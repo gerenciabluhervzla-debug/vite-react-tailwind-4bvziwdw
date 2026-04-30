@@ -16,6 +16,7 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
       appId: import.meta.env.VITE_FIREBASE_APP_ID
     };
 
+    // hola
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
