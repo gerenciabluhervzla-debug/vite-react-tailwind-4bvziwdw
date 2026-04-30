@@ -16,7 +16,7 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
       appId: import.meta.env.VITE_FIREBASE_APP_ID
     };
 
-    // hola
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -29,7 +29,7 @@ const URL_GOOGLE_SCRIPT = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
 // En la vista previa local usa "", en producción usará la variable de entorno
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
-
+//HOLAAAAAA
 // --- CATÁLOGO DE PRODUCTOS ---
 const CATALOGO = [
   {
@@ -249,13 +249,21 @@ function PanelVentas({ user, pedidos }) {
 
   const analizarConGemini = async () => {
     if (!textoCrudo.trim()) return alert("Por favor, pega el mensaje de WhatsApp primero.");
+    
+    const apiKey = GEMINI_API_KEY;
+    if (!apiKey) {
+      alert("Error: No se ha configurado la VITE_GEMINI_API_KEY en las variables de entorno.");
+      return;
+    }
+  
     setAnalizando(true);
     
     try {
-      const apiKey = GEMINI_API_KEY;
       const prompt = "Eres un asistente de logística. Analiza el siguiente texto y extrae los datos del pedido en formato JSON para autocompletar un formulario. TOMA EN CUENTA ESTO: El nombre de la empresa de envíos (courier) suele estar al principio del texto (ej. 'ENVIO 3 ZOOM', 'ENVIO TEALCA'). El nombre de la asesora suele estar al final del texto (ej. 'Asesora Manuela'). Formatea el teléfono internacionalmente (ej. 584...). Si no encuentras un dato, omítelo. Texto:\n\n" + textoCrudo;
       
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+      // CORRECCIÓN: Modelo actualizado a gemini-1.5-flash
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      
       const options = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -280,7 +288,7 @@ function PanelVentas({ user, pedidos }) {
           }
         })
       };
-
+  
       let resultData;
       const delays = [1000, 2000, 4000, 8000, 16000];
       for (let i = 0; i < 5; i++) {
@@ -294,7 +302,7 @@ function PanelVentas({ user, pedidos }) {
           await new Promise(r => setTimeout(r, delays[i]));
         }
       }
-
+  
       if (resultData?.candidates?.[0]?.content?.parts?.[0]?.text) {
          const result = JSON.parse(resultData.candidates[0].content.parts[0].text);
          
@@ -306,7 +314,7 @@ function PanelVentas({ user, pedidos }) {
            else if (upperCourier.includes("MRW")) detectedCourier = "MRW";
            else if (upperCourier.includes("DOMESA")) detectedCourier = "Domesa";
          }
-
+  
          setFormData(prev => ({
            ...prev,
            clienteNombre: result.clienteNombre || prev.clienteNombre,
@@ -322,7 +330,7 @@ function PanelVentas({ user, pedidos }) {
       }
     } catch(e) {
       console.error("Error API Gemini:", e);
-      alert("Hubo un error al intentar extraer los datos con la IA. Por favor, inténtalo de nuevo.");
+      alert("Hubo un error al intentar extraer los datos con la IA. Por favor, revisa la consola para más detalles.");
     } finally {
       setAnalizando(false);
     }
