@@ -4,17 +4,16 @@ import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged }
 import { getFirestore, collection, addDoc, onSnapshot, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { ShoppingCart, CheckSquare, Truck, Printer, MessageCircle, Clock, CheckCircle, XCircle, Search, Sparkles, Package, Plus, Minus, X, Image as ImageIcon, ChevronDown, ChevronUp, Camera, ClipboardList, AlertTriangle, UploadCloud, Loader2 } from 'lucide-react';
 
-// --- 1. CONFIGURACIÓN DE FIREBASE ---
+// --- 1. CONFIGURACIÓN DE FIREBASE (A TRAVÉS DE .ENV EN VITE) ---
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
   ? JSON.parse(__firebase_config) 
   : {
-      // Borra esto y pega tu configuración real de Firebase cuando lo subas a producción
-      apiKey: "AIzaSyAacvUBHw19DbJ9czJV_a9hmof5yUw-nmQ",
-      authDomain: "logiweb-9e555.firebaseapp.com",
-      projectId: "logiweb-9e555",
-      storageBucket: "logiweb-9e555.firebasestorage.app",
-      messagingSenderId: "426278955109",
-      appId: "1:426278955109:web:7be60db2d86dfbce56fe8c"
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+      appId: import.meta.env.VITE_FIREBASE_APP_ID
     };
 
 const app = initializeApp(firebaseConfig);
@@ -23,10 +22,12 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'app-pedidos-venezuela';
 
 // --- 2. URL WEB APP DE GOOGLE SCRIPT PARA DRIVE ---
-const URL_GOOGLE_SCRIPT = "https://script.google.com/macros/s/AKfycbzg_XKOfKWSDpIa3CQG98cJ72YCZ5n3NdpiUtVR6OEkgZwyodDZVTW7WONmcBrTgTJA/exec";
+const URL_GOOGLE_SCRIPT = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
 
 // --- 3. API KEY DE GEMINI ---
-const GEMINI_API_KEY = "AIzaSyAW0Lqa8Qu_zV9YKm2o1g8Et0sz6lpmTgQ"; // En la vista previa funciona automáticamente. En producción pon tu clave aquí.
+// En la vista previa local usa "", en producción usará la variable de entorno
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+
 
 // --- CATÁLOGO DE PRODUCTOS ---
 const CATALOGO = [
