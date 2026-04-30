@@ -4,19 +4,29 @@ import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged }
 import { getFirestore, collection, addDoc, onSnapshot, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { ShoppingCart, CheckSquare, Truck, Printer, MessageCircle, Clock, CheckCircle, XCircle, Search, Sparkles, Package, Plus, Minus, X, Image as ImageIcon, ChevronDown, ChevronUp, Camera, ClipboardList, AlertTriangle, UploadCloud, Loader2 } from 'lucide-react';
 
-// --- CONFIGURACIÓN DE FIREBASE ---
-const firebaseConfig = {
-  apiKey: "AIzaSyAacvUBHw19DbJ9czJV_a9hmof5yUw-nmQ",
-  authDomain: "logiweb-9e555.firebaseapp.com",
-  projectId: "logiweb-9e555",
-  storageBucket: "logiweb-9e555.firebasestorage.app",
-  messagingSenderId: "426278955109",
-  appId: "1:426278955109:web:7be60db2d86dfbce56fe8c"
-};
+// --- 1. CONFIGURACIÓN DE FIREBASE ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      // Borra esto y pega tu configuración real de Firebase cuando lo subas a producción
+      apiKey: "AIzaSyAacvUBHw19DbJ9czJV_a9hmof5yUw-nmQ",
+      authDomain: "logiweb-9e555.firebaseapp.com",
+      projectId: "logiweb-9e555",
+      storageBucket: "logiweb-9e555.firebasestorage.app",
+      messagingSenderId: "426278955109",
+      appId: "1:426278955109:web:7be60db2d86dfbce56fe8c"
+    };
 
-// --- URL WEB APP DE GOOGLE SCRIPT PARA DRIVE ---
-// Aquí pegarás el enlace que te genere Google Apps Script en los siguientes pasos
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'app-pedidos-venezuela';
+
+// --- 2. URL WEB APP DE GOOGLE SCRIPT PARA DRIVE ---
 const URL_GOOGLE_SCRIPT = "https://script.google.com/macros/s/AKfycbzg_XKOfKWSDpIa3CQG98cJ72YCZ5n3NdpiUtVR6OEkgZwyodDZVTW7WONmcBrTgTJA/exec";
+
+// --- 3. API KEY DE GEMINI ---
+const GEMINI_API_KEY = "AIzaSyAW0Lqa8Qu_zV9YKm2o1g8Et0sz6lpmTgQ"; // En la vista previa funciona automáticamente. En producción pon tu clave aquí.
 
 // --- CATÁLOGO DE PRODUCTOS ---
 const CATALOGO = [
@@ -113,6 +123,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
+    // Ruta compatible con el entorno de Canvas y la versión de producción
     const pedidosRef = collection(db, 'artifacts', appId, 'public', 'data', 'pedidos');
     const unsubscribe = onSnapshot(pedidosRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({
@@ -239,7 +250,7 @@ function PanelVentas({ user, pedidos }) {
     setAnalizando(true);
     
     try {
-      const apiKey = "AIzaSyAW0Lqa8Qu_zV9YKm2o1g8Et0sz6lpmTgQ"; // La clave se provee automáticamente en el entorno de ejecución
+      const apiKey = GEMINI_API_KEY;
       const prompt = "Eres un asistente de logística. Analiza el siguiente texto y extrae los datos del pedido en formato JSON para autocompletar un formulario. TOMA EN CUENTA ESTO: El nombre de la empresa de envíos (courier) suele estar al principio del texto (ej. 'ENVIO 3 ZOOM', 'ENVIO TEALCA'). El nombre de la asesora suele estar al final del texto (ej. 'Asesora Manuela'). Formatea el teléfono internacionalmente (ej. 584...). Si no encuentras un dato, omítelo. Texto:\n\n" + textoCrudo;
       
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
