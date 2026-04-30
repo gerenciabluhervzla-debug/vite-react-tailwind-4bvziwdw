@@ -262,7 +262,7 @@ function PanelVentas({ user, pedidos }) {
       const prompt = "Eres un asistente de logística. Analiza el siguiente texto y extrae los datos del pedido en formato JSON para autocompletar un formulario. TOMA EN CUENTA ESTO: El nombre de la empresa de envíos (courier) suele estar al principio del texto (ej. 'ENVIO 3 ZOOM', 'ENVIO TEALCA'). El nombre de la asesora suele estar al final del texto (ej. 'Asesora Manuela'). Formatea el teléfono internacionalmente (ej. 584...). Si no encuentras un dato, omítelo. Texto:\n\n" + textoCrudo;
       
       // CORRECCIÓN: Modelo actualizado a gemini-1.5-flash
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       
       const options = {
         method: 'POST',
