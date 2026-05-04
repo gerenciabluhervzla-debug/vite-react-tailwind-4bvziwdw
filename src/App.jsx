@@ -304,7 +304,7 @@ function PanelVentas({ perfil, pedidos, db, appId, loggear }) {
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
   const [formData, setFormData] = useState({ 
     clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil.nombre, referencia: '', moneda: 'USD', montoPago: '', 
-    tasa: '' // Nuevo campo Tasa
+    tasa: '' 
   });
   const [enviando, setEnviando] = useState(false);
   const [textoCrudo, setTextoCrudo] = useState('');
@@ -401,6 +401,12 @@ En 'productosCrudos' extrae el texto exacto pedido. En 'carrito' mapea a estas l
     setEnviando(false);
   };
 
+  const enviarWhatsApp = (pedido) => {
+    const mensaje = `Hola ${pedido.clienteNombre}, tu pedido ha sido procesado y enviado por *${pedido.courier}*.%0A%0A*Tu número de guía es:* ${pedido.guia}%0A%0A${pedido.linkGuia ? `Foto de tu guía: ${pedido.linkGuia}%0A` : ''}${pedido.linkFotoProductos ? `Foto de tus productos: ${pedido.linkFotoProductos}%0A` : ''}%0ACualquier duda estamos a la orden.`;
+    const cleanPhone = String(pedido.clienteTelefono).replace(/\D/g, '');
+    window.open(`https://wa.me/${cleanPhone}?text=${mensaje}`, '_blank');
+  };
+
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
       <div className="flex gap-4 mb-6 border-b pb-4">
@@ -450,7 +456,6 @@ En 'productosCrudos' extrae el texto exacto pedido. En 'carrito' mapea a estas l
              </div>
 
              <div className="md:col-span-2 bg-green-50/50 p-4 rounded-lg border border-green-100 grid grid-cols-1 md:grid-cols-4 gap-4 mt-2">
-               {/* NUEVO CAMPO DE TASA */}
                <div className="flex flex-col relative">
                  <label className="text-sm font-bold text-slate-700 mb-1">Tasa Aplicada (Bs/$)</label>
                  <input type="number" step="0.01" name="tasa" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required placeholder="Ej: 45.20" className="p-2 border border-slate-300 rounded outline-none font-bold text-lg text-blue-700" />
@@ -484,14 +489,46 @@ En 'productosCrudos' extrae el texto exacto pedido. En 'carrito' mapea a estas l
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-sm">
-            <thead><tr className="bg-slate-100"><th className="p-3 border-b">Fecha/Cliente</th><th className="p-3 border-b">Monto</th><th className="p-3 border-b">Tasa</th><th className="p-3 border-b">Estatus</th><th className="p-3 border-b">Auditoría</th></tr></thead>
+            <thead>
+              <tr className="bg-slate-100">
+                <th className="p-3 border-b">Fecha/Cliente</th>
+                <th className="p-3 border-b">Pago</th>
+                <th className="p-3 border-b">Estatus</th>
+                <th className="p-3 border-b">Despacho y Notificación</th>
+                <th className="p-3 border-b">Auditoría</th>
+              </tr>
+            </thead>
             <tbody>
               {pedidos.map(p => (
                 <tr key={p.id} className="border-b">
-                  <td className="p-3"><div className="font-bold">{p.clienteNombre}</div><div className="text-xs text-slate-500">{new Date(p.fechaCreacion).toLocaleDateString()}</div></td>
-                  <td className="p-3 font-semibold">${(p.montoUsd||0).toFixed(2)}</td>
-                  <td className="p-3 text-slate-500">Bs. {p.tasaAplicada || '-'}</td>
+                  <td className="p-3">
+                    <div className="font-bold">{p.clienteNombre}</div>
+                    <div className="text-xs text-slate-500">{new Date(p.fechaCreacion).toLocaleDateString()}</div>
+                  </td>
+                  <td className="p-3">
+                    <div className="font-semibold">${(p.montoUsd||0).toFixed(2)}</div>
+                    <div className="text-xs text-slate-500">Tasa: {p.tasaAplicada || '-'}</div>
+                  </td>
                   <td className="p-3">{getStatusBadge(p.status)}</td>
+                  <td className="p-3">
+                    {p.status === 'Despachado' ? (
+                      <div className="flex flex-col items-start gap-2">
+                        <div className="text-xs font-bold text-slate-700">Guía: {p.guia}</div>
+                        <div className="flex gap-2">
+                          {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-800" title="Ver Guía"><ImageIcon size={16}/></a>}
+                          {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-800" title="Ver Productos"><Camera size={16}/></a>}
+                        </div>
+                        <button 
+                          onClick={() => enviarWhatsApp(p)} 
+                          className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-1 px-2 rounded flex items-center justify-center gap-1 shadow-sm transition w-max"
+                        >
+                          <MessageCircle size={14} /> Notificar Cliente
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400">Pendiente de envío</span>
+                    )}
+                  </td>
                   <td className="p-3">
                     {p.auditado ? <span className="text-green-600 font-bold text-xs flex items-center gap-1"><ShieldCheck size={14}/> Validado OK</span> : <span className="text-slate-400 text-xs">Sin revisión</span>}
                   </td>
@@ -661,19 +698,17 @@ function PanelAdmin({ perfil, pedidos, cambiarEstado, loggear, db, appId }) {
 // 4. PANEL DE DESPACHO
 // ==========================================
 function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear }) {
-  const pedidosValidados = pedidos.filter(p => p.status === 'Validado' || p.status === 'Despachado');
+  const [vistaDespacho, setVistaDespacho] = useState('pendientes');
+  
+  const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
+  const pedidosDespachados = pedidos.filter(p => p.status === 'Despachado');
   const pedidosPendientes = pedidos.filter(p => p.status === 'Pendiente' || p.status === 'Rechazado').length;
+  
   const [guiasInput, setGuiasInput] = useState({});
   const [subiendo, setSubiendo] = useState({ id: null, field: null });
 
   const handleGuiaChange = (id, field, value) => {
     setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
-  };
-
-  const enviarWhatsApp = (pedido) => {
-    const mensaje = `Hola ${pedido.clienteNombre}, tu pedido ha sido procesado y enviado por *${pedido.courier}*.%0A%0A*Tu número de guía es:* ${pedido.guia}%0A%0A${pedido.linkGuia ? `Foto de tu guía: ${pedido.linkGuia}%0A` : ''}${pedido.linkFotoProductos ? `Foto de tus productos: ${pedido.linkFotoProductos}%0A` : ''}%0ACualquier duda estamos a la orden.`;
-    const cleanPhone = String(pedido.clienteTelefono).replace(/\D/g, '');
-    window.open(`https://wa.me/${cleanPhone}?text=${mensaje}`, '_blank');
   };
 
   const handleFileUpload = async (e, id, field) => {
@@ -735,29 +770,43 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear }) {
         status: 'Despachado'
       });
       loggear('PEDIDO_DESPACHADO', `Se despachó el pedido de ${pedido.clienteNombre} (Guía: ${inputData.guia})`);
-      alert("Guía y soportes guardados correctamente.");
+      alert("Guía y soportes guardados correctamente. El pedido ahora pasará al historial.");
     } catch(e) {
       console.error(e);
       alert("Error al guardar la información");
     }
   };
 
+  const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
+
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b pb-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Logística y Despacho</h2>
-          <p className="text-slate-500 text-sm mt-1">Imprime etiquetas, asigna guías y sube soportes fotográficos obligatorios.</p>
+      
+      {/* Navegación Interna */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 border-b border-slate-200 pb-4 gap-4">
+        <div className="flex gap-4">
+          <button 
+            onClick={() => setVistaDespacho('pendientes')}
+            className={`pb-2 font-bold px-2 flex items-center gap-2 ${vistaDespacho === 'pendientes' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Truck size={18} /> Por Despachar ({pedidosValidados.length})
+          </button>
+          <button 
+            onClick={() => setVistaDespacho('historial')}
+            className={`pb-2 font-bold px-2 flex items-center gap-2 ${vistaDespacho === 'historial' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Archive size={18} /> Historial Despachados
+          </button>
         </div>
         <button 
           onClick={() => window.print()} 
           className="bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 px-4 rounded shadow flex items-center gap-2"
         >
-          <Printer size={18} /> Imprimir Etiquetas ({pedidosValidados.filter(p=>p.status === 'Validado').length})
+          <Printer size={18} /> Imprimir Etiquetas ({pedidosValidados.length})
         </button>
       </div>
 
-      {pedidosPendientes > 0 && (
+      {pedidosPendientes > 0 && vistaDespacho === 'pendientes' && (
         <div className="mb-6 bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-md flex items-start gap-3">
           <AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={24} />
           <div>
@@ -779,11 +828,11 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear }) {
             </tr>
           </thead>
           <tbody>
-            {pedidosValidados.length === 0 ? (
-              <tr><td colSpan="3" className="p-4 text-center text-slate-500">No hay paquetes pendientes por despachar.</td></tr>
+            {pedidosAMostrar.length === 0 ? (
+              <tr><td colSpan="3" className="p-4 text-center text-slate-500">No hay paquetes en esta vista.</td></tr>
             ) : (
-              pedidosValidados.map(p => (
-                <tr key={p.id} className={`border-b ${p.status === 'Despachado' ? 'bg-green-50/50' : ''}`}>
+              pedidosAMostrar.map(p => (
+                <tr key={p.id} className={`border-b ${p.status === 'Despachado' ? 'bg-slate-50' : ''}`}>
                   <td className="p-3 align-top">
                     <div className="font-bold text-slate-800">{p.clienteNombre}</div>
                     <div className="text-sm font-semibold text-blue-600 mt-1">{p.courier}</div>
@@ -791,7 +840,7 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear }) {
                     <div className="text-xs text-slate-500"><span className="font-semibold">Prog. Despacho:</span> {p.fechaDespacho}</div>
                   </td>
                   <td className="p-3 align-top text-sm">
-                    <div className="font-medium bg-slate-50 p-2 rounded border border-slate-100 mb-2 whitespace-pre-wrap">{p.productos}</div>
+                    <div className="font-medium bg-white p-2 rounded border border-slate-200 mb-2 whitespace-pre-wrap shadow-sm">{p.productos}</div>
                     <div className="text-slate-600">{p.direccion}</div>
                   </td>
                   <td className="p-3 align-top bg-slate-50 border-l border-slate-100">
@@ -802,13 +851,8 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear }) {
                           {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1"><ImageIcon size={14}/> Ver Recibo de Guía</a>}
                           {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Camera size={14}/> Ver Foto de Productos</a>}
                         </div>
-                        <button 
-                            onClick={() => enviarWhatsApp(p)} 
-                            className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-1.5 px-3 rounded flex items-center justify-center gap-1 shadow-sm transition mb-2 w-full"
-                          >
-                            <MessageCircle size={14} /> Notificar Cliente
-                        </button>
-                        <button onClick={() => cambiarEstado(p.id, 'Validado', p)} className="text-slate-400 hover:text-slate-600 text-xs underline mt-2">Editar envío</button>
+                        <div className="text-xs text-slate-600 font-bold mb-2">✓ Despachado (Ventas notificará)</div>
+                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-slate-600 text-xs underline mt-2">Corregir envío</button>
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -850,9 +894,9 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear }) {
 
                         <button 
                           onClick={() => guardarGuia(p)}
-                          className="w-full bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold py-2 rounded mt-1 flex items-center justify-center gap-2"
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded mt-1 flex items-center justify-center gap-2"
                         >
-                          <Truck size={14}/> Registrar Despacho
+                          <Truck size={14}/> Registrar y Archivar
                         </button>
                       </div>
                     )}
