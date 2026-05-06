@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, updateDoc, doc, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, updateDoc, doc, getDoc, setDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { ShoppingCart, CheckSquare, Truck, Printer, Clock, CheckCircle, XCircle, Search, Sparkles, Package, Plus, Minus, X, Image as ImageIcon, Camera, ClipboardList, AlertTriangle, UploadCloud, Loader2, DollarSign, Archive, Edit3, Save, LogOut, ShieldCheck, Users, FileText, MessageSquare, Eye, FileSpreadsheet, Download, ChevronDown, ChevronUp, MessageCircle, ArrowRightLeft, PlusCircle, Trash2 } from 'lucide-react';
 
 // --- 1. CONFIGURACIÓN DE FIREBASE ---
@@ -249,7 +249,7 @@ export default function App() {
   const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(r);
   const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO, ROLES.AUDITOR_GENERAL].includes(r);
   const showReportes = [ROLES.ADMIN, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r);
-  const showInventario = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r); // Admins tienen acceso para recepcion
+  const showInventario = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r); 
   const showUsuarios = [ROLES.ADMIN].includes(r);
   const showLogs = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(r);
 
@@ -294,7 +294,7 @@ export default function App() {
           <div className="print:hidden">
             {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} db={db} appId={appId} loggear={loggear} />}
             {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} />}
-            {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} db={db} appId={appId} loggear={loggear} />}
+            {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} />}
             {activeTab === 'reportes' && showReportes && <PanelReportes pedidos={pedidos} />}
             {activeTab === 'inventario' && showInventario && <PanelInventario stock={stockInventario} notas={notasInventario} catalogo={catalogo} movimientos={movimientos} db={db} appId={appId} loggear={loggear} perfil={userProfile} />}
             {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} />}
@@ -397,7 +397,7 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
 
     // --- LÓGICA AUTOMÁTICA DE CONCENTRADO ---
     let finalCarrito = { ...formData.carritoObj };
-    let finalProductosText = formData.productos;
+    let finalProductosText = formData.productos || '';
     let countBoosters = 0;
     const boosterKeys = [
       "Booster de Hidratacion|Unidad",
@@ -560,7 +560,19 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
           </table>
         </div>
       )}
-      <ModalCatalogo catalogo={catalogo} isOpen={isCatalogOpen} onClose={()=>setIsCatalogOpen(false)} onConfirm={(txt, obj)=>{setFormData({...formData, productos: txt, carritoObj: obj}); setIsCatalogOpen(false);}} />
+      <ModalCatalogo 
+        catalogo={catalogo} 
+        isOpen={isCatalogOpen} 
+        onClose={()=>setIsCatalogOpen(false)} 
+        onConfirm={(txt, obj)=>{
+          setFormData(prev => ({
+            ...prev, 
+            productos: prev.productos ? `${prev.productos}\n${txt}` : txt, 
+            carritoObj: { ...(prev.carritoObj || {}), ...obj }
+          })); 
+          setIsCatalogOpen(false);
+        }} 
+      />
     </div>
   );
 }
@@ -1404,32 +1416,70 @@ function PanelUsuarios({ usuarios, db, appId, loggear }) {
     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid), { isApproved, role: newRole });
     loggear('GESTION_USUARIO', `Acceso de ${email} -> Rol: ${newRole} (Aprobado: ${isApproved})`);
   };
+
+  const formatearSistema = async () => {
+    if(!window.confirm("⚠️ PELIGRO: Estás a punto de ELIMINAR TODOS los Pedidos, Movimientos de Inventario y Logs de Auditoría. El Stock también se reiniciará a 0. Las cuentas de usuario y el catálogo se mantendrán. ¿Estás absolutamente seguro?")) return;
+    if(prompt("Escribe BORRAR para confirmar") !== "BORRAR") return;
+    
+    try {
+      const wipeCollection = async (collName) => {
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', collName));
+        const promises = snap.docs.map(d => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', collName, d.id)));
+        await Promise.all(promises);
+      };
+
+      await wipeCollection('pedidos');
+      await wipeCollection('movimientos');
+      await wipeCollection('logs');
+
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), {});
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), {});
+
+      loggear('SISTEMA_REINICIADO', 'El administrador borró toda la data de prueba del sistema.');
+      alert("¡Sistema restablecido a 0 exitosamente!");
+      window.location.reload();
+    } catch(e) {
+      console.error(e);
+      alert("Error formateando el sistema.");
+    }
+  };
+
   return (
-    <div className="bg-white p-6 rounded-xl shadow border">
-      <h2 className="text-xl font-bold mb-4 flex gap-2"><Users /> Gestión de Usuarios y Roles</h2>
-      <table className="w-full text-left text-sm border-collapse">
-        <thead><tr className="bg-slate-100"><th className="p-3 border-b">Usuario / Email</th><th className="p-3 border-b">Asignar Rol</th></tr></thead>
-        <tbody>
-          {usuarios.map(u => (
-            <tr key={u.id} className="border-b">
-              <td className="p-3 font-semibold">
-                <div className="flex items-center gap-2">
-                   {u.nombre}
-                   {u.isOnline && <span title="En línea" className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse shadow-sm"></span>}
-                </div>
-                <span className="text-xs font-normal text-slate-500">{u.email}</span>
-              </td>
-              <td className="p-3 flex gap-2">
-                 <select value={u.role} onChange={e=>cambiarRol(u.id, true, e.target.value, u.email)} className="border p-1 rounded outline-none">
-                   <option value="Pendiente" disabled>Pendiente</option>
-                   {Object.values(ROLES).map(r => <option key={r} value={r}>{r}</option>)}
-                 </select>
-                 {u.isApproved && <button onClick={()=>cambiarRol(u.id, false, 'Bloqueado', u.email)} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">Bloquear</button>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="flex flex-col gap-6">
+      <div className="bg-white p-6 rounded-xl shadow border">
+        <h2 className="text-xl font-bold mb-4 flex gap-2"><Users /> Gestión de Usuarios y Roles</h2>
+        <table className="w-full text-left text-sm border-collapse">
+          <thead><tr className="bg-slate-100"><th className="p-3 border-b">Usuario / Email</th><th className="p-3 border-b">Asignar Rol</th></tr></thead>
+          <tbody>
+            {usuarios.map(u => (
+              <tr key={u.id} className="border-b">
+                <td className="p-3 font-semibold">
+                  <div className="flex items-center gap-2">
+                     {u.nombre}
+                     {u.isOnline && <span title="En línea" className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse shadow-sm"></span>}
+                  </div>
+                  <span className="text-xs font-normal text-slate-500">{u.email}</span>
+                </td>
+                <td className="p-3 flex gap-2">
+                   <select value={u.role} onChange={e=>cambiarRol(u.id, true, e.target.value, u.email)} className="border p-1 rounded outline-none">
+                     <option value="Pendiente" disabled>Pendiente</option>
+                     {Object.values(ROLES).map(r => <option key={r} value={r}>{r}</option>)}
+                   </select>
+                   {u.isApproved && <button onClick={()=>cambiarRol(u.id, false, 'Bloqueado', u.email)} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">Bloquear</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="bg-red-50 p-6 rounded-xl shadow border border-red-200">
+        <h2 className="text-xl font-bold mb-2 flex items-center gap-2 text-red-800"><AlertTriangle /> Zona de Pruebas (Restablecer Sistema)</h2>
+        <p className="text-red-700 text-sm mb-4">Utiliza esta opción únicamente si estás en fase de pruebas. Esto eliminará todas las ventas, transferencias, historial y restablecerá el stock físico a cero de forma irreversible.</p>
+        <button onClick={formatearSistema} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded shadow flex items-center gap-2">
+          <Trash2 size={18} /> Limpiar Todo el Sistema (Dejar en 0)
+        </button>
+      </div>
     </div>
   );
 }
@@ -1480,7 +1530,38 @@ function TabButton({ active, onClick, icon, label, badge, badgeColor="bg-red-500
 }
 
 function VistaImpresion({ pedidos }) { 
-  return <div className="hidden print:block p-8 text-center">Hoja de impresión activa. (Presiona Ctrl+P para ver el diseño completo de etiquetas)</div>; 
+  if (pedidos.length === 0) {
+    return (
+      <div className="hidden print:block p-8 text-center text-xl">
+        No hay pedidos validados para imprimir.
+      </div>
+    );
+  }
+
+  return (
+    <div className="hidden print:block w-full bg-white text-black p-4">
+      <h1 className="text-2xl font-bold text-center mb-6">HOJA DE DESPACHO - {new Date().toLocaleDateString('es-VE')}</h1>
+      
+      <div className="grid grid-cols-2 gap-4">
+        {pedidos.map((p) => (
+          <div key={p.id} className="border-2 border-black p-4 break-inside-avoid">
+            <div className="flex justify-between border-b-2 border-black pb-2 mb-2">
+              <span className="font-bold text-lg">{p.courier?.toUpperCase() || 'ENVÍO'}</span>
+              <span className="text-sm">Envío programado: {p.fechaDespacho}</span>
+            </div>
+            <div className="space-y-1 text-sm">
+              <p><span className="font-bold">DESTINATARIO:</span> {p.clienteNombre?.toUpperCase()}</p>
+              <p><span className="font-bold">C.I / RIF:</span> {p.clienteCedula}</p>
+              <p><span className="font-bold">TELÉFONO:</span> {p.clienteTelefono}</p>
+              <p className="mt-2"><span className="font-bold">DIRECCIÓN DE ENTREGA:</span></p>
+              <p className="pl-2 border-l-2 border-gray-300 leading-tight">{p.direccion}</p>
+              <p className="mt-2 border-t pt-1"><span className="font-bold">CONTENIDO:</span> {p.productos}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  ); 
 }
 
 function ModalCatalogo({ catalogo, isOpen, onClose, onConfirm }) {
@@ -1493,6 +1574,19 @@ function ModalCatalogo({ catalogo, isOpen, onClose, onConfirm }) {
       return {...prev, [key]:n}; 
     }); 
   };
+
+  const handleConfirm = () => {
+    const lineas = [];
+    Object.entries(carrito).forEach(([key, qty]) => {
+      const [prod, pres] = key.split('|');
+      lineas.push(`- ${qty}x ${prod} (${pres})`);
+    });
+    if (lineas.length === 0) return alert("Selecciona algún producto.");
+    
+    onConfirm(lineas.join('\n'), carrito); 
+    setCarrito({});
+  };
+
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl w-full max-w-5xl h-[85vh] flex flex-col">
@@ -1514,7 +1608,7 @@ function ModalCatalogo({ catalogo, isOpen, onClose, onConfirm }) {
             </div>)}
           </div></div>)}
         </div>
-        <div className="p-4 border-t flex justify-between items-center"><div className="font-bold">Total Items: {Object.values(carrito).reduce((a,b)=>a+b,0)}</div><button onClick={()=>onConfirm('', carrito)} className="bg-blue-600 text-white px-6 py-2 rounded font-bold">Confirmar</button></div>
+        <div className="p-4 border-t flex justify-between items-center"><div className="font-bold">Total Items: {Object.values(carrito).reduce((a,b)=>a+b,0)}</div><button onClick={handleConfirm} className="bg-blue-600 text-white px-6 py-2 rounded font-bold">Confirmar</button></div>
       </div>
     </div>
   )
