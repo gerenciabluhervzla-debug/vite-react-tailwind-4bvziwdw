@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, updateDoc, doc, getDoc, setDoc } from 'firebase/firestore';
-import { ShoppingCart, CheckSquare, Truck, Printer, Clock, CheckCircle, XCircle, Search, Sparkles, Package, Plus, Minus, X, Image as ImageIcon, Camera, ClipboardList, AlertTriangle, UploadCloud, Loader2, DollarSign, Archive, Edit3, Save, LogOut, ShieldCheck, Users, FileText, MessageSquare, Eye, FileSpreadsheet, Download, ChevronDown, ChevronUp, MessageCircle, ArrowRightLeft, ImagePlus, PlusCircle } from 'lucide-react';
+import { ShoppingCart, CheckSquare, Truck, Printer, Clock, CheckCircle, XCircle, Search, Sparkles, Package, Plus, Minus, X, Image as ImageIcon, Camera, ClipboardList, AlertTriangle, UploadCloud, Loader2, DollarSign, Archive, Edit3, Save, LogOut, ShieldCheck, Users, FileText, MessageSquare, Eye, FileSpreadsheet, Download, ChevronDown, ChevronUp, MessageCircle, ArrowRightLeft, PlusCircle, Trash2 } from 'lucide-react';
 
 // --- 1. CONFIGURACIÓN DE FIREBASE ---
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
@@ -30,15 +30,14 @@ const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const ROLES = {
   ADMIN: 'Administrador',
   VENTAS: 'Ventas',
-  ADMINISTRACION: 'Administración',
+  ADMINISTRACION: 'Administración', // Ahora incluye los permisos de Recepción
   DESPACHO: 'Despacho',
   AUDITOR_VENTAS: 'Auditor Ventas y Admin',
   AUDITOR_INVENTARIO: 'Auditor Inventario',
-  AUDITOR_GENERAL: 'Auditor General',
-  RECEPCION: 'Recepción' // Nuevo rol para aprobar el stock que llega al almacén físico
+  AUDITOR_GENERAL: 'Auditor General'
 };
 
-// --- CATÁLOGO BASE POR DEFECTO (Se usará si la base de datos está vacía) ---
+// --- CATÁLOGO BASE POR DEFECTO ---
 const DEFAULT_CATALOGO = [
   { categoria: "Cirugías Capilares", productos: [ { nombre: "Cirugía Clásica", presentaciones: ["Litro", "1/2 Litro", "Galón"], imagen: "" }, { nombre: "Cirugía Chocolate", presentaciones: ["Litro", "1/2 Litro", "Galón"], imagen: "" } ] },
   { categoria: "Alisados", productos: [ { nombre: "Alisado Clásica", presentaciones: ["1 Litro", "300ml"], imagen: "" }, { nombre: "Alisado Chocolate", presentaciones: ["1 Litro", "300ml"], imagen: "" } ] },
@@ -56,7 +55,7 @@ export default function App() {
   
   const [pedidos, setPedidos] = useState([]);
   const [catalogo, setCatalogo] = useState(DEFAULT_CATALOGO);
-  const [stockInventario, setStockInventario] = useState({}); // Formato: { key: { envios: 0, recepcion: 0 } }
+  const [stockInventario, setStockInventario] = useState({});
   const [notasInventario, setNotasInventario] = useState({});
   const [movimientos, setMovimientos] = useState([]);
   const [usuarios, setUsuarios] = useState([]);
@@ -70,8 +69,6 @@ export default function App() {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          // Si no hay token de Canvas, esperamos el OnAuthStateChanged
         }
       } catch (error) { console.error("Auth error", error); }
     };
@@ -81,7 +78,7 @@ export default function App() {
       if (currentUser && !currentUser.isAnonymous) {
         setUser(currentUser);
       } else if (currentUser && currentUser.isAnonymous && typeof __initial_auth_token !== 'undefined') {
-        // Ignorar anónimo si estamos en entorno Canvas con token pendiente
+        // Ignorar
       } else {
         setUser(null); setUserProfile(null); setAuthLoading(false);
       }
@@ -89,21 +86,36 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- 2. ESCUCHAR PERFIL DE USUARIO ---
+  // --- 2. ESCUCHAR PERFIL DE USUARIO Y LOGS DE SESIÓN ---
   useEffect(() => {
     if (!user) return;
+    let isFirstLoad = true;
+    
     const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
     const unsub = onSnapshot(userRef, async (snap) => {
       if (snap.exists()) {
         const profile = snap.data();
         setUserProfile(profile);
+
+        // Actualizar estado en línea al entrar
+        if (isFirstLoad) {
+           isFirstLoad = false;
+           if (!profile.isOnline) {
+              updateDoc(userRef, { isOnline: true });
+              // Registrar Inicio de Sesión
+              addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
+                 accion: 'INICIO_SESION', detalle: 'El usuario inició sesión en el sistema.', usuarioEmail: profile.email, usuarioNombre: profile.nombre, usuarioRol: profile.role, fecha: Date.now()
+              }).catch(console.error);
+           }
+        }
+
         if (profile.isApproved && activeTab === 'ventas') {
           if (profile.role === ROLES.ADMINISTRACION) setActiveTab('admin');
           if (profile.role === ROLES.DESPACHO) setActiveTab('despacho');
-          if (profile.role === ROLES.AUDITOR_INVENTARIO || profile.role === ROLES.RECEPCION) setActiveTab('inventario');
+          if (profile.role === ROLES.AUDITOR_INVENTARIO) setActiveTab('inventario');
         }
       } else {
-        const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, fechaRegistro: Date.now() };
+        const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
         registrarLogSistem(newProfile, 'NUEVO_REGISTRO', `El usuario ${user.email} se ha registrado y espera aprobación.`);
@@ -114,6 +126,17 @@ export default function App() {
       setAuthLoading(false); 
     });
     return () => unsub();
+  }, [user]);
+
+  // Manejar el cierre de pestaña para desconectar al usuario
+  useEffect(() => {
+    const handleUnload = () => {
+      if (user) {
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { isOnline: false });
+      }
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
   }, [user]);
 
   // --- 3. LOGS DE AUDITORÍA ---
@@ -161,7 +184,16 @@ export default function App() {
     try { setAuthLoading(true); await signInWithPopup(auth, googleProvider); } 
     catch (error) { console.error(error); alert("Error al iniciar sesión."); setAuthLoading(false); }
   };
-  const cerrarSesion = () => signOut(auth);
+  
+  const cerrarSesion = async () => {
+    if (userProfile && user) {
+       try {
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { isOnline: false });
+         await registrarLogSistem(userProfile, 'CIERRE_SESION', `El usuario cerró sesión manualmente.`);
+       } catch(e) {}
+    }
+    signOut(auth);
+  };
 
   // --- VISTAS DE AUTENTICACIÓN ---
   
@@ -207,7 +239,7 @@ export default function App() {
   const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(r);
   const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO, ROLES.AUDITOR_GENERAL].includes(r);
   const showReportes = [ROLES.ADMIN, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r);
-  const showInventario = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.RECEPCION].includes(r);
+  const showInventario = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r); // Admins tienen acceso para recepcion
   const showUsuarios = [ROLES.ADMIN].includes(r);
   const showLogs = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(r);
 
@@ -477,7 +509,7 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
                   </td>
                   <td className="p-3">
                     {p.status === 'Rechazado' && (
-                      <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-500 text-white text-xs font-bold py-1 px-3 rounded shadow-sm hover:bg-amber-600">Corregir Pedido</button>
+                      <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-500 text-rome text-xs font-bold py-1 px-3 rounded shadow-sm hover:bg-amber-600">Corregir Pedido</button>
                     )}
                     {p.status === 'Despachado' && (
                       <div className="flex flex-col items-start gap-1">
@@ -559,20 +591,27 @@ function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId }) {
 
       <div className="overflow-x-auto bg-slate-50 rounded-b-lg">
         <table className="w-full text-left border-collapse text-sm">
-          <thead><tr className="bg-slate-200"><th className="p-3 border-b">Cliente / Productos</th><th className="p-3 border-b">Pago & Ref</th><th className="p-3 border-b text-right">Acciones Admin / Auditor</th></tr></thead>
+          <thead><tr className="bg-slate-200"><th className="p-3 border-b w-1/3">Cliente / Productos</th><th className="p-3 border-b">Pago & Ref</th><th className="p-3 border-b text-right">Acciones Admin / Auditor</th></tr></thead>
           <tbody>
             {listado.length === 0 ? <tr><td colSpan="3" className="p-4 text-center">No hay pedidos aquí.</td></tr> : listado.map(p => (
               <tr key={p.id} className="border-b hover:bg-white bg-white/50">
-                 <td className="p-3">
+                 <td className="p-3 align-top">
                    <div className="font-bold text-base">{p.clienteNombre} <span className="text-xs font-normal text-slate-500">({p.asesora})</span></div>
-                   <div className="text-xs text-slate-600 bg-slate-100 p-2 mt-1 rounded whitespace-pre-wrap">{p.productos}</div>
+                   <div className="text-xs text-slate-700 bg-blue-50 border border-blue-100 p-2 mt-2 rounded shadow-inner">
+                     <span className="font-bold flex items-center gap-1 mb-1 text-blue-800"><Package size={14}/> Productos a Validar:</span>
+                     {p.productos ? (
+                        <div className="whitespace-pre-wrap">{p.productos}</div>
+                     ) : (
+                        p.carritoObj ? Object.entries(p.carritoObj).map(([key, qty]) => <div key={key}>• {qty}x {key.replace('|', ' ')}</div>) : 'No se especificaron productos.'
+                     )}
+                   </div>
                  </td>
-                 <td className="p-3">
+                 <td className="p-3 align-top">
                    <div className="font-bold text-green-700 text-lg">${(p.montoUsd||0).toFixed(2)} <span className="text-xs text-slate-500 font-normal ml-1">(Tasa: {p.tasaAplicada})</span></div>
                    <div className="text-xs">Ref: {p.referencia}</div>
                    <div className="mt-1">{getStatusBadge(p.status)}</div>
                  </td>
-                 <td className="p-3">
+                 <td className="p-3 align-top">
                    <div className="flex flex-col gap-2 items-end">
                      {/* Acciones de Admin/Pagos (Solo en pendientes) */}
                      {esAdmin && p.status === 'Pendiente' && (
@@ -603,8 +642,8 @@ function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId }) {
 // 4. PANEL DE INVENTARIO MULTI-ALMACÉN
 // ==========================================
 function PanelInventario({ stock, notas, catalogo, movimientos, db, appId, loggear, perfil }) {
-  const puedeEditar = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL].includes(perfil.role);
-  const esRecepcion = [ROLES.ADMIN, ROLES.RECEPCION, ROLES.AUDITOR_GENERAL].includes(perfil.role);
+  const puedeEditar = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(perfil.role);
+  const esRecepcion = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITOR_GENERAL].includes(perfil.role);
   
   const [subTab, setSubTab] = useState('stock'); // stock | movimientos | catalogo
   
@@ -791,7 +830,32 @@ function SubPanelMovimientos({ movimientos, stock, db, appId, loggear, perfil, c
 
 // 4.3 SUBPANEL CATÁLOGO
 function SubPanelCatalogo({ catalogo, db, appId, loggear }) {
-  const [form, setForm] = useState({ categoria: '', nuevoCat: '', nombre: '', presentaciones: '', imagen: '' });
+  const defaultForm = { categoria: '', nuevoCat: '', nombre: '', presentaciones: '', imagen: '' };
+  const [form, setForm] = useState(defaultForm);
+  const [modoEdicion, setModoEdicion] = useState(null); // { catOriginal, nomOriginal }
+
+  const cargarEdicion = (catNombre, prod) => {
+    setForm({ categoria: catNombre, nuevoCat: '', nombre: prod.nombre, presentaciones: prod.presentaciones.join(', '), imagen: prod.imagen || '' });
+    setModoEdicion({ catOriginal: catNombre, nomOriginal: prod.nombre });
+  };
+
+  const cancelarEdicion = () => {
+    setModoEdicion(null); setForm(defaultForm);
+  };
+
+  const eliminarProducto = async (catNombre, prodNombre) => {
+    if(!window.confirm(`¿Seguro que deseas eliminar ${prodNombre} del catálogo? (Esto no borra el stock físico, solo lo oculta de la tienda)`)) return;
+    let newCatalogo = [...catalogo];
+    let catIndex = newCatalogo.findIndex(c => c.categoria === catNombre);
+    if(catIndex >= 0) {
+       newCatalogo[catIndex].productos = newCatalogo[catIndex].productos.filter(p => p.nombre !== prodNombre);
+       if(newCatalogo[catIndex].productos.length === 0) newCatalogo.splice(catIndex, 1);
+       try {
+         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), { categorias: newCatalogo });
+         loggear('CATALOGO_ELIMINADO', `Se eliminó el producto: ${prodNombre}`);
+       } catch(err) { console.error(err); }
+    }
+  };
 
   const guardarProducto = async (e) => {
     e.preventDefault();
@@ -800,9 +864,19 @@ function SubPanelCatalogo({ catalogo, db, appId, loggear }) {
     
     if(!catName || !form.nombre || presentacionesArr.length === 0) return alert("Faltan datos requeridos.");
 
-    let newCatalogo = [...catalogo];
-    let catIndex = newCatalogo.findIndex(c => c.categoria.toLowerCase() === catName.toLowerCase());
+    let newCatalogo = JSON.parse(JSON.stringify(catalogo)); // deep copy
     
+    // Si estamos editando, remover el original primero por si cambió de categoría o nombre
+    if (modoEdicion) {
+      let oldCatIndex = newCatalogo.findIndex(c => c.categoria === modoEdicion.catOriginal);
+      if(oldCatIndex >= 0) {
+         newCatalogo[oldCatIndex].productos = newCatalogo[oldCatIndex].productos.filter(p => p.nombre !== modoEdicion.nomOriginal);
+         if(newCatalogo[oldCatIndex].productos.length === 0) newCatalogo.splice(oldCatIndex, 1);
+      }
+    }
+
+    // Agregar el nuevo/editado
+    let catIndex = newCatalogo.findIndex(c => c.categoria.toLowerCase() === catName.toLowerCase());
     const nuevoProd = { nombre: form.nombre, presentaciones: presentacionesArr, imagen: form.imagen };
 
     if (catIndex >= 0) {
@@ -813,32 +887,61 @@ function SubPanelCatalogo({ catalogo, db, appId, loggear }) {
 
     try {
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), { categorias: newCatalogo });
-      loggear('CATALOGO_ACTUALIZADO', `Se añadió el producto: ${form.nombre}`);
-      alert("Producto añadido al catálogo de Ventas.");
-      setForm({ categoria: '', nuevoCat: '', nombre: '', presentaciones: '', imagen: '' });
+      loggear('CATALOGO_ACTUALIZADO', `Se ${modoEdicion ? 'editó' : 'añadió'} el producto: ${form.nombre}`);
+      alert(`Producto ${modoEdicion ? 'actualizado' : 'añadido'} correctamente.`);
+      cancelarEdicion();
     } catch(err) { console.error(err); }
   };
 
   return (
-    <div className="bg-slate-50 p-6 rounded-lg border">
-      <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Package/> Añadir Nuevo Producto al Catálogo</h3>
-      <form onSubmit={guardarProducto} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="flex flex-col">
-          <label className="text-sm font-semibold mb-1">Categoría</label>
-          <select value={form.categoria} onChange={e=>setForm({...form, categoria: e.target.value})} className="p-2 border rounded" required>
-            <option value="">Selecciona...</option>
-            {catalogo.map(c => <option key={c.categoria} value={c.categoria}>{c.categoria}</option>)}
-            <option value="OTRA">+ Crear Nueva Categoría</option>
-          </select>
+    <div className="flex flex-col gap-6">
+      <div className="bg-slate-50 p-6 rounded-lg border">
+        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Package/> {modoEdicion ? 'Editar Producto Seleccionado' : 'Añadir Nuevo Producto al Catálogo'}</h3>
+        <form onSubmit={guardarProducto} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="flex flex-col">
+            <label className="text-sm font-semibold mb-1">Categoría</label>
+            <select value={form.categoria} onChange={e=>setForm({...form, categoria: e.target.value})} className="p-2 border rounded" required>
+              <option value="">Selecciona...</option>
+              {catalogo.map(c => <option key={c.categoria} value={c.categoria}>{c.categoria}</option>)}
+              <option value="OTRA">+ Crear Nueva Categoría</option>
+            </select>
+          </div>
+          {form.categoria === 'OTRA' ? <Input label="Nombre Nueva Categoría" value={form.nuevoCat} onChange={e=>setForm({...form, nuevoCat: e.target.value})} required/> : <div></div>}
+          
+          <Input label="Nombre del Producto" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} placeholder="Ej: Tratamiento KeraBlue" required/>
+          <Input label="Presentaciones (Separadas por coma)" value={form.presentaciones} onChange={e=>setForm({...form, presentaciones: e.target.value})} placeholder="Ej: 1 Litro, 500ml, 250ml" required/>
+          <Input label="URL de Imagen (Opcional)" value={form.imagen} onChange={e=>setForm({...form, imagen: e.target.value})} placeholder="https://...imagen.jpg" />
+          
+          <div className="md:col-span-2 flex justify-end gap-2 mt-2">
+            {modoEdicion && <button type="button" onClick={cancelarEdicion} className="bg-slate-200 text-slate-700 font-bold py-2 px-6 rounded">Cancelar Edición</button>}
+            <button type="submit" className="bg-blue-600 text-white font-bold py-2 px-6 rounded">{modoEdicion ? 'Actualizar Producto' : 'Guardar Producto Nuevo'}</button>
+          </div>
+        </form>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg border">
+        <h3 className="font-bold text-slate-800 mb-4">Productos Actuales en el Catálogo</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead><tr className="bg-slate-100"><th className="p-3 border-b">Categoría</th><th className="p-3 border-b">Producto y Presentaciones</th><th className="p-3 border-b text-right">Acciones</th></tr></thead>
+            <tbody>
+              {catalogo.map(c => c.productos.map(p => (
+                <tr key={p.nombre} className="border-b hover:bg-slate-50">
+                  <td className="p-3 font-semibold text-slate-500">{c.categoria}</td>
+                  <td className="p-3">
+                    <div className="font-bold text-slate-800">{p.nombre}</div>
+                    <div className="text-xs text-slate-600 mt-1">{p.presentaciones.join(' / ')}</div>
+                  </td>
+                  <td className="p-3 flex justify-end gap-2">
+                     <button onClick={()=>cargarEdicion(c.categoria, p)} className="text-blue-600 bg-blue-50 p-2 rounded hover:bg-blue-100" title="Editar"><Edit3 size={16}/></button>
+                     <button onClick={()=>eliminarProducto(c.categoria, p.nombre)} className="text-red-600 bg-red-50 p-2 rounded hover:bg-red-100" title="Eliminar"><Trash2 size={16}/></button>
+                  </td>
+                </tr>
+              )))}
+            </tbody>
+          </table>
         </div>
-        {form.categoria === 'OTRA' ? <Input label="Nombre Nueva Categoría" value={form.nuevoCat} onChange={e=>setForm({...form, nuevoCat: e.target.value})} required/> : <div></div>}
-        
-        <Input label="Nombre del Producto" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} placeholder="Ej: Tratamiento KeraBlue" required/>
-        <Input label="Presentaciones (Separadas por coma)" value={form.presentaciones} onChange={e=>setForm({...form, presentaciones: e.target.value})} placeholder="Ej: 1 Litro, 500ml, 250ml" required/>
-        <Input label="URL de Imagen (Opcional)" value={form.imagen} onChange={e=>setForm({...form, imagen: e.target.value})} placeholder="https://...imagen.jpg" />
-        
-        <div className="md:col-span-2 flex justify-end mt-2"><button type="submit" className="bg-blue-600 text-white font-bold py-2 px-6 rounded">Guardar Producto</button></div>
-      </form>
+      </div>
     </div>
   );
 }
@@ -1082,7 +1185,13 @@ function PanelUsuarios({ usuarios, db, appId, loggear }) {
         <tbody>
           {usuarios.map(u => (
             <tr key={u.id} className="border-b">
-              <td className="p-3 font-semibold">{u.nombre}<br/><span className="text-xs text-slate-500">{u.email}</span></td>
+              <td className="p-3 font-semibold">
+                <div className="flex items-center gap-2">
+                   {u.nombre}
+                   {u.isOnline && <span title="En línea" className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse shadow-sm"></span>}
+                </div>
+                <span className="text-xs font-normal text-slate-500">{u.email}</span>
+              </td>
               <td className="p-3 flex gap-2">
                  <select value={u.role} onChange={e=>cambiarRol(u.id, true, e.target.value, u.email)} className="border p-1 rounded outline-none">
                    <option value="Pendiente" disabled>Pendiente</option>
