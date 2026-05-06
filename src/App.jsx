@@ -25,12 +25,11 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'app-pedidos-venezuel
 const URL_GOOGLE_SCRIPT = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
-
 // --- CONSTANTES DE ROLES DE USUARIO ---
 const ROLES = {
   ADMIN: 'Administrador',
   VENTAS: 'Ventas',
-  ADMINISTRACION: 'Administración', // Ahora incluye los permisos de Recepción
+  ADMINISTRACION: 'Administración', 
   DESPACHO: 'Despacho',
   AUDITOR_VENTAS: 'Auditor Ventas y Admin',
   AUDITOR_INVENTARIO: 'Auditor Inventario',
@@ -42,7 +41,18 @@ const DEFAULT_CATALOGO = [
   { categoria: "Cirugías Capilares", productos: [ { nombre: "Cirugía Clásica", presentaciones: ["Litro", "1/2 Litro", "Galón"], imagen: "" }, { nombre: "Cirugía Chocolate", presentaciones: ["Litro", "1/2 Litro", "Galón"], imagen: "" } ] },
   { categoria: "Alisados", productos: [ { nombre: "Alisado Clásica", presentaciones: ["1 Litro", "300ml"], imagen: "" }, { nombre: "Alisado Chocolate", presentaciones: ["1 Litro", "300ml"], imagen: "" } ] },
   { categoria: "Shampoos y Cuidado", productos: [ { nombre: "Shampoo Tradicional", presentaciones: ["Litro", "1/2 Litro"], imagen: "" }, { nombre: "Anti-Residuos", presentaciones: ["1 Litro", "1/2 Litro"], imagen: "" } ] },
-  { categoria: "Boosters y Terapias", productos: [ { nombre: "Terapia Antifrizz", presentaciones: ["500gr"], imagen: "" }, { nombre: "Booster Full Hidratación", presentaciones: ["Unidad"], imagen: "" } ] }
+  { categoria: "Boosters y Terapias", productos: [ 
+      { nombre: "Booster de Hidratacion", presentaciones: ["Unidad"], imagen: "" },
+      { nombre: "Booster de Reparacion", presentaciones: ["Unidad"], imagen: "" },
+      { nombre: "Booster de Nutricion", presentaciones: ["Unidad"], imagen: "" },
+      { nombre: "Booster Profesional", presentaciones: ["Unidad"], imagen: "" },
+      { nombre: "Terapia Antifrizz", presentaciones: ["500gr"], imagen: "" } 
+    ] 
+  },
+  { categoria: "Complementos Automáticos", productos: [
+      { nombre: "Concentrado", presentaciones: ["Unidad"], imagen: "" }
+    ]
+  }
 ];
 
 // ==========================================
@@ -385,18 +395,43 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
     const tasa = parseFloat(formData.tasa);
     const calculo = formData.moneda === 'USD' ? { usd: montoNum, ves: montoNum * tasa } : { ves: montoNum, usd: tasa > 0 ? montoNum / tasa : 0 };
 
+    // --- LÓGICA AUTOMÁTICA DE CONCENTRADO ---
+    let finalCarrito = { ...formData.carritoObj };
+    let finalProductosText = formData.productos;
+    let countBoosters = 0;
+    const boosterKeys = [
+      "Booster de Hidratacion|Unidad",
+      "Booster de Reparacion|Unidad",
+      "Booster de Nutricion|Unidad",
+      "Booster Profesional|Unidad"
+    ];
+
+    Object.entries(finalCarrito).forEach(([key, qty]) => {
+      if (boosterKeys.includes(key)) {
+        countBoosters += qty;
+      }
+    });
+
+    if (countBoosters > 0) {
+      finalCarrito["Concentrado|Unidad"] = (finalCarrito["Concentrado|Unidad"] || 0) + countBoosters;
+      if (!finalProductosText.includes("Concentrado (Unidad)")) {
+        finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Agregado Automáticamente]`;
+      }
+    }
+    // ----------------------------------------
+
     try {
       if (editId) {
         // Actualizar pedido rechazado
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', editId), {
-          ...formData, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', motivoRechazo: '' // Limpiar motivo
+          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', motivoRechazo: '' // Limpiar motivo
         });
         loggear('PEDIDO_CORREGIDO', `Se corrigió el pedido de ${formData.clienteNombre} devuelto por Administración.`);
         alert("Pedido corregido y enviado a Administración.");
       } else {
         // Crear nuevo
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), {
-          ...formData, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', auditado: false, fechaCreacion: Date.now(), fechaDespacho: new Date().toLocaleDateString('es-VE')
+          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', auditado: false, fechaCreacion: Date.now(), fechaDespacho: new Date().toLocaleDateString('es-VE')
         });
         loggear('PEDIDO_CREADO', `Venta registrada: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)})`);
         alert("¡Pedido registrado exitosamente!");
@@ -509,7 +544,7 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
                   </td>
                   <td className="p-3">
                     {p.status === 'Rechazado' && (
-                      <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-500 text-rome text-xs font-bold py-1 px-3 rounded shadow-sm hover:bg-amber-600">Corregir Pedido</button>
+                      <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-500 text-white text-xs font-bold py-1 px-3 rounded shadow-sm hover:bg-amber-600">Corregir Pedido</button>
                     )}
                     {p.status === 'Despachado' && (
                       <div className="flex flex-col items-start gap-1">
@@ -639,7 +674,223 @@ function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId }) {
 }
 
 // ==========================================
-// 4. PANEL DE INVENTARIO MULTI-ALMACÉN
+// 4. PANEL DE DESPACHO
+// ==========================================
+function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear }) {
+  const [vistaDespacho, setVistaDespacho] = useState('pendientes');
+
+  const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
+  const pedidosDespachados = pedidos.filter(p => p.status === 'Despachado');
+  const pedidosPendientes = pedidos.filter(p => p.status === 'Pendiente' || p.status === 'Rechazado').length;
+
+  const [guiasInput, setGuiasInput] = useState({});
+  const [subiendo, setSubiendo] = useState({ id: null, field: null });
+
+  const handleGuiaChange = (id, field, value) => {
+    setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  };
+
+  const handleFileUpload = async (e, id, field) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!URL_GOOGLE_SCRIPT) {
+        alert("⚠️ Falta configurar el puente de Google Drive. Por ahora, debes tomar la foto, subirla a drive y pegar el enlace manualmente.");
+        return;
+    }
+
+    setSubiendo({ id, field });
+
+    try {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onloadend = async () => {
+            const base64Data = reader.result.split(',')[1];
+            
+            const response = await fetch(URL_GOOGLE_SCRIPT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                    fileName: `Soporte_${id.substring(0,5)}_${field}.jpg`,
+                    mimeType: file.type,
+                    data: base64Data
+                })
+            });
+
+            const result = await response.json();
+            if (result.url) {
+                handleGuiaChange(id, field, result.url);
+                loggear('FOTO_SUBIDA', `Se subió foto para el campo ${field} en el pedido ${id}`);
+            } else {
+                throw new Error("No se recibió URL válida");
+            }
+            setSubiendo({ id: null, field: null });
+        };
+    } catch (error) {
+        console.error(error);
+        alert("Error subiendo la foto a Drive. Revisa tu conexión.");
+        setSubiendo({ id: null, field: null });
+    }
+  };
+
+  const guardarGuia = async (pedido) => {
+    const inputData = guiasInput[pedido.id];
+    
+    if (!inputData || !inputData.guia || !inputData.link || !inputData.fotoProductos) {
+      return alert("⚠️ ALERTA: Todos los campos son obligatorios.\n\nDebes ingresar:\n1. Número de Guía\n2. Link/Foto del recibo de Guía\n3. Link/Foto de los productos armados");
+    }
+    
+    try {
+      const pedidoRef = doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id);
+      await updateDoc(pedidoRef, { 
+        guia: inputData.guia, 
+        linkGuia: inputData.link,
+        linkFotoProductos: inputData.fotoProductos,
+        status: 'Despachado'
+      });
+      loggear('PEDIDO_DESPACHADO', `Se despachó el pedido de ${pedido.clienteNombre} (Guía: ${inputData.guia})`);
+      alert("Guía y soportes guardados correctamente. El pedido ahora pasará al historial.");
+    } catch(e) {
+      console.error(e);
+      alert("Error al guardar la información");
+    }
+  };
+
+  const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
+
+  return (
+    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+      
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 border-b border-slate-200 pb-4 gap-4">
+        <div className="flex gap-4">
+          <button 
+            onClick={() => setVistaDespacho('pendientes')}
+            className={`pb-2 font-bold px-2 flex items-center gap-2 ${vistaDespacho === 'pendientes' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Truck size={18} /> Por Despachar ({pedidosValidados.length})
+          </button>
+          <button 
+            onClick={() => setVistaDespacho('historial')}
+            className={`pb-2 font-bold px-2 flex items-center gap-2 ${vistaDespacho === 'historial' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Archive size={18} /> Historial Despachados
+          </button>
+        </div>
+        <button 
+          onClick={() => window.print()} 
+          className="bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 px-4 rounded shadow flex items-center gap-2"
+        >
+          <Printer size={18} /> Imprimir Etiquetas ({pedidosValidados.length})
+        </button>
+      </div>
+
+      {pedidosPendientes > 0 && vistaDespacho === 'pendientes' && (
+        <div className="mb-6 bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-md flex items-start gap-3">
+          <AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={24} />
+          <div>
+            <h3 className="text-amber-800 font-bold">¡Atención Despacho!</h3>
+            <p className="text-amber-700 text-sm mt-1">
+              Todavía hay <strong>{pedidosPendientes} pedidos pendientes</strong> por validar en Administración. Te recomendamos esperar a que los validen todos antes de imprimir para que salgan en la misma página.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse min-w-[800px]">
+          <thead>
+            <tr className="bg-slate-100 text-slate-700 text-sm">
+              <th className="p-3 border-b w-1/4">Datos del Paquete</th>
+              <th className="p-3 border-b">Dirección y Productos</th>
+              <th className="p-3 border-b w-1/3">Información de Envío y Soportes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pedidosAMostrar.length === 0 ? (
+              <tr><td colSpan="3" className="p-4 text-center text-slate-500">No hay paquetes en esta vista.</td></tr>
+            ) : (
+              pedidosAMostrar.map(p => (
+                <tr key={p.id} className={`border-b ${p.status === 'Despachado' ? 'bg-slate-50' : ''}`}>
+                  <td className="p-3 align-top">
+                    <div className="font-bold text-slate-800">{p.clienteNombre}</div>
+                    <div className="text-sm font-semibold text-blue-600 mt-1">{p.courier}</div>
+                    <div className="text-xs text-slate-500 mt-1"><span className="font-semibold">Tel:</span> {p.clienteTelefono}</div>
+                    <div className="text-xs text-slate-500"><span className="font-semibold">Prog. Despacho:</span> {p.fechaDespacho}</div>
+                  </td>
+                  <td className="p-3 align-top text-sm">
+                    <div className="font-medium bg-white p-2 rounded border border-slate-200 mb-2 whitespace-pre-wrap shadow-sm">{p.productos}</div>
+                    <div className="text-slate-600">{p.direccion}</div>
+                  </td>
+                  <td className="p-3 align-top bg-slate-50 border-l border-slate-100">
+                    {p.status === 'Despachado' ? (
+                      <div>
+                        <div className="text-sm mb-2"><span className="font-bold">Guía:</span> {p.guia}</div>
+                        <div className="flex flex-col gap-1 mb-2">
+                          {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1"><ImageIcon size={14}/> Ver Recibo de Guía</a>}
+                          {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Camera size={14}/> Ver Foto de Productos</a>}
+                        </div>
+                        <div className="text-xs text-slate-600 font-bold mb-2">✓ Despachado (Ventas notificará)</div>
+                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-slate-600 text-xs underline mt-2">Corregir envío</button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <input 
+                          type="text" 
+                          placeholder="* Número de Guía" 
+                          className="w-full text-sm p-1.5 border border-slate-300 rounded font-semibold"
+                          value={guiasInput[p.id]?.guia || ''}
+                          onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)}
+                        />
+                        
+                        <div className="flex gap-2 relative">
+                          <input 
+                            type="text" 
+                            placeholder="* Link Foto Guía" 
+                            className="w-full text-sm p-1.5 border border-slate-300 rounded pr-10"
+                            value={guiasInput[p.id]?.link || ''}
+                            onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)}
+                          />
+                          <label className="absolute right-1 top-1 p-1 bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-600 rounded cursor-pointer transition" title="Subir desde Cámara/Galería">
+                            {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
+                          </label>
+                        </div>
+
+                        <div className="flex gap-2 relative">
+                          <input 
+                            type="text" 
+                            placeholder="* Link Foto Productos (Soporte)" 
+                            className="w-full text-sm p-1.5 border border-slate-300 rounded pr-10"
+                            value={guiasInput[p.id]?.fotoProductos || ''}
+                            onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)}
+                          />
+                          <label className="absolute right-1 top-1 p-1 bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-600 rounded cursor-pointer transition" title="Subir desde Cámara/Galería">
+                            {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} />
+                          </label>
+                        </div>
+
+                        <button 
+                          onClick={() => guardarGuia(p)}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded mt-1 flex items-center justify-center gap-2"
+                        >
+                          <Truck size={14}/> Registrar y Archivar
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 5. PANEL DE INVENTARIO MULTI-ALMACÉN
 // ==========================================
 function PanelInventario({ stock, notas, catalogo, movimientos, db, appId, loggear, perfil }) {
   const puedeEditar = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(perfil.role);
@@ -1148,30 +1399,6 @@ function PanelReportes({ pedidos }) {
   );
 }
 
-function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear }) {
-  const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
-  return ( 
-    <div className="bg-white p-6 rounded-xl shadow border"> 
-      <h2 className="text-xl font-bold flex gap-2"><Truck className="text-blue-600"/> Logística y Despacho</h2> 
-      <p className="text-slate-500 mt-2">({pedidosValidados.length} pedidos por despachar)</p> 
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full text-left border-collapse text-sm">
-          <thead><tr className="bg-slate-100"><th className="p-3 border-b">Paquete</th><th className="p-3 border-b">Productos y Dirección</th></tr></thead>
-          <tbody>
-            {pedidosValidados.length === 0 ? <tr><td colSpan="2" className="p-4 text-center">No hay pedidos listos para despacho.</td></tr> :
-              pedidosValidados.map(p => (
-                <tr key={p.id} className="border-b">
-                  <td className="p-3"><div className="font-bold">{p.clienteNombre}</div><div className="text-blue-600 font-medium">{p.courier}</div></td>
-                  <td className="p-3"><div className="bg-slate-50 p-2 rounded text-xs mb-1 whitespace-pre-wrap">{p.productos}</div><div className="text-xs text-slate-600">{p.direccion}</div></td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </div>
-    </div> 
-  );
-}
-
 function PanelUsuarios({ usuarios, db, appId, loggear }) {
   const cambiarRol = async (uid, isApproved, newRole, email) => {
     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid), { isApproved, role: newRole });
@@ -1271,7 +1498,7 @@ function ModalCatalogo({ catalogo, isOpen, onClose, onConfirm }) {
       <div className="bg-white rounded-xl w-full max-w-5xl h-[85vh] flex flex-col">
         <div className="p-4 border-b flex justify-between bg-slate-50"><h2 className="font-bold flex items-center gap-2"><Package/> Catálogo</h2><button onClick={onClose}><X/></button></div>
         <div className="flex-1 overflow-y-auto p-6 bg-slate-100">
-          {catalogo.map(c => <div key={c.categoria} className="mb-6"><h3 className="font-bold border-b pb-2 mb-4">{c.categoria}</h3><div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {catalogo.filter(c => c.categoria !== 'Complementos Automáticos').map(c => <div key={c.categoria} className="mb-6"><h3 className="font-bold border-b pb-2 mb-4">{c.categoria}</h3><div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {c.productos.map(p => <div key={p.nombre} className="bg-white border rounded p-3 shadow-sm flex flex-col">
               {p.imagen ? <img src={p.imagen} alt="img" className="w-full h-24 object-contain mb-2 rounded shrink-0" /> : <div className="w-full h-12 bg-slate-50 flex items-center justify-center mb-2 shrink-0"><ImageIcon className="text-slate-300"/></div>}
               <div className="font-bold text-sm mb-3">{p.nombre}</div>
