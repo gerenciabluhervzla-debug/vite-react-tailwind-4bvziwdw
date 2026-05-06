@@ -205,6 +205,17 @@ export default function App() {
     signOut(auth);
   };
 
+  // Función para que Despacho pueda revertir un envío si se equivocó
+  const cambiarEstadoPedido = async (id, nuevoEstado) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id), { status: nuevoEstado });
+      loggear('ESTADO_PEDIDO_REVERTIDO', `Se revirtió el estado del pedido a ${nuevoEstado} para su corrección.`);
+    } catch (error) {
+      console.error(error);
+      alert("Error al intentar cambiar el estado del pedido.");
+    }
+  };
+
   // --- VISTAS DE AUTENTICACIÓN ---
   
   // Evitar choque de renderizado si Firebase demora o falla cargando el perfil tras autenticar
@@ -420,6 +431,18 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
     }
     // ----------------------------------------
 
+    // --- LÓGICA DE HORARIO DE CORTE (12:20 PM) ---
+    // Determinamos la fecha de despacho basada en la hora local de Venezuela
+    const targetDate = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const hours = targetDate.getHours();
+    const minutes = targetDate.getMinutes();
+    
+    if (hours > 12 || (hours === 12 && minutes >= 20)) {
+       targetDate.setDate(targetDate.getDate() + 1);
+    }
+    const fechaDespachoStr = targetDate.toLocaleDateString('es-VE');
+    // ---------------------------------------------
+
     try {
       if (editId) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', editId), {
@@ -429,10 +452,10 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
         alert("Pedido corregido y enviado a Administración.");
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), {
-          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', auditado: false, fechaCreacion: Date.now(), fechaDespacho: new Date().toLocaleDateString('es-VE')
+          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', auditado: false, fechaCreacion: Date.now(), fechaDespacho: fechaDespachoStr
         });
         loggear('PEDIDO_CREADO', `Venta registrada: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)})`);
-        alert("¡Pedido registrado exitosamente!");
+        alert("¡Pedido registrado exitosamente! Quedó pautado para despachar el: " + fechaDespachoStr);
       }
       
       cancelarEdicion();
