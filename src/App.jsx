@@ -316,8 +316,8 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
   const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil.nombre, referencia: '', moneda: 'USD', montoPago: '', tasa: '' };
   
   const [formData, setFormData] = useState(defaultForm);
-  const [editId, setEditId] = useState(null); // ID del pedido si estamos corrigiendo un rechazo
-  const [motivoRechazoActual, setMotivoRechazoActual] = useState(''); // Mostrar por qué fue devuelto
+  const [editId, setEditId] = useState(null); 
+  const [motivoRechazoActual, setMotivoRechazoActual] = useState(''); 
 
   const [enviando, setEnviando] = useState(false);
   const [textoCrudo, setTextoCrudo] = useState('');
@@ -422,14 +422,12 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
 
     try {
       if (editId) {
-        // Actualizar pedido rechazado
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', editId), {
-          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', motivoRechazo: '' // Limpiar motivo
+          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', motivoRechazo: '' 
         });
         loggear('PEDIDO_CORREGIDO', `Se corrigió el pedido de ${formData.clienteNombre} devuelto por Administración.`);
         alert("Pedido corregido y enviado a Administración.");
       } else {
-        // Crear nuevo
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), {
           ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', auditado: false, fechaCreacion: Date.now(), fechaDespacho: new Date().toLocaleDateString('es-VE')
         });
@@ -1332,7 +1330,7 @@ function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId, loggear, perfi
 }
 
 // ==========================================
-// RESTO DE PANELES (REPORTES, DESPACHO, USUARIOS, LOGS)
+// RESTO DE PANELES (REPORTES, USUARIOS, LOGS)
 // ==========================================
 function PanelReportes({ pedidos }) {
   const hoyStr = new Date().toISOString().split('T')[0];
