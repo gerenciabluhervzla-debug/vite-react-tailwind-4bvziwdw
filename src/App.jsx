@@ -9,11 +9,11 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
   ? JSON.parse(__firebase_config) 
   : {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+      appId: import.meta.env.VITE_FIREBASE_APP_ID
     };
 
 const app = initializeApp(firebaseConfig);
@@ -151,6 +151,7 @@ export default function App() {
 
   // --- 3. LOGS DE AUDITORÍA ---
   const registrarLogSistem = async (perfilActivo, accion, detalle) => {
+    if (!perfilActivo) return;
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
         accion, detalle, usuarioEmail: perfilActivo.email, usuarioNombre: perfilActivo.nombre, usuarioRol: perfilActivo.role, fecha: Date.now()
@@ -181,7 +182,7 @@ export default function App() {
       setMovimientos(data);
     }));
 
-    const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(userProfile.role);
+    const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(userProfile?.role);
     if (esAdminOAuditor) {
       unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))));
       unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), (snapshot) => setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.fecha - a.fecha))));
@@ -254,8 +255,8 @@ export default function App() {
     </div>
   );
 
-  // --- PERMISOS DE VISUALIZACIÓN POR ROL ---
-  const r = userProfile.role;
+  // --- PERMISOS DE VISUALIZACIÓN POR ROL (Uso de Optional Chaining ?.) ---
+  const r = userProfile?.role;
   const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(r);
   const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(r);
   const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO, ROLES.AUDITOR_GENERAL].includes(r);
@@ -273,7 +274,7 @@ export default function App() {
           <div className="mt-4 bg-slate-800 rounded-lg p-3 border border-slate-700 flex flex-col gap-1">
              <div className="text-xs text-slate-400">Usuario Activo:</div>
              <div className="text-sm font-bold text-white truncate" title={user.email}>{user.displayName}</div>
-             <div className="text-xs font-semibold text-blue-400 bg-blue-900/30 px-2 py-0.5 rounded-full inline-block w-max mt-1 border border-blue-800">{userProfile.role}</div>
+             <div className="text-xs font-semibold text-blue-400 bg-blue-900/30 px-2 py-0.5 rounded-full inline-block w-max mt-1 border border-blue-800">{userProfile?.role}</div>
           </div>
         </div>
         
@@ -322,9 +323,9 @@ export default function App() {
 // 1. PANEL DE VENTAS 
 // ==========================================
 function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
-  const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil.role);
+  const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
-  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil.nombre, referencia: '', moneda: 'USD', montoPago: '', tasa: '' };
+  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: 'USD', montoPago: '', tasa: '' };
   
   const [formData, setFormData] = useState(defaultForm);
   const [editId, setEditId] = useState(null); 
@@ -382,8 +383,8 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
   const cargarPedidoParaEditar = (pedido) => {
     setFormData({
       clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, direccion: pedido.direccion,
-      productos: pedido.productos, carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda, 
-      montoPago: pedido.monto.toString(), tasa: pedido.tasaAplicada.toString()
+      productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda, 
+      montoPago: pedido.monto?.toString(), tasa: pedido.tasaAplicada?.toString()
     });
     setEditId(pedido.id);
     setMotivoRechazoActual(pedido.motivoRechazo || 'Sin motivo especificado.');
@@ -432,7 +433,6 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
     // ----------------------------------------
 
     // --- LÓGICA DE HORARIO DE CORTE (12:20 PM) ---
-    // Determinamos la fecha de despacho basada en la hora local de Venezuela
     const targetDate = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     const hours = targetDate.getHours();
     const minutes = targetDate.getMinutes();
@@ -525,7 +525,7 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
                  <button type="button" onClick={() => setIsCatalogOpen(true)} className="text-xs font-bold text-white bg-blue-600 py-2 px-4 rounded shadow flex items-center gap-2"><Search size={14} /> Abrir Catálogo</button>
                </div>
                {formData.productos ? (
-                 <div className="text-sm text-slate-700 whitespace-pre-wrap bg-white p-3 border rounded">{formData.productos}</div>
+                 <div className="text-sm text-slate-700 whitespace-pre-wrap bg-white p-3 border rounded">{typeof formData.productos === 'string' ? formData.productos : JSON.stringify(formData.productos)}</div>
                ) : (
                  <div className="text-sm text-slate-400 italic text-center p-4 border-2 border-dashed rounded">No hay productos. Usa el catálogo.</div>
                )}
@@ -603,8 +603,8 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear }) {
 // ==========================================
 function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId }) {
   const [vistaAdmin, setVistaAdmin] = useState('pendientes');
-  const esAuditor = [ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(perfil.role);
-  const esAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(perfil.role);
+  const esAuditor = [ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(perfil?.role);
+  const esAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(perfil?.role);
 
   const pendientes = pedidos.filter(p => p.status === 'Pendiente');
   const historial = pedidos.filter(p => p.status !== 'Pendiente');
@@ -668,7 +668,7 @@ function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId }) {
                    <div className="text-xs text-slate-700 bg-blue-50 border border-blue-100 p-2 mt-2 rounded shadow-inner">
                      <span className="font-bold flex items-center gap-1 mb-1 text-blue-800"><Package size={14}/> Productos a Validar:</span>
                      {p.productos ? (
-                        <div className="whitespace-pre-wrap">{p.productos}</div>
+                        <div className="whitespace-pre-wrap">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
                      ) : (
                         p.carritoObj ? Object.entries(p.carritoObj).map(([key, qty]) => <div key={key}>• {qty}x {key.replace('|', ' ')}</div>) : 'No se especificaron productos.'
                      )}
@@ -851,7 +851,7 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear }) {
                     <div className="text-xs text-slate-500"><span className="font-semibold">Prog. Despacho:</span> {p.fechaDespacho}</div>
                   </td>
                   <td className="p-3 align-top text-sm">
-                    <div className="font-medium bg-white p-2 rounded border border-slate-200 mb-2 whitespace-pre-wrap shadow-sm">{p.productos}</div>
+                    <div className="font-medium bg-white p-2 rounded border border-slate-200 mb-2 whitespace-pre-wrap shadow-sm">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
                     <div className="text-slate-600">{p.direccion}</div>
                   </td>
                   <td className="p-3 align-top bg-slate-50 border-l border-slate-100">
@@ -926,8 +926,8 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear }) {
 // 5. PANEL DE INVENTARIO MULTI-ALMACÉN
 // ==========================================
 function PanelInventario({ stock, notas, catalogo, movimientos, db, appId, loggear, perfil }) {
-  const puedeEditar = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(perfil.role);
-  const esRecepcion = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITOR_GENERAL].includes(perfil.role);
+  const puedeEditar = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(perfil?.role);
+  const esRecepcion = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITOR_GENERAL].includes(perfil?.role);
   
   const [subTab, setSubTab] = useState('stock'); // stock | movimientos | catalogo
   
@@ -1253,9 +1253,41 @@ function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId, loggear, perfi
   };
 
   const handleFileUpload = async (e) => {
-    // ... Lógica idéntica de subida a drive (omitida por brevedad de lectura, asume que sube url a fotoUrl)
-    alert("Función de subir al drive (Mismo código de despacho). Asigna la URL generada.");
-    setFotoUrl('https://via.placeholder.com/150'); // Mock
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!URL_GOOGLE_SCRIPT) {
+        alert("⚠️ Falta configurar el puente de Google Drive. Por ahora, debes tomar la foto, subirla a drive y pegar el enlace manualmente.");
+        return;
+    }
+
+    try {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onloadend = async () => {
+            const base64Data = reader.result.split(',')[1];
+            
+            const response = await fetch(URL_GOOGLE_SCRIPT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                    fileName: `Movimiento_${Date.now()}.jpg`,
+                    mimeType: file.type,
+                    data: base64Data
+                })
+            });
+
+            const result = await response.json();
+            if (result.url) {
+                setFotoUrl(result.url);
+            } else {
+                throw new Error("No se recibió URL válida");
+            }
+        };
+    } catch (error) {
+        console.error(error);
+        alert("Error subiendo la foto a Drive. Revisa tu conexión.");
+    }
   };
 
   const handleSubmit = async () => {
@@ -1367,7 +1399,8 @@ function PanelReportes({ pedidos }) {
       const cliente = `"${p.clienteNombre || ''}"`;
       const tlf = `"${p.clienteTelefono || ''}"`;
       const asesora = `"${p.asesora || ''}"`;
-      const productos = `"${(p.productos || '').replace(/\n/g, ' ')}"`;
+      const productosTexto = typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos);
+      const productos = `"${(productosTexto || '').replace(/\n/g, ' ')}"`;
       return `${fecha},${cliente},${tlf},${asesora},${p.courier},${productos},${p.monto},${p.moneda},${(p.montoUsd||0).toFixed(2)},${(p.montoVes||0).toFixed(2)},${p.tasaAplicada},${p.status}`;
     }).join("\n");
 
@@ -1576,7 +1609,7 @@ function VistaImpresion({ pedidos }) {
               <p><span className="font-bold">TELÉFONO:</span> {p.clienteTelefono}</p>
               <p className="mt-2"><span className="font-bold">DIRECCIÓN DE ENTREGA:</span></p>
               <p className="pl-2 border-l-2 border-gray-300 leading-tight">{p.direccion}</p>
-              <p className="mt-2 border-t pt-1"><span className="font-bold">CONTENIDO:</span> {p.productos}</p>
+              <p className="mt-2 border-t pt-1"><span className="font-bold">CONTENIDO:</span> {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</p>
             </div>
           </div>
         ))}
