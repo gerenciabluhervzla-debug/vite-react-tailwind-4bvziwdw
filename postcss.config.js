@@ -4,5 +4,3 @@ export default {
     autoprefixer: {},
   },
 }
-
-//postcss.config
