@@ -24,30 +24,30 @@ import {
 } from 'firebase/firestore';
 import { 
   ShoppingCart, CheckSquare, Truck, Printer, Clock, CheckCircle, XCircle, Search, 
-  Sparkles, Package, Plus, Minus, X, Image as ImageIcon, Camera, ClipboardList, 
+  Sparkles, Package, Plus, Minus, X, Image, Camera, ClipboardList, 
   AlertTriangle, UploadCloud, Loader2, DollarSign, Archive, Edit3, Save, LogOut, 
   ShieldCheck, Users, FileText, MessageSquare, Eye, FileSpreadsheet, Download, 
-  ChevronDown, ChevronUp, MessageCircle, ArrowRightLeft, PlusCircle, Trash2, Moon, Sun, Store, Link, Gift, CheckSquare2
+  ChevronDown, ChevronUp, MessageCircle, ArrowRightLeft, PlusCircle, Trash2, Moon, Sun, Store, Link, Gift
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN DE MARCA BLUEHER ---
-const BRAND_LOGO = "logobluher.jpg"; // Truco CSS aplicado abajo para eliminar el fondo blanco
+const BRAND_LOGO = "logobluher.jpg"; 
 
 // --- CONFIGURACIÓN DE FIREBASE ---
 const getEnvVar = (key) => {
   try {
-    if (typeof import.meta !== 'undefined' && import.meta.env) {
-      return import.meta.env[key] || '';
-    }
+    return import.meta.env[key] || '';
   } catch (error) {
     return '';
   }
-  return '';
 };
 
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
+let firebaseConfig = { apiKey: "" };
+try {
+  if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+    firebaseConfig = JSON.parse(__firebase_config);
+  } else {
+    firebaseConfig = {
       apiKey: getEnvVar('VITE_FIREBASE_API_KEY'),
       authDomain: getEnvVar('VITE_FIREBASE_AUTH_DOMAIN'),
       projectId: getEnvVar('VITE_FIREBASE_PROJECT_ID'),
@@ -55,6 +55,10 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
       messagingSenderId: getEnvVar('VITE_FIREBASE_MESSAGING_SENDER_ID'),
       appId: getEnvVar('VITE_FIREBASE_APP_ID')
     };
+  }
+} catch (e) {
+  console.warn("No se pudo cargar la configuración de Firebase");
+}
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -184,61 +188,6 @@ function VistaImpresion({ pedidos }) {
   ); 
 }
 
-function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConfirm, dialogs }) {
-  const [carrito, setCarrito] = useState({});
-  const updateQty = (key, delta) => { 
-    setCarrito(prev => { 
-      const n = Math.max(0, (prev[key]||0)+delta); 
-      if(n===0){const c={...prev}; delete c[key]; return c;} 
-      return {...prev, [key]:n}; 
-    }); 
-  };
-  if (!isOpen) return null;
-  const handleConfirm = () => {
-    const lineas = [];
-    Object.entries(carrito).forEach(([k, q]) => lineas.push(`- ${q}x ${k.replace('|', ' ')}`));
-    if (lineas.length === 0) return dialogs.alert("Selecciona productos del catálogo.");
-    onConfirm(lineas.join('\n'), carrito);
-  };
-  return (
-    <div className="fixed inset-0 bg-slate-900/80 z-[200] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in">
-      <div className="bg-white dark:bg-slate-800 rounded-[3rem] w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden shadow-2xl border dark:border-slate-700 transition-colors">
-        <div className="p-8 border-b dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800 transition-colors">
-           <h2 className="text-2xl font-black flex items-center gap-3 dark:text-white"><Search className="text-sky-600"/> Catálogo Oficial</h2>
-           <button onClick={onClose} className="p-3 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 transition-colors text-slate-500"><X size={24}/></button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-8 bg-[#f8fafc] dark:bg-slate-900 grid grid-cols-1 md:grid-cols-2 gap-8 transition-colors">
-           {catalogo.filter(c=>c.categoria !== 'Complementos Automáticos').map(c => (
-              <div key={c.categoria} className="space-y-4">
-                 <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] border-b dark:border-slate-700 pb-2 transition-colors">{c.categoria}</h3>
-                 {c.productos.map(p => (
-                    <div key={p.nombre} className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] border dark:border-slate-700 shadow-sm space-y-4 hover:shadow-md transition-all">
-                       <div className="font-black text-base text-slate-800 dark:text-slate-100 transition-colors">{p.nombre}</div>
-                       {p.presentaciones.map((pres, i) => {
-                          const k = `${p.nombre}|${pres}`; const q = carrito[k] || 0;
-                          const disp = stock ? (typeof stock[k] === 'object' ? stock[k].envios : (stock[k]||0)) : 0;
-                          return (
-                            <div key={pres} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-4 rounded-[1.5rem] border dark:border-slate-700 transition-colors">
-                               <div className="flex flex-col"><span className="font-bold opacity-60 text-[10px] dark:text-slate-400 uppercase tracking-widest">{pres}</span><span className="font-black text-emerald-600 text-lg">${p.precios[i]}</span><span className={`text-[9px] font-black ${disp===0?'text-red-500':'text-sky-500'}`}>Stock: {disp}</span></div>
-                               <div className="flex items-center gap-3 bg-white dark:bg-slate-800 p-2 rounded-2xl border dark:border-slate-700 shadow-inner transition-colors">
-                                  <button type="button" onClick={()=>updateQty(k,-1)} className="w-8 h-8 flex items-center justify-center font-black text-slate-400 hover:text-slate-800 transition-colors">-</button>
-                                  <span className="font-black w-6 text-center dark:text-white text-lg">{q}</span>
-                                  <button type="button" onClick={()=>updateQty(k,1)} className="w-8 h-8 flex items-center justify-center font-black text-sky-600 hover:text-sky-800 transition-colors">+</button>
-                               </div>
-                            </div>
-                          )
-                       })}
-                    </div>
-                 ))}
-              </div>
-           ))}
-        </div>
-        <div className="p-8 border-t dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800 transition-colors"><div className="font-black opacity-50 dark:text-slate-400 tracking-widest uppercase text-xs">Items: {Object.values(carrito).reduce((a,b)=>a+b,0)}</div><button onClick={handleConfirm} className="bg-sky-600 text-white px-12 py-5 rounded-[2rem] font-black shadow-2xl hover:bg-sky-700 transition-all uppercase tracking-widest">Confirmar Selección</button></div>
-      </div>
-    </div>
-  );
-}
-
 function GlobalDialog({ config, setConfig }) {
   const [inputValue, setInputValue] = useState('');
 
@@ -285,6 +234,108 @@ function GlobalDialog({ config, setConfig }) {
   );
 }
 
+function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConfirm, dialogs }) {
+  const [carrito, setCarrito] = useState({});
+  const [totalCotizacion, setTotalCotizacion] = useState(0);
+
+  const updateQty = (key, delta) => { 
+    setCarrito(prev => { 
+      const n = Math.max(0, (prev[key]||0)+delta); 
+      if(n===0){const c={...prev}; delete c[key]; return c;} 
+      return {...prev, [key]:n}; 
+    }); 
+  };
+
+  useEffect(() => {
+    let total = 0;
+    Object.entries(carrito).forEach(([key, qty]) => {
+      const [nombre, pres] = key.split('|');
+      let pPrecio = 0;
+      catalogo.forEach(c => c.productos.forEach(p => {
+        if(p.nombre === nombre) {
+          const presIndex = p.presentaciones.indexOf(pres);
+          if (presIndex >= 0 && p.precios) pPrecio = p.precios[presIndex] || 0;
+        }
+      }));
+      total += (pPrecio * qty);
+    });
+    setTotalCotizacion(total);
+  }, [carrito, catalogo]);
+
+  if (!isOpen) return null; 
+
+  const handleConfirm = () => {
+    const lineas = [];
+    Object.entries(carrito).forEach(([key, qty]) => {
+      const [prod, pres] = key.split('|');
+      
+      let pPrecio = 0;
+      catalogo.forEach(c => c.productos.forEach(p => {
+        if(p.nombre === prod) {
+          const presIndex = p.presentaciones.indexOf(pres);
+          if (presIndex >= 0 && p.precios) pPrecio = p.precios[presIndex] || 0;
+        }
+      }));
+
+      lineas.push(`- ${qty}x ${prod} (${pres}) ${pPrecio > 0 ? `[$${pPrecio} c/u]` : ''}`);
+    });
+    if (lineas.length === 0) {
+      if(dialogs) dialogs.alert("Debe seleccionar al menos un producto del Catálogo Visual para confirmar la selección.", "Selección Vacía");
+      return;
+    }
+    
+    onConfirm(lineas.join('\n'), carrito); 
+    setCarrito({});
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-in fade-in">
+      <div className="bg-white dark:bg-slate-800 rounded-[3rem] w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200">
+        <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between bg-white dark:bg-slate-800 items-center">
+          <h2 className="text-2xl font-black flex items-center gap-3 text-slate-800 dark:text-slate-100"><Search className="text-sky-600"/> Catálogo Visual Bluher</h2>
+          <button onClick={onClose} className="p-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full text-slate-500 dark:text-slate-400 transition-colors"><X size={24}/></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-8 bg-[#f8fafc] dark:bg-slate-900">
+          {catalogo.filter(c => c.categoria !== 'Complementos Automáticos').map(c => <div key={c.categoria} className="mb-10"><h3 className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest text-xs border-b border-slate-200 dark:border-slate-700 pb-2 mb-6">{c.categoria}</h3><div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            {c.productos.map(p => <div key={p.nombre} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col group">
+              {p.imagen ? <img src={p.imagen} alt="img" className="w-full h-28 object-contain mb-4 rounded-lg shrink-0 group-hover:scale-105 transition-transform" /> : <div className="w-full h-24 bg-slate-50 dark:bg-slate-900/50 rounded-xl flex items-center justify-center mb-4 shrink-0"><Image className="text-slate-300 dark:text-slate-600" size={32}/></div>}
+              <div className="font-black text-slate-800 dark:text-slate-100 text-sm mb-4 leading-tight">{p.nombre}</div>
+              <div className="mt-auto space-y-2">
+                {p.presentaciones.map((pres, i) => { 
+                  const key = `${p.nombre}|${pres}`; 
+                  const qty = carrito[key]||0; 
+                  const precio = p.precios ? p.precios[i] : 0;
+                  const disp = stock ? (typeof stock[key] === 'object' ? stock[key].envios : (stock[key]||0)) : 0;
+                  return (
+                    <div key={pres} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-2 rounded-xl border border-slate-100 dark:border-slate-700/50">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-slate-600 dark:text-slate-400 text-[11px] px-1 uppercase tracking-wider">{pres}</span>
+                        {precio > 0 && <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-black px-1">${precio}</span>}
+                        {stock && <span className={`text-[9px] font-black px-1 ${disp === 0 ? 'text-red-500' : 'text-sky-500'}`}>Disp: {disp}</span>}
+                      </div>
+                      <div className="flex gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-sm">
+                        <button onClick={()=>updateQty(key,-1)} className="px-2.5 py-1 text-slate-400 dark:text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-black transition-colors">-</button>
+                        <span className="w-6 text-center font-black text-sm py-1 text-sky-700 dark:text-sky-400">{qty}</span>
+                        <button onClick={()=>updateQty(key,1)} className="px-2.5 py-1 text-sky-600 dark:text-sky-500 hover:text-sky-800 dark:hover:text-sky-300 font-black transition-colors">+</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>)}
+          </div></div>)}
+        </div>
+        <div className="p-6 border-t border-slate-100 dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800">
+          <div>
+             <div className="font-bold text-slate-500 dark:text-slate-400 text-sm">Total de Items: <span className="text-xl font-black text-slate-800 dark:text-slate-100 ml-2">{Object.values(carrito).reduce((a,b)=>a+b,0)}</span></div>
+             <div className="font-bold text-slate-500 dark:text-slate-400 text-sm mt-1">Cotización Estimada: <span className="text-xl font-black text-emerald-600 dark:text-emerald-400 ml-2">${totalCotizacion.toFixed(2)}</span></div>
+          </div>
+          <button onClick={handleConfirm} className="bg-sky-600 hover:bg-sky-700 text-white px-10 py-4 rounded-xl font-bold shadow-lg transition-all hover:-translate-y-0.5 text-lg">Confirmar Selección</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ==========================================
 // COMPONENTE PRINCIPAL APP
@@ -617,9 +668,8 @@ export default function App() {
 }
 
 // ==========================================
-// PANELES OPERATIVOS
+// PANELES OPERATIVOS 
 // ==========================================
-
 function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
@@ -636,6 +686,18 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
 
   const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
   const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
+
+  useEffect(() => {
+    if (!formData.carritoObj) return;
+    let sub = 0;
+    Object.entries(formData.carritoObj).forEach(([key, qty]) => {
+      const [n, p] = key.split('|');
+      catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const i=prod.presentaciones.indexOf(p); if (i >= 0 && prod.precios) sub += (prod.precios[i]*qty); }}));
+    });
+    const d = parseFloat(formData.descuentoPorcentaje) || 0;
+    const final = sub * (1 - d/100);
+    setFormData(prev => ({ ...prev, montoPago: final.toFixed(2), tasa: prev.tasa || config.tasaDia }));
+  }, [formData.carritoObj, formData.descuentoPorcentaje, config.tasaDia, catalogo]);
 
   const copiarLinkTienda = () => {
     const linkTienda = `${window.location.origin}${window.location.pathname}#tienda`;
@@ -777,7 +839,7 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
       } else {
          pagoExtUsd = extra;
       }
-      montoNum += extra; // Sumamos al monto original registrado (para historial visual)
+      montoNum += extra; // Sumamos al monto original registrado
     }
 
     let calculo = { usd: 0, ves: 0 };
@@ -803,7 +865,6 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
         finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Agregado Automáticamente]`;
       }
     }
-    // ----------------------------------------
 
     // --- LÓGICA DE HORARIO DE CORTE (12:20 PM) ---
     const targetDate = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -814,7 +875,6 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
        targetDate.setDate(targetDate.getDate() + 1);
     }
     const fechaDespachoStr = targetDate.toLocaleDateString('es-VE');
-    // ---------------------------------------------
 
     try {
       if (editId) {
@@ -877,8 +937,8 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
                     <div className="mt-4 bg-white dark:bg-slate-800 p-4 rounded-xl border border-red-200 dark:border-red-800">
                       <div className="text-sm font-bold text-red-600 dark:text-red-400 mb-3">⚠️ Dinero Faltante Detectado: ${pedidoDevuelto.faltanteUsd.toFixed(2)} USD</div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <Input label="Monto adicional pagado" type="number" step="0.01" value={formData.pagoAdicional} onChange={e=>setFormData({...formData, pagoAdicional: e.target.value})} placeholder="Ej: 5.50" />
-                        <Input label="Referencia del pago adicional" type="text" value={formData.refAdicional} onChange={e=>setFormData({...formData, refAdicional: e.target.value})} placeholder="Ref: 4321..." />
+                        <Input label="Monto adicional pagado" type="number" step="0.01" value={formData.pagoAdicional || ''} onChange={e=>setFormData({...formData, pagoAdicional: e.target.value})} placeholder="Ej: 5.50" />
+                        <Input label="Referencia del pago adicional" type="text" value={formData.refAdicional || ''} onChange={e=>setFormData({...formData, refAdicional: e.target.value})} placeholder="Ref: 4321..." />
                       </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400 mt-2 italic">* Este monto se sumará automáticamente al total original registrado.</div>
                     </div>
@@ -1045,7 +1105,7 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
                      <div className="font-bold text-lg">{p.clienteNombre}</div>
                      <div className="text-xs opacity-60">Desde {new Date(p.fechaCreacion).toLocaleDateString()}</div>
                    </div>
-                   <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-sky-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-sky-700 transition-colors">Retomar Pedido</button>
+                   <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-sky-600 text-white px-6 py-2 rounded-xl font-black text-xs shadow hover:bg-sky-700 transition-colors">Retomar Pedido</button>
                  </div>
                ))}
              </div>
@@ -1073,7 +1133,7 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
                    <div className="flex flex-col gap-2 shrink-0">
                      <button onClick={() => {setFormData({...p, montoPago: p.montoUsd.toString(), tasa: p.tasaAplicada.toString()}); setEditId(p.id); setVista('nuevo');}} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-emerald-700 flex items-center gap-2 transition-colors shadow-md"><CheckCircle size={14}/> Validar Venta</button>
                      <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="bg-amber-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-amber-600 flex items-center gap-2 transition-colors shadow-md"><Clock size={14}/> Mover a Espera</button>
-                     <button onClick={() => cambiarEstadoPedido(p.id, 'Rechazado')} className="bg-red-50 text-red-600 px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-red-100 flex items-center gap-2 transition-colors"><XCircle size={14}/> Descartar</button>
+                     <button onClick={() => cambiarEstadoPedido(p.id, 'Rechazado')} className="bg-red-50 text-red-600 px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-red-100 flex items-center gap-2 transition-colors"><XCircle size={14}/> Descartar Web</button>
                    </div>
                  </div>
                ))}
@@ -1116,8 +1176,18 @@ function PanelAdmin({ perfil, config, pedidos, db, appId, dialogs, loggear }) {
     dialogs.prompt("Ingresa la nueva tasa del día en Bolívares (Bs/$):", async (nuevaTasa) => {
       const tasaNum = parseFloat(nuevaTasa);
       if (isNaN(tasaNum) || tasaNum <= 0) return dialogs.alert("Ingresa un número válido.");
+      
       try {
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { tasaDia: tasaNum });
+        const hoy = new Date().toLocaleDateString('es-VE');
+        const hist = config.historialTasas || [];
+        const nuevoHistorial = [{ fecha: hoy, tasa: tasaNum }, ...hist].slice(0, 10);
+        
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { 
+          tasaDia: tasaNum, 
+          ultimaActualizacion: hoy,
+          historialTasas: nuevoHistorial
+        }, { merge: true });
+        
         loggear('ACTUALIZACION_TASA', `Se cambió la tasa del día a: ${tasaNum} Bs/$`);
         dialogs.alert("Tasa actualizada correctamente para todo el sistema.");
       } catch(e) { dialogs.alert("Error actualizando tasa."); }
@@ -1166,15 +1236,24 @@ function PanelAdmin({ perfil, config, pedidos, db, appId, dialogs, loggear }) {
   };
 
   const listado = vistaAdmin === 'pendientes' ? pendientes : historial;
+  const fechaHoy = new Date().toLocaleDateString('es-VE');
+  const tasaActualizadaHoy = config?.ultimaActualizacion === fechaHoy;
 
   return (
     <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
-      <div className="bg-[#003366] text-white p-10 rounded-[2.5rem] flex flex-col md:flex-row justify-between items-center border-4 border-sky-400/20 shadow-2xl mb-8">
+      <div className="bg-[#003366] text-white p-8 rounded-[2rem] flex flex-col md:flex-row justify-between items-center border-4 border-sky-400/20 shadow-xl mb-8">
           <div className="text-center md:text-left mb-6 md:mb-0">
             <div className="text-xs font-black uppercase tracking-widest opacity-60 mb-1">Tasa Oficial Bluher</div>
-            <h2 className="text-5xl font-black">{config?.tasaDia || 1} Bs/$</h2>
+            <h2 className="text-4xl font-black">{config?.tasaDia || 1} Bs/$</h2>
+            {!tasaActualizadaHoy && (
+              <div className="mt-2 text-xs font-bold text-yellow-300 bg-yellow-900/30 px-3 py-1.5 rounded-lg border border-yellow-400 inline-block">
+                ⚠️ Cuidado: La tasa no ha sido actualizada el día de hoy.
+              </div>
+            )}
           </div>
-          {esAdmin && <button onClick={actualizarTasa} className="bg-sky-500 px-10 py-4 rounded-2xl font-black shadow-lg hover:bg-sky-400 transition-colors uppercase tracking-widest">Ajustar Tasa</button>}
+          <div className="flex flex-col gap-3">
+             {esAdmin && <button onClick={actualizarTasa} className="bg-sky-500 px-8 py-3 rounded-xl font-black shadow-lg hover:bg-sky-400 transition-colors uppercase tracking-widest text-sm">Ajustar Tasa de Hoy</button>}
+          </div>
        </div>
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
@@ -1340,7 +1419,7 @@ function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, log
       {vistaDespacho === 'inventario' ? (
         <div className="animate-in fade-in">
           <div className="mb-6 bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-            <p className="text-sm font-medium text-slate-600 dark:text-slate-400 flex items-center gap-2"><CheckSquare2 className="text-sky-500"/> Esta vista es exclusiva para validar las cantidades físicas en el almacén de despacho. Las marcas no se guardan.</p>
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-400 flex items-center gap-2"><CheckSquare className="text-sky-500"/> Esta vista es exclusiva para validar las cantidades físicas en el almacén de despacho. Las marcas no se guardan.</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
              {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
@@ -1396,7 +1475,7 @@ function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, log
                       <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
                         <div className="text-sm mb-4"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100 text-lg">{p.guia}</span></div>
                         <div className="flex flex-col gap-3 mb-5">
-                          {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors"><ImageIcon size={16}/> Ver Recibo Digital</a>}
+                          {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors"><Image size={16}/> Ver Recibo Digital</a>}
                           {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors"><Camera size={16}/> Ver Foto del Paquete</a>}
                         </div>
                         <div className="text-xs text-emerald-600 dark:text-emerald-400 font-black mb-3 uppercase tracking-widest flex items-center gap-1"><CheckCircle size={14}/> Despachado OK</div>
@@ -1602,7 +1681,7 @@ function SubPanelMovimientos({ movimientos, stock, db, appId, loggear, perfil, c
                   {Object.entries(m.items).map(([k,q]) => <div key={k} className="flex gap-2 mb-1"><span className="font-bold text-slate-800 dark:text-slate-100">{q}x</span> <span>{k.replace('|', ' ')}</span></div>)}
                 </td>
                 <td className="p-4">
-                  {m.foto ? <a href={m.foto} target="_blank" rel="noreferrer" className="text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center w-max gap-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/50 transition-colors"><ImageIcon size={14}/> Ver Evidencia</a> : <span className="text-slate-400 text-xs italic">Sin respaldo</span>}
+                  {m.foto ? <a href={m.foto} target="_blank" rel="noreferrer" className="text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center w-max gap-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/50 transition-colors"><Image size={14}/> Ver Evidencia</a> : <span className="text-slate-400 text-xs italic">Sin respaldo</span>}
                 </td>
                 <td className="p-4 text-right">
                   {m.status === 'COMPLETADO' ? (
@@ -2104,7 +2183,7 @@ function PanelLogs({ logs }) {
           {logs.map(l => (
             <div key={l.id} className="p-3 border-b dark:border-slate-800 text-[10px] flex gap-6 hover:bg-white dark:hover:bg-slate-800 transition-colors rounded-lg">
                <span className="font-black text-sky-600 dark:text-sky-400 shrink-0">{new Date(l.fecha).toLocaleString()}</span>
-               <span className="font-medium text-slate-600 dark:text-slate-300"><b className="dark:text-white uppercase">{l.usuarioEmail}</b>: {l.detalle}</span>
+               <span className="font-medium text-slate-600 dark:text-slate-300"><b className="dark:text-white uppercase">{l.usuarioNombre}</b>: {l.detalle}</span>
             </div>
           ))}
        </div>
