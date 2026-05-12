@@ -27,7 +27,7 @@ import {
   Sparkles, Package, Plus, Minus, X, Image as ImageIcon, Camera, ClipboardList, 
   AlertTriangle, UploadCloud, Loader2, DollarSign, Archive, Edit3, Save, LogOut, 
   ShieldCheck, Users, FileText, MessageSquare, Eye, FileSpreadsheet, Download, 
-  ChevronDown, ChevronUp, MessageCircle, ArrowRightLeft, PlusCircle, Trash2, Moon, Sun, Store
+  ChevronDown, ChevronUp, MessageCircle, ArrowRightLeft, PlusCircle, Trash2, Moon, Sun, Store, Link
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN DE MARCA BLUEHER ---
@@ -180,7 +180,7 @@ export default function App() {
   
   // States para diseño y portal público
   const [darkMode, setDarkMode] = useState(false);
-  const [showPublicPortal, setShowPublicPortal] = useState(false);
+  const [isPublicRoute, setIsPublicRoute] = useState(window.location.hash === '#tienda');
 
   // --- CONTROLADOR DE DIÁLOGOS ---
   const [dialogConfig, setDialogConfig] = useState(null);
@@ -189,6 +189,22 @@ export default function App() {
     confirm: (msg, onConfirm, title) => setDialogConfig({ type: 'confirm', message: msg, title: title || "Confirmación Requerida", onConfirm }),
     prompt: (msg, onConfirm, title) => setDialogConfig({ type: 'prompt', message: msg, title: title || "Ingresar Información", onConfirm })
   }), []);
+
+  // --- MANEJO DE RUTAS (PORTAL PÚBLICO) ---
+  useEffect(() => {
+    const handleHashChange = () => setIsPublicRoute(window.location.hash === '#tienda');
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  // --- MANEJO DE MODO OSCURO GLOBAL ---
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
 
   // --- 1. MANEJO DE AUTENTICACIÓN ---
   useEffect(() => {
@@ -204,9 +220,8 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser && !currentUser.isAnonymous) {
         setUser(currentUser);
-        setShowPublicPortal(false);
       } else if (currentUser && currentUser.isAnonymous && typeof __initial_auth_token !== 'undefined') {
-        // Ignorar
+        // Ignorar anónimo temporal
       } else {
         setUser(null); setUserProfile(null); setAuthLoading(false);
       }
@@ -252,7 +267,7 @@ export default function App() {
       setAuthLoading(false); 
     });
     return () => unsub();
-  }, [user]);
+  }, [user, activeTab]);
 
   useEffect(() => {
     const handleUnload = () => {
@@ -328,50 +343,31 @@ export default function App() {
     }
   };
 
-  // Wrapper para Modo Oscuro Global
-  const DarkModeWrapper = ({ children }) => (
-    <div className={darkMode ? 'dark' : ''}>
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors duration-300 font-sans selection:bg-sky-200 dark:selection:bg-sky-900">
-        {children}
-        <GlobalDialog config={dialogConfig} setConfig={setDialogConfig} />
+  // --- RENDERIZADO DEL CONTENIDO PRINCIPAL ---
+  let content;
+
+  if (isPublicRoute) {
+    // VISTA PORTAL PÚBLICO
+    content = <PublicPortal catalogo={catalogo} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
+  } else if (authLoading || (user && !userProfile)) {
+    // VISTA CARGANDO
+    content = (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
+        <img src={BRAND_LOGO_LIGHT} alt="Logo Bluher" className="h-16 mb-8 mix-blend-multiply dark:hidden animate-pulse" />
+        <div className="hidden dark:flex items-center gap-2 mb-8 animate-pulse text-sky-500 font-black text-2xl"><Package/> BLUHER</div>
+        <Loader2 className="animate-spin text-sky-600 dark:text-sky-400 mb-4" size={48} />
+        <div className="font-bold text-xl tracking-tight">Verificando seguridad...</div>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Autenticando credenciales de acceso a Bluher.</p>
+        {user && <button onClick={cerrarSesion} className="text-sky-600 dark:text-sky-400 text-sm hover:underline font-semibold mt-4">Cancelar y regresar</button>}
       </div>
-    </div>
-  );
-
-  // --- VISTAS PÚBLICAS Y DE AUTENTICACIÓN ---
-  if (authLoading || (user && !userProfile)) {
-    return (
-      <DarkModeWrapper>
-        <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center">
-          <img src={BRAND_LOGO_LIGHT} alt="Logo Bluher" className="h-16 mb-8 mix-blend-multiply dark:hidden animate-pulse" />
-          {/* Fallback en caso de que no haya logo para modo oscuro */}
-          <div className="hidden dark:flex items-center gap-2 mb-8 animate-pulse text-sky-500 font-black text-2xl"><Package/> BLUHER</div>
-          
-          <Loader2 className="animate-spin text-sky-600 dark:text-sky-400 mb-4" size={48} />
-          <div className="font-bold text-xl tracking-tight">Verificando seguridad...</div>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Autenticando credenciales de acceso a Bluher.</p>
-          {user && <button onClick={cerrarSesion} className="text-sky-600 dark:text-sky-400 text-sm hover:underline font-semibold mt-4">Cancelar y regresar</button>}
-        </div>
-      </DarkModeWrapper>
     );
-  }
-
-  // PORTAL PÚBLICO DE CLIENTES
-  if (showPublicPortal && !user) {
-    return (
-      <DarkModeWrapper>
-         <PublicPortal catalogo={catalogo} db={db} appId={appId} dialogs={dialogs} onBack={() => setShowPublicPortal(false)} />
-      </DarkModeWrapper>
-    );
-  }
-
-  // PANTALLA DE LOGIN
-  if (!user) return (
-    <DarkModeWrapper>
-      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800">
-        <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-white dark:bg-slate-800 rounded-full shadow text-slate-500 dark:text-slate-400">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
+  } else if (!user) {
+    // VISTA LOGIN
+    content = (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
+        <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-white dark:bg-slate-800 rounded-full shadow text-slate-500 dark:text-slate-400 hover:text-sky-600 transition-colors">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
         
-        <div className="bg-white dark:bg-slate-800 p-10 rounded-[2rem] shadow-2xl max-w-sm w-full text-center border-t-[6px] border-sky-600 relative overflow-hidden">
+        <div className="bg-white dark:bg-slate-800 p-10 rounded-[2rem] shadow-2xl max-w-sm w-full text-center border-t-[6px] border-sky-600 relative overflow-hidden transition-colors">
           <div className="absolute top-0 left-0 w-full h-32 bg-sky-50/50 dark:bg-slate-700/30 -z-10 rounded-t-[2rem]"></div>
           
           <img src={BRAND_LOGO_LIGHT} alt="Logo Bluher" className="h-20 mx-auto object-contain mb-8 z-10 drop-shadow-sm mix-blend-multiply dark:hidden" />
@@ -385,42 +381,39 @@ export default function App() {
             Acceso Empleados
           </button>
 
-          <button onClick={() => setShowPublicPortal(true)} className="w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300">
+          <button onClick={() => window.location.hash = '#tienda'} className="w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300">
             <Store size={18}/> Comprar Online (Clientes)
           </button>
         </div>
       </div>
-    </DarkModeWrapper>
-  );
-
-  if (userProfile && !userProfile.isApproved) return (
-    <DarkModeWrapper>
-      <div className="min-h-screen flex items-center justify-center p-4 text-center">
-        <div className="bg-white dark:bg-slate-800 p-10 rounded-3xl shadow-xl max-w-md w-full border-t-[6px] border-amber-500">
+    );
+  } else if (userProfile && !userProfile.isApproved) {
+    // VISTA CUENTA EN ESPERA DE APROBACIÓN
+    content = (
+      <div className="min-h-screen flex items-center justify-center p-4 text-center bg-slate-50 dark:bg-slate-900 transition-colors text-slate-800 dark:text-slate-100">
+        <div className="bg-white dark:bg-slate-800 p-10 rounded-3xl shadow-xl max-w-md w-full border-t-[6px] border-amber-500 transition-colors">
           <ShieldCheck size={56} className="mx-auto text-amber-500 mb-4" />
           <h2 className="text-2xl font-bold">Cuenta en Revisión</h2>
           <p className="text-slate-600 dark:text-slate-400 mt-2 mb-8 leading-relaxed">Tu correo <b>{user.email}</b> espera aprobación del Administrador de Bluher.</p>
           <button onClick={cerrarSesion} className="text-sky-700 dark:text-sky-400 font-semibold hover:underline transition-colors">Cerrar sesión</button>
         </div>
       </div>
-    </DarkModeWrapper>
-  );
+    );
+  } else {
+    // VISTA PRINCIPAL DEL SISTEMA (DASHBOARD)
+    const r = userProfile?.role;
+    const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(r);
+    const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(r);
+    const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO, ROLES.AUDITOR_GENERAL].includes(r);
+    const showReportes = [ROLES.ADMIN, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r);
+    const showInventario = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r); 
+    const showUsuarios = [ROLES.ADMIN].includes(r);
+    const showLogs = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(r);
 
-  // --- PERMISOS ---
-  const r = userProfile?.role;
-  const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(r);
-  const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(r);
-  const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO, ROLES.AUDITOR_GENERAL].includes(r);
-  const showReportes = [ROLES.ADMIN, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r);
-  const showInventario = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r); 
-  const showUsuarios = [ROLES.ADMIN].includes(r);
-  const showLogs = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(r);
-
-  return (
-    <DarkModeWrapper>
-      <div className="flex flex-col md:flex-row min-h-screen">
+    content = (
+      <div className="flex flex-col md:flex-row min-h-screen bg-[#f8fafc] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors selection:bg-sky-200 dark:selection:bg-sky-900">
         {/* SIDEBAR */}
-        <aside className="w-full md:w-[280px] bg-slate-900 dark:bg-slate-950 text-slate-300 flex-shrink-0 print:hidden shadow-2xl z-10 flex flex-col h-auto md:h-screen sticky top-0 overflow-y-auto border-r border-slate-800">
+        <aside className="w-full md:w-[280px] bg-[#0f172a] text-slate-300 flex-shrink-0 print:hidden shadow-2xl z-10 flex flex-col h-auto md:h-screen sticky top-0 overflow-y-auto border-r border-slate-800">
           <div className="p-8 pb-4 flex flex-col items-center border-b border-slate-800/50 relative">
             <button onClick={() => setDarkMode(!darkMode)} className="absolute top-4 right-4 p-1.5 bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors">
               {darkMode ? <Sun size={14}/> : <Moon size={14}/>}
@@ -474,7 +467,15 @@ export default function App() {
           </div>
         </main>
       </div>
-    </DarkModeWrapper>
+    );
+  }
+
+  // Devolvemos el contenedor Root para toda la aplicación garantizando que el modal Global no se desmonte
+  return (
+    <>
+      {content}
+      <GlobalDialog config={dialogConfig} setConfig={setDialogConfig} />
+    </>
   );
 }
 
@@ -499,6 +500,32 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
 
   const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
   const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
+
+  const copiarLinkTienda = () => {
+    const linkTienda = `${window.location.origin}${window.location.pathname}#tienda`;
+    const copyFallback = (text) => {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        dialogs.alert(`Enlace copiado al portapapeles:\n\n${text}\n\nPuedes enviarlo a tus clientes para que registren sus pedidos directamente.`, "Enlace de Tienda Copiado");
+      } catch (err) {
+        dialogs.alert("No se pudo copiar automáticamente. Copia este enlace manualmente:\n\n" + text, "Enlace de la Tienda");
+      }
+      document.body.removeChild(textArea);
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(linkTienda)
+        .then(() => dialogs.alert(`Enlace copiado al portapapeles:\n\n${linkTienda}\n\nPuedes enviarlo a tus clientes para que registren sus pedidos directamente.`, "Enlace de Tienda Copiado"))
+        .catch(() => copyFallback(linkTienda));
+    } else {
+      copyFallback(linkTienda);
+    }
+  };
 
   const analizarConGemini = async () => {
     if (!textoCrudo.trim()) return dialogs.alert("Por favor, pega el mensaje de WhatsApp del cliente antes de procesar.", "Mensaje Vacío");
@@ -669,7 +696,8 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
         {puedeCrear && <button onClick={() => { setVista('nuevo'); if(editId) cancelarEdicion(); }} className={`pb-3 font-bold flex items-center gap-2 transition-colors ${vista === 'nuevo' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ShoppingCart size={18} /> {editId ? 'Corrigiendo Pedido' : 'Nueva Venta'}</button>}
         <button onClick={() => setVista('historial')} className={`pb-3 font-bold flex items-center gap-2 transition-colors ${vista === 'historial' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ClipboardList size={18} /> Historial y Estatus</button>
         <button onClick={() => setVista('espera')} className={`pb-3 font-bold flex items-center gap-2 transition-colors ${vista === 'espera' ? 'text-amber-500 border-b-2 border-amber-500' : 'text-slate-400 hover:text-amber-500'}`}><Clock size={18} /> Lista de Espera {enEspera.length > 0 && <span className="bg-amber-100 text-amber-700 px-2 rounded-full text-[10px]">{enEspera.length}</span>}</button>
-        <button onClick={() => setVista('web')} className={`pb-3 font-bold flex items-center gap-2 transition-colors ml-auto ${vista === 'web' ? 'text-emerald-500 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-emerald-500'}`}><Store size={18} /> Pedidos Web {pedidosWeb.length > 0 && <span className="bg-emerald-100 text-emerald-700 px-2 rounded-full text-[10px]">{pedidosWeb.length}</span>}</button>
+        <button onClick={() => setVista('web')} className={`pb-3 font-bold flex items-center gap-2 transition-colors ${vista === 'web' ? 'text-emerald-500 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-emerald-500'}`}><Store size={18} /> Pedidos Web {pedidosWeb.length > 0 && <span className="bg-emerald-100 text-emerald-700 px-2 rounded-full text-[10px]">{pedidosWeb.length}</span>}</button>
+        <button onClick={copiarLinkTienda} className="pb-3 font-bold flex items-center gap-2 transition-colors text-slate-400 hover:text-sky-600 ml-auto"><Link size={18} /> Copiar Enlace Público</button>
       </div>
 
       {vista === 'nuevo' && puedeCrear && (
@@ -870,6 +898,7 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
         catalogo={catalogo} 
         isOpen={isCatalogOpen} 
         onClose={()=>setIsCatalogOpen(false)} 
+        dialogs={dialogs}
         onConfirm={(txt, obj)=>{
           setFormData(prev => ({
             ...prev, 
@@ -878,7 +907,6 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
           })); 
           setIsCatalogOpen(false);
         }}
-        dialogs={dialogs}
       />
     </div>
   );
@@ -1837,7 +1865,7 @@ function PanelLogs({ logs }) {
 // ==========================================
 // PORTAL PÚBLICO DE CLIENTES (NUEVO)
 // ==========================================
-function PublicPortal({ catalogo, db, appId, dialogs, onBack }) {
+function PublicPortal({ catalogo, db, appId, dialogs, onBack, darkMode, setDarkMode }) {
   const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null };
   const [formData, setFormData] = useState(defaultForm);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
@@ -1892,11 +1920,16 @@ function PublicPortal({ catalogo, db, appId, dialogs, onBack }) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-10 transition-colors">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 pb-10 transition-colors">
       <header className="bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 p-6 flex items-center justify-between shadow-sm sticky top-0 z-10">
         <img src={BRAND_LOGO_LIGHT} alt="Logo Bluher" className="h-10 mix-blend-multiply dark:hidden" />
         <div className="hidden dark:flex items-center gap-2 text-sky-400 font-black text-xl tracking-widest"><Package/> BLUHER</div>
-        <button onClick={onBack} className="text-sm font-bold text-slate-500 hover:text-sky-600 transition-colors flex items-center gap-1"><LogOut size={16}/> Salir del Portal</button>
+        <div className="flex gap-4 items-center">
+          <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full shadow text-slate-500 dark:text-slate-400 transition-colors">
+            {darkMode ? <Sun size={18}/> : <Moon size={18}/>}
+          </button>
+          <button onClick={onBack} className="text-sm font-bold text-slate-500 hover:text-sky-600 transition-colors flex items-center gap-1"><LogOut size={16}/> Salir del Portal</button>
+        </div>
       </header>
 
       <div className="max-w-4xl mx-auto mt-8 p-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -2014,7 +2047,7 @@ function VistaImpresion({ pedidos }) {
 
   return (
     <div className="hidden print:block w-full bg-white text-black p-4">
-      <h1 className="text-3xl font-black text-center mb-8 tracking-tight">HOJA DE DESPACHO BLUEHER <br/><span className="text-xl font-medium">FECHA DE CORTE: {new Date().toLocaleDateString('es-VE')}</span></h1>
+      <h1 className="text-3xl font-black text-center mb-8 tracking-tight">HOJA DE DESPACHO BLUHER <br/><span className="text-xl font-medium">FECHA DE CORTE: {new Date().toLocaleDateString('es-VE')}</span></h1>
       
       <div className="grid grid-cols-2 gap-6">
         {pedidos.map((p) => (
@@ -2045,8 +2078,6 @@ function ModalCatalogo({ catalogo, isOpen, onClose, onConfirm, dialogs }) {
   const [carrito, setCarrito] = useState({});
   const [totalCotizacion, setTotalCotizacion] = useState(0);
 
-  if (!isOpen) return null;
-
   const updateQty = (key, delta) => { 
     setCarrito(prev => { 
       const n = Math.max(0, (prev[key]||0)+delta); 
@@ -2070,6 +2101,8 @@ function ModalCatalogo({ catalogo, isOpen, onClose, onConfirm, dialogs }) {
     });
     setTotalCotizacion(total);
   }, [carrito, catalogo]);
+
+  if (!isOpen) return null; // Safe early return after all Hooks
 
   const handleConfirm = () => {
     const lineas = [];
