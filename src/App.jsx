@@ -27,14 +27,11 @@ import {
   Sparkles, Package, Plus, Minus, X, Image as ImageIcon, Camera, ClipboardList, 
   AlertTriangle, UploadCloud, Loader2, DollarSign, Archive, Edit3, Save, LogOut, 
   ShieldCheck, Users, FileText, MessageSquare, Eye, FileSpreadsheet, Download, 
-  ChevronDown, ChevronUp, MessageCircle, ArrowRightLeft, PlusCircle, Trash2, Moon, Sun, Store, Link
+  ChevronDown, ChevronUp, MessageCircle, ArrowRightLeft, PlusCircle, Trash2, Moon, Sun, Store, Link, Gift, CheckSquare2
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN DE MARCA BLUEHER ---
-// Reemplaza 'logobluher.jpg' por el enlace real a tu imagen si la tienes en la nube, 
-// o asegúrate de que el archivo esté en tu carpeta public/
-const BRAND_LOGO_LIGHT = "logobluher.jpg"; // Truco CSS aplicado para mezclar el fondo blanco
-const BRAND_LOGO_DARK = "https://via.placeholder.com/300x100/0f172a/7eb0ce?text=BLUHER+PNG+AQUI";  
+const BRAND_LOGO = "logobluher.jpg"; // Truco CSS aplicado abajo para eliminar el fondo blanco
 
 // --- CONFIGURACIÓN DE FIREBASE ---
 const getEnvVar = (key) => {
@@ -78,7 +75,6 @@ const ROLES = {
   AUDITOR_GENERAL: 'Auditor General'
 };
 
-// Catálogo Base con Precios Añadidos para Cotización
 const DEFAULT_CATALOGO = [
   { categoria: "Cirugías Capilares", productos: [ 
       { nombre: "Cirugía Clásica", presentaciones: ["Litro", "1/2 Litro", "Galón"], precios: [25, 15, 80], imagen: "" }, 
@@ -145,7 +141,7 @@ function GlobalDialog({ config, setConfig }) {
            <input 
              autoFocus 
              type="text" 
-             className="w-full p-4 border-2 border-slate-200 dark:border-slate-600 rounded-xl mb-8 outline-none focus:ring-2 focus:ring-sky-500 font-medium text-slate-800 dark:text-slate-100 transition-all bg-slate-50 dark:bg-slate-700" 
+             className="w-full p-4 border-2 border-slate-200 dark:border-slate-600 rounded-xl mb-8 outline-none focus:ring-2 focus:ring-sky-500 font-medium text-slate-800 dark:text-slate-100 transition-all bg-[#f0f4f8] dark:bg-slate-700" 
              value={inputValue} 
              onChange={e=>setInputValue(e.target.value)} 
              onKeyDown={(e) => e.key === 'Enter' && handleConfirm()}
@@ -296,13 +292,17 @@ export default function App() {
       setCatalogo(docSnap.exists() && docSnap.data().categorias ? docSnap.data().categorias : DEFAULT_CATALOGO);
     }));
 
+    // Cargar Stock publicamente necesario para validaciones en ventas y portal
+    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), (docSnap) => {
+      setStockInventario(docSnap.exists() ? docSnap.data() : {});
+    }));
+
     if (!user || !userProfile || !userProfile.isApproved) return;
     
     unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), (snapshot) => {
       setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.fechaCreacion - a.fechaCreacion));
     }));
 
-    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), (docSnap) => setStockInventario(docSnap.exists() ? docSnap.data() : {})));
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => setNotasInventario(docSnap.exists() ? docSnap.data() : {})));
 
     unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), (snapshot) => {
@@ -336,7 +336,7 @@ export default function App() {
   const cambiarEstadoPedido = async (id, nuevoEstado) => {
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id), { status: nuevoEstado });
-      loggear('ESTADO_PEDIDO_REVERTIDO', `Se cambió el estado del pedido a ${nuevoEstado}.`);
+      loggear('ESTADO_PEDIDO_ACTUALIZADO', `Se cambió el estado del pedido a ${nuevoEstado}.`);
     } catch (error) {
       console.error(error);
       dialogs.alert("Error de red al intentar cambiar el estado del pedido.", "Fallo de conexión");
@@ -348,13 +348,12 @@ export default function App() {
 
   if (isPublicRoute) {
     // VISTA PORTAL PÚBLICO
-    content = <PublicPortal catalogo={catalogo} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
+    content = <PublicPortal catalogo={catalogo} stock={stockInventario} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
   } else if (authLoading || (user && !userProfile)) {
     // VISTA CARGANDO
     content = (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
-        <img src={BRAND_LOGO_LIGHT} alt="Logo Bluher" className="h-16 mb-8 mix-blend-multiply dark:hidden animate-pulse" />
-        <div className="hidden dark:flex items-center gap-2 mb-8 animate-pulse text-sky-500 font-black text-2xl"><Package/> BLUHER</div>
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
+        <img src={BRAND_LOGO} alt="Logo Bluher" className="h-20 mb-8 mix-blend-multiply dark:invert animate-pulse" />
         <Loader2 className="animate-spin text-sky-600 dark:text-sky-400 mb-4" size={48} />
         <div className="font-bold text-xl tracking-tight">Verificando seguridad...</div>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Autenticando credenciales de acceso a Bluher.</p>
@@ -364,24 +363,23 @@ export default function App() {
   } else if (!user) {
     // VISTA LOGIN
     content = (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
-        <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-white dark:bg-slate-800 rounded-full shadow text-slate-500 dark:text-slate-400 hover:text-sky-600 transition-colors">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-[#f0f4f8] to-[#d8e4f0] dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
+        <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-md text-sky-600 dark:text-sky-400 hover:text-sky-800 transition-colors">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
         
         <div className="bg-white dark:bg-slate-800 p-10 rounded-[2rem] shadow-2xl max-w-sm w-full text-center border-t-[6px] border-sky-600 relative overflow-hidden transition-colors">
           <div className="absolute top-0 left-0 w-full h-32 bg-sky-50/50 dark:bg-slate-700/30 -z-10 rounded-t-[2rem]"></div>
           
-          <img src={BRAND_LOGO_LIGHT} alt="Logo Bluher" className="h-20 mx-auto object-contain mb-8 z-10 drop-shadow-sm mix-blend-multiply dark:hidden" />
-          <div className="hidden dark:flex justify-center items-center gap-2 mb-8 z-10 text-sky-400 font-black text-3xl tracking-widest drop-shadow"><Package size={32}/> BLUHER</div>
+          <img src={BRAND_LOGO} alt="Logo Bluher" className="h-24 mx-auto object-contain mb-8 z-10 drop-shadow-sm mix-blend-multiply dark:invert" />
 
           <h1 className="text-3xl font-black tracking-tight mb-2">Ingreso</h1>
           <p className="text-slate-500 dark:text-slate-400 mb-8 text-sm">Sistema de Gestión Logística Bluher.</p>
           
-          <button onClick={signInGoogle} className="w-full bg-slate-900 dark:bg-sky-600 hover:bg-slate-800 dark:hover:bg-sky-500 text-white font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300 shadow-lg hover:-translate-y-0.5 mb-4">
+          <button onClick={signInGoogle} className="w-full bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300 shadow-lg hover:-translate-y-0.5 mb-4">
             <svg className="w-5 h-5 bg-white rounded-full p-0.5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
             Acceso Empleados
           </button>
 
-          <button onClick={() => window.location.hash = '#tienda'} className="w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300">
+          <button onClick={() => window.location.hash = '#tienda'} className="w-full bg-[#f0f4f8] dark:bg-slate-700 hover:bg-[#e2ebf3] dark:hover:bg-slate-600 text-sky-900 dark:text-slate-200 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300 border border-sky-100 dark:border-slate-600">
             <Store size={18}/> Comprar Online (Clientes)
           </button>
         </div>
@@ -390,7 +388,7 @@ export default function App() {
   } else if (userProfile && !userProfile.isApproved) {
     // VISTA CUENTA EN ESPERA DE APROBACIÓN
     content = (
-      <div className="min-h-screen flex items-center justify-center p-4 text-center bg-slate-50 dark:bg-slate-900 transition-colors text-slate-800 dark:text-slate-100">
+      <div className="min-h-screen flex items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 transition-colors text-slate-800 dark:text-slate-100">
         <div className="bg-white dark:bg-slate-800 p-10 rounded-3xl shadow-xl max-w-md w-full border-t-[6px] border-amber-500 transition-colors">
           <ShieldCheck size={56} className="mx-auto text-amber-500 mb-4" />
           <h2 className="text-2xl font-bold">Cuenta en Revisión</h2>
@@ -411,32 +409,34 @@ export default function App() {
     const showLogs = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(r);
 
     content = (
-      <div className="flex flex-col md:flex-row min-h-screen bg-[#f8fafc] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors selection:bg-sky-200 dark:selection:bg-sky-900">
+      <div className="flex flex-col md:flex-row min-h-screen bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors selection:bg-sky-200 dark:selection:bg-sky-900">
         {/* SIDEBAR */}
-        <aside className="w-full md:w-[280px] bg-[#0f172a] text-slate-300 flex-shrink-0 print:hidden shadow-2xl z-10 flex flex-col h-auto md:h-screen sticky top-0 overflow-y-auto border-r border-slate-800">
-          <div className="p-8 pb-4 flex flex-col items-center border-b border-slate-800/50 relative">
-            <button onClick={() => setDarkMode(!darkMode)} className="absolute top-4 right-4 p-1.5 bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors">
+        <aside className="w-full md:w-[280px] bg-[#003366] dark:bg-slate-950 text-slate-200 flex-shrink-0 print:hidden shadow-2xl z-10 flex flex-col h-auto md:h-screen sticky top-0 overflow-y-auto border-r border-sky-800 dark:border-slate-800">
+          <div className="p-8 pb-4 flex flex-col items-center border-b border-sky-800/50 dark:border-slate-800/50 relative">
+            <button onClick={() => setDarkMode(!darkMode)} className="absolute top-4 right-4 p-1.5 bg-sky-800/50 dark:bg-slate-800 rounded-full text-sky-200 dark:text-slate-400 hover:text-white transition-colors">
               {darkMode ? <Sun size={14}/> : <Moon size={14}/>}
             </button>
-            <div className="text-sky-400 font-black text-2xl tracking-widest flex items-center gap-2 mb-6"><Package/> BLUHER</div>
+            <div className="w-full flex justify-center mb-6">
+               <img src={BRAND_LOGO} alt="Logo Bluher" className="h-12 w-auto object-contain drop-shadow-md mix-blend-screen dark:mix-blend-normal invert dark:invert-0 brightness-200 dark:brightness-100" />
+            </div>
             
-            <div className="w-full bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 text-center">
-               <div className="text-xs font-medium text-slate-400 mb-1">Usuario Activo</div>
+            <div className="w-full bg-sky-900/40 dark:bg-slate-800/50 rounded-xl p-4 border border-sky-700/50 dark:border-slate-700/50 text-center">
+               <div className="text-xs font-medium text-sky-300 dark:text-slate-400 mb-1">Usuario Activo</div>
                <div className="text-sm font-bold text-white truncate px-2" title={user.email}>{user.displayName}</div>
-               <div className="mt-2 inline-flex items-center justify-center px-3 py-1 rounded-full bg-sky-900/50 text-sky-300 text-[10px] font-bold uppercase tracking-widest border border-sky-800/50">
+               <div className="mt-2 inline-flex items-center justify-center px-3 py-1 rounded-full bg-sky-800/80 dark:bg-sky-900/50 text-sky-100 dark:text-sky-300 text-[10px] font-bold uppercase tracking-widest border border-sky-700/50 dark:border-sky-800/50">
                  {userProfile?.role}
                </div>
             </div>
           </div>
           
           <nav className="mt-6 flex flex-row md:flex-col gap-1.5 px-4 overflow-x-auto flex-1 pb-4">
-            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 px-2 hidden md:block">Área Operativa</div>
-            {showVentas && <TabButton active={activeTab === 'ventas'} onClick={() => setActiveTab('ventas')} icon={<ShoppingCart size={18} />} label="Ventas y Web" badge={pedidos.filter(p=>p.status==='Rechazado' || p.esPublico).length} badgeColor="bg-sky-500" />}
+            <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2 hidden md:block">Área Operativa</div>
+            {showVentas && <TabButton active={activeTab === 'ventas'} onClick={() => setActiveTab('ventas')} icon={<ShoppingCart size={18} />} label="Ventas y Web" badge={pedidos.filter(p=>p.status==='Rechazado' || p.esPublico).length} badgeColor="bg-red-500 dark:bg-sky-500" />}
             {showAdmin && <TabButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')} icon={<CheckSquare size={18} />} label={`Admin y Pagos`} badge={pedidos.filter(p=>p.status==='Pendiente').length} />}
             {showDespacho && <TabButton active={activeTab === 'despacho'} onClick={() => setActiveTab('despacho')} icon={<Truck size={18} />} label={`Despacho`} badge={pedidos.filter(p=>p.status==='Validado').length} />}
             
-            {(showReportes || showInventario || showUsuarios || showLogs) && <div className="hidden md:block my-4 border-t border-slate-800 mx-2"></div>}
-            {(showReportes || showInventario || showUsuarios || showLogs) && <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 px-2 hidden md:block">Gestión y Reportes</div>}
+            {(showReportes || showInventario || showUsuarios || showLogs) && <div className="hidden md:block my-4 border-t border-sky-800/50 dark:border-slate-800 mx-2"></div>}
+            {(showReportes || showInventario || showUsuarios || showLogs) && <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2 hidden md:block">Gestión y Reportes</div>}
 
             {showReportes && <TabButton active={activeTab === 'reportes'} onClick={() => setActiveTab('reportes')} icon={<FileSpreadsheet size={18} />} label="Reportes" />}
             {showInventario && <TabButton active={activeTab === 'inventario'} onClick={() => setActiveTab('inventario')} icon={<Archive size={18} />} label="Inventario" badge={movimientos.filter(m=>m.status==='PENDIENTE').length} />}
@@ -444,8 +444,8 @@ export default function App() {
             {showLogs && <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={<FileText size={18} />} label="Auditoría" />}
           </nav>
 
-          <div className="p-6 border-t border-slate-800/50">
-            <button onClick={cerrarSesion} className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors font-medium text-sm">
+          <div className="p-6 border-t border-sky-800/50 dark:border-slate-800/50">
+            <button onClick={cerrarSesion} className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl text-sky-200 dark:text-slate-400 hover:text-white hover:bg-sky-800 dark:hover:bg-slate-800 transition-colors font-medium text-sm">
               <LogOut size={16} /> Cerrar Sesión
             </button>
           </div>
@@ -455,10 +455,10 @@ export default function App() {
         <main className="flex-1 p-4 md:p-10 overflow-y-auto print:p-0 print:m-0 print:bg-white print:block relative">
           <div className="max-w-6xl mx-auto print:max-w-none print:mx-0">
             <div className="print:hidden">
-              {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} />}
+              {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} />}
               {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
-              {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
-              {activeTab === 'reportes' && showReportes && <PanelReportes pedidos={pedidos} />}
+              {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
+              {activeTab === 'reportes' && showReportes && <PanelReportes pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
               {activeTab === 'inventario' && showInventario && <PanelInventario stock={stockInventario} notas={notasInventario} catalogo={catalogo} movimientos={movimientos} db={db} appId={appId} loggear={loggear} perfil={userProfile} dialogs={dialogs} />}
               {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
               {activeTab === 'logs' && showLogs && <PanelLogs logs={logs} />}
@@ -470,28 +470,28 @@ export default function App() {
     );
   }
 
-  // Devolvemos el contenedor Root para toda la aplicación garantizando que el modal Global no se desmonte
+  // Devolvemos el contenedor Root para toda la aplicación
   return (
-    <>
+    <div className={darkMode ? 'dark' : ''}>
       {content}
       <GlobalDialog config={dialogConfig} setConfig={setDialogConfig} />
-    </>
+    </div>
   );
 }
 
 // ==========================================
 // 1. PANEL DE VENTAS 
 // ==========================================
-function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
+function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
-  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: 'USD', montoPago: '', tasa: '', esMercadoLibre: false };
+  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: 'USD', montoPago: '', tasa: '', esMercadoLibre: false, esRegalo: false, descuentoUsd: '' };
   
   const [formData, setFormData] = useState(defaultForm);
   const [editId, setEditId] = useState(null); 
-  const [pedidoDevuelto, setPedidoDevuelto] = useState(null); // Guarda el obj completo si estamos editando
+  const [pedidoDevuelto, setPedidoDevuelto] = useState(null); 
   
-  const [pagoAdicional, setPagoAdicional] = useState({ monto: '', ref: '' }); // Para faltantes
+  const [pagoAdicional, setPagoAdicional] = useState({ monto: '', ref: '' }); 
 
   const [enviando, setEnviando] = useState(false);
   const [textoCrudo, setTextoCrudo] = useState('');
@@ -587,7 +587,7 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
     setFormData({
       clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, direccion: pedido.direccion,
       productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda, 
-      montoPago: pedido.monto?.toString(), tasa: pedido.tasaAplicada?.toString(), esMercadoLibre: pedido.esMercadoLibre || false
+      montoPago: pedido.monto?.toString(), tasa: pedido.tasaAplicada?.toString(), esMercadoLibre: pedido.esMercadoLibre || false, esRegalo: pedido.esRegalo || false, descuentoUsd: pedido.descuentoUsd?.toString() || ''
     });
     setEditId(pedido.id);
     setPedidoDevuelto(pedido);
@@ -605,11 +605,34 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) return dialogs.alert("Debes seleccionar productos del Catálogo Visual para proceder con la venta.", "Carrito Vacío");
-    if (!formData.tasa || parseFloat(formData.tasa) <= 0) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
+    if (!formData.esRegalo && (!formData.tasa || parseFloat(formData.tasa) <= 0)) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
     
+    // VALIDACIÓN DE STOCK
+    let sinStock = false;
+    let itemsFaltantes = [];
+    Object.entries(formData.carritoObj).forEach(([key, qty]) => {
+      let maxDisp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key]||0);
+      if (qty > maxDisp) {
+        sinStock = true;
+        itemsFaltantes.push(key.replace('|', ' '));
+      }
+    });
+
+    if (sinStock) {
+      dialogs.confirm(`Actualmente no hay stock suficiente en el almacén de envíos para:\n\n${itemsFaltantes.join('\n')}\n\n¿Deseas guardar este pedido en la "Lista de Espera" para procesarlo luego?`, () => {
+        procesarVenta('En Espera (Sin Stock)');
+      }, "Stock Insuficiente");
+      return;
+    }
+
+    procesarVenta('Pendiente');
+  };
+
+  const procesarVenta = async (finalStatus) => {
     setEnviando(true);
-    let montoNum = parseFloat(formData.montoPago) || 0;
-    const tasa = parseFloat(formData.tasa);
+    let montoNum = formData.esRegalo ? 0 : (parseFloat(formData.montoPago) || 0);
+    const tasa = parseFloat(formData.tasa) || 1;
+    let descuento = parseFloat(formData.descuentoUsd) || 0;
     let pagoExtUsd = 0;
 
     // Si había faltante y se agregó pago extra
@@ -623,7 +646,10 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
       montoNum += extra; // Sumamos al monto original registrado (para historial visual)
     }
 
-    const calculo = formData.moneda === 'USD' ? { usd: montoNum, ves: montoNum * tasa } : { ves: montoNum, usd: tasa > 0 ? montoNum / tasa : 0 };
+    let calculo = { usd: 0, ves: 0 };
+    if (!formData.esRegalo) {
+       calculo = formData.moneda === 'USD' ? { usd: montoNum, ves: montoNum * tasa } : { ves: montoNum, usd: tasa > 0 ? montoNum / tasa : 0 };
+    }
 
     // --- LÓGICA AUTOMÁTICA DE CONCENTRADO ---
     let finalCarrito = { ...formData.carritoObj };
@@ -659,23 +685,26 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
     try {
       if (editId) {
         let updateData = {
-          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', motivoRechazo: '', faltanteUsd: 0 
+          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, motivoRechazo: '', faltanteUsd: 0, descuentoUsd: descuento 
         };
-        // Registrar referencia extra si la hay
         if (pagoAdicional.ref) {
            updateData.referencia = `${formData.referencia} | EXTRA: ${pagoAdicional.ref}`;
            updateData.pagoAdicionalUsd = pagoExtUsd;
         }
 
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', editId), updateData);
-        loggear('PEDIDO_CORREGIDO', `Se corrigió el pedido de ${formData.clienteNombre}. Monto extra sumado: $${pagoExtUsd.toFixed(2)}`);
-        dialogs.alert(`El pedido de ${formData.clienteNombre} fue corregido y enviado nuevamente a Administración.`, "Pedido Corregido");
+        loggear('PEDIDO_CORREGIDO', `Se corrigió y actualizó el pedido de ${formData.clienteNombre}. ${pagoExtUsd > 0 ? `(Extra: $${pagoExtUsd})` : ''}`);
+        dialogs.alert(`El pedido de ${formData.clienteNombre} fue actualizado exitosamente.`, "Pedido Actualizado");
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), {
-          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: 'Pendiente', auditado: false, fechaCreacion: Date.now(), fechaDespacho: fechaDespachoStr, esPublico: false
+          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, auditado: false, fechaCreacion: Date.now(), fechaDespacho: fechaDespachoStr, esPublico: false, descuentoUsd: descuento
         });
-        loggear('PEDIDO_CREADO', `Venta registrada: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)})`);
-        dialogs.alert(`Venta registrada exitosamente. \n\nEl despacho quedó pautado para el: ${fechaDespachoStr}`, "¡Venta Exitosa!");
+        loggear('PEDIDO_CREADO', `Venta registrada: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)}) ${formData.esRegalo ? '[REGALO]' : ''}`);
+        if (finalStatus === 'Pendiente') {
+           dialogs.alert(`Venta registrada exitosamente. \n\nEl despacho quedó pautado para el: ${fechaDespachoStr}`, "¡Venta Exitosa!");
+        } else {
+           dialogs.alert(`El pedido se ha guardado en la Lista de Espera por falta de inventario.`, "Guardado en Espera");
+        }
       }
       
       cancelarEdicion();
@@ -747,19 +776,25 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
              
              <div className="flex flex-col">
                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Empresa de Envío</label>
-               <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} className="p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 outline-none focus:ring-2 focus:ring-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+               <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} className="p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-[#f0f4f8] dark:bg-slate-900 outline-none focus:ring-2 focus:ring-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
                  <option value="ZOOM">ZOOM</option> <option value="MRW">MRW</option> <option value="Tealca">Tealca</option> <option value="Domesa">Domesa</option>
                </select>
              </div>
              
-             <div className="flex items-center gap-3 mt-8">
-               <input type="checkbox" id="ml-check" checked={formData.esMercadoLibre} onChange={(e) => setFormData({...formData, esMercadoLibre: e.target.checked})} className="w-5 h-5 accent-sky-600 cursor-pointer rounded" />
-               <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Es envío de MercadoLibre</label>
+             <div className="flex flex-col justify-center gap-3 mt-6">
+               <div className="flex items-center gap-3">
+                 <input type="checkbox" id="ml-check" checked={formData.esMercadoLibre} onChange={(e) => setFormData({...formData, esMercadoLibre: e.target.checked})} className="w-5 h-5 accent-sky-600 cursor-pointer rounded" />
+                 <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Es envío de MercadoLibre</label>
+               </div>
+               <div className="flex items-center gap-3">
+                 <input type="checkbox" id="regalo-check" checked={formData.esRegalo} onChange={(e) => setFormData({...formData, esRegalo: e.target.checked})} className="w-5 h-5 accent-purple-600 cursor-pointer rounded" />
+                 <label htmlFor="regalo-check" className="text-sm font-bold text-purple-700 dark:text-purple-400 cursor-pointer uppercase tracking-wider flex items-center gap-1"><Gift size={16}/> Es Regalo / Obsequio VIP</label>
+               </div>
              </div>
 
              <div className="md:col-span-2">
                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2 block">Dirección de Envío Completa</label>
-               <textarea name="direccion" value={formData.direccion} onChange={(e)=>setFormData({...formData, direccion: e.target.value})} required rows={2} className="w-full p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 outline-none focus:ring-2 focus:ring-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200"></textarea>
+               <textarea name="direccion" value={formData.direccion} onChange={(e)=>setFormData({...formData, direccion: e.target.value})} required rows={2} className="w-full p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-[#f0f4f8] dark:bg-slate-900 outline-none focus:ring-2 focus:ring-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200"></textarea>
              </div>
              
              <div className="md:col-span-2 bg-slate-50 dark:bg-slate-800/50 p-6 rounded-2xl border border-slate-100 dark:border-slate-700">
@@ -774,18 +809,22 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
                )}
              </div>
 
-             <div className="md:col-span-2 bg-slate-900 dark:bg-slate-950 p-6 rounded-2xl shadow-inner grid grid-cols-1 md:grid-cols-4 gap-5 text-white">
-               <div className="flex flex-col"><InputDark type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required placeholder="Ej: 45.20" /></div>
+             <div className={`md:col-span-2 p-6 rounded-2xl shadow-inner grid grid-cols-1 md:grid-cols-4 gap-5 transition-colors ${formData.esRegalo ? 'bg-purple-900/20 border-2 border-purple-500 text-purple-300' : 'bg-[#003366] dark:bg-slate-950 text-white'}`}>
+               <div className="flex flex-col"><InputDark disabled={formData.esRegalo} type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 45.20" /></div>
                <div className="flex flex-col">
-                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Moneda</label>
-                 <select value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} className="p-3 border-2 border-slate-700 rounded-xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold text-white cursor-pointer">
+                 <label className="text-xs font-bold uppercase tracking-wider mb-2 text-slate-300">Moneda</label>
+                 <select disabled={formData.esRegalo} value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} className="p-3 border-2 border-slate-700 rounded-xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold text-white cursor-pointer disabled:opacity-50">
                    <option value="USD">Dólares (USD)</option> <option value="VES">Bolívares (VES)</option>
                  </select>
                </div>
-               <div className="flex flex-col relative"><InputDark type="number" step="0.01" label="Monto Pagado" value={formData.montoPago} onChange={(e)=>setFormData({...formData, montoPago: e.target.value})} required placeholder="Ej: 30.50" />
-                 {formData.tasa && formData.montoPago && <span className="text-xs text-sky-400 font-bold absolute -bottom-5 left-0">{formData.moneda === 'USD' ? `Eq: Bs. ${((parseFloat(formData.montoPago)||0) * parseFloat(formData.tasa)).toFixed(2)}` : `Eq: $${((parseFloat(formData.montoPago)||0) / parseFloat(formData.tasa)).toFixed(2)}`}</span>}
+               <div className="flex flex-col relative"><InputDark disabled={formData.esRegalo} type="number" step="0.01" label="Monto Pagado" value={formData.esRegalo ? '0' : formData.montoPago} onChange={(e)=>setFormData({...formData, montoPago: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 30.50" />
+                 {!formData.esRegalo && formData.tasa && formData.montoPago && <span className="text-xs text-sky-400 font-bold absolute -bottom-5 left-0">{formData.moneda === 'USD' ? `Eq: Bs. ${((parseFloat(formData.montoPago)||0) * parseFloat(formData.tasa)).toFixed(2)}` : `Eq: $${((parseFloat(formData.montoPago)||0) / parseFloat(formData.tasa)).toFixed(2)}`}</span>}
                </div>
-               <InputDark label="Referencia / Banco" value={formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required placeholder="Ej. 1234 Banesco" />
+               <InputDark disabled={formData.esRegalo} label="Referencia / Banco" value={formData.esRegalo ? 'MUESTRA / OBSEQUIO VIP' : formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required={!formData.esRegalo} placeholder="Ej. 1234 Banesco" />
+               
+               {!formData.esRegalo && (
+                 <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-4"><InputDark type="number" step="0.01" label="Descuento Adicional Otorgado ($)" value={formData.descuentoUsd} onChange={(e)=>setFormData({...formData, descuentoUsd: e.target.value})} placeholder="Ej: 5 (Opcional)" /></div>
+               )}
              </div>
              
              <div className="md:col-span-2 mt-4">
@@ -820,8 +859,14 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
                     <div className="text-xs font-semibold text-slate-400 mt-1">{new Date(p.fechaCreacion).toLocaleDateString()}</div>
                   </td>
                   <td className="p-4">
-                    <div className="font-black text-slate-800 dark:text-slate-100 text-lg">${(p.montoUsd||0).toFixed(2)}</div>
-                    <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
+                    {p.esRegalo ? (
+                       <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1"><Gift size={14}/> REGALO VIP</div>
+                    ) : (
+                       <>
+                        <div className="font-black text-slate-800 dark:text-slate-100 text-lg">${(p.montoUsd||0).toFixed(2)}</div>
+                        <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
+                       </>
+                    )}
                   </td>
                   <td className="p-4">
                     <StatusBadge status={p.status} />
@@ -863,7 +908,7 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
                      <div className="text-xs text-slate-500 mt-1">{p.clienteTelefono} - {new Date(p.fechaCreacion).toLocaleDateString()}</div>
                    </div>
                    <div className="flex gap-2">
-                     <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-200">Retomar Pedido</button>
+                     <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-sky-100 text-sky-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-sky-200 transition-colors">Retomar Pedido</button>
                    </div>
                  </div>
                ))}
@@ -883,9 +928,15 @@ function PanelVentas({ perfil, pedidos, catalogo, db, appId, loggear, dialogs, c
                      <div className="font-bold text-slate-800 dark:text-slate-200">{p.clienteNombre} <span className="text-xs font-normal text-slate-500">({p.clienteTelefono})</span></div>
                      <div className="text-xs font-semibold text-emerald-600 mt-1">Total Cotizado: ${p.montoUsd}</div>
                      <div className="text-xs text-slate-500 mt-2 bg-slate-50 dark:bg-slate-900 p-2 rounded whitespace-pre-wrap">{p.productos}</div>
+                     
+                     <div className="flex flex-col gap-1 mt-3">
+                        <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Ref: {p.referencia}</div>
+                        {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-600 hover:underline flex items-center gap-1"><ImageIcon size={12}/> Ver Comprobante Subido</a>}
+                     </div>
                    </div>
-                   <div className="flex gap-2 shrink-0">
-                     <button onClick={() => cargarPedidoParaEditar(p)} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-700 flex items-center gap-1"><CheckCircle size={14}/> Procesar Venta</button>
+                   <div className="flex flex-col gap-2 shrink-0">
+                     <button onClick={() => cargarPedidoParaEditar(p)} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-700 flex items-center gap-1 transition-colors"><CheckCircle size={14}/> Procesar Venta</button>
+                     <button onClick={() => cambiarEstadoPedido(p.id, 'Rechazado')} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-100 flex items-center gap-1 transition-colors"><XCircle size={14}/> Descartar Web</button>
                    </div>
                  </div>
                ))}
@@ -1001,13 +1052,20 @@ function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId, dialogs }) {
                    </div>
                  </td>
                  <td className="p-4 align-top">
-                   <div className="font-black text-slate-800 dark:text-slate-100 text-2xl">${(p.montoUsd||0).toFixed(2)}</div>
-                   <div className="font-bold text-emerald-600 dark:text-emerald-400 text-lg mb-2">Bs. {(p.montoVes||0).toFixed(2)}</div>
-                   <div className="text-xs font-semibold text-slate-500 mb-1">Tasa Aplicada: Bs. {p.tasaAplicada}</div>
-                   {p.sobranteUsd > 0 && <div className="text-xs font-bold text-purple-600 dark:text-purple-400 mb-2">+ Sobrante: ${p.sobranteUsd}</div>}
-                   {p.faltanteUsd > 0 && <div className="text-xs font-bold text-red-600 dark:text-red-400 mb-2">- Faltante: ${p.faltanteUsd}</div>}
-                   <div className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg inline-block mb-3 border border-slate-200 dark:border-slate-700">Ref: {p.referencia}</div>
-                   <div className="mt-1"><StatusBadge status={p.status}/></div>
+                   {p.esRegalo ? (
+                      <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 mb-2"><Gift size={20}/> REGALO VIP</div>
+                   ) : (
+                      <>
+                        <div className="font-black text-slate-800 dark:text-slate-100 text-2xl">${(p.montoUsd||0).toFixed(2)}</div>
+                        <div className="font-bold text-emerald-600 dark:text-emerald-400 text-lg mb-2">Bs. {(p.montoVes||0).toFixed(2)}</div>
+                        <div className="text-xs font-semibold text-slate-500 mb-1">Tasa Aplicada: Bs. {p.tasaAplicada}</div>
+                        {p.sobranteUsd > 0 && <div className="text-xs font-bold text-purple-600 dark:text-purple-400 mb-2">+ Sobrante: ${p.sobranteUsd}</div>}
+                        {p.faltanteUsd > 0 && <div className="text-xs font-bold text-red-600 dark:text-red-400 mb-2">- Faltante: ${p.faltanteUsd}</div>}
+                        {p.descuentoUsd > 0 && <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded w-max my-1 border border-emerald-200 dark:border-emerald-800">Descuento aplicado: ${p.descuentoUsd}</div>}
+                      </>
+                   )}
+                   <div className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-[#f0f4f8] dark:bg-slate-800 px-3 py-1.5 rounded-lg inline-block my-3 border border-slate-200 dark:border-slate-700">Ref: {p.referencia}</div>
+                   <div><StatusBadge status={p.status}/></div>
                  </td>
                  <td className="p-4 align-top text-right">
                    <div className="flex flex-col gap-2 items-end">
@@ -1036,7 +1094,7 @@ function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId, dialogs }) {
 // ==========================================
 // 4. PANEL DE DESPACHO
 // ==========================================
-function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear, dialogs }) {
+function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs }) {
   const [vistaDespacho, setVistaDespacho] = useState('pendientes');
 
   const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
@@ -1045,6 +1103,7 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear, dialogs }) 
 
   const [guiasInput, setGuiasInput] = useState({});
   const [subiendo, setSubiendo] = useState({ id: null, field: null });
+  const [inventarioChecked, setInventarioChecked] = useState({}); // Para el check visual de despacho
 
   const handleGuiaChange = (id, field, value) => setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
 
@@ -1087,20 +1146,27 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear, dialogs }) 
 
   const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
 
+  const toggleCheck = (key) => {
+    setInventarioChecked(prev => ({...prev, [key]: !prev[key]}));
+  };
+
   return (
     <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
       
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><Truck className="text-sky-600"/> Logística de Envíos</h2>
-          <div className="flex gap-2 mt-4 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-max">
+          <div className="flex flex-wrap gap-2 mt-4 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-max">
             <button onClick={() => setVistaDespacho('pendientes')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Por Empacar ({pedidosValidados.length})</button>
             <button onClick={() => setVistaDespacho('historial')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Enviados</button>
+            <button onClick={() => setVistaDespacho('inventario')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'inventario' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Validar Inventario</button>
           </div>
         </div>
-        <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm">
-          <Printer size={18} /> Imprimir Etiquetas
-        </button>
+        {vistaDespacho !== 'inventario' && (
+          <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm">
+            <Printer size={18} /> Imprimir Etiquetas
+          </button>
+        )}
       </div>
 
       {pedidosPendientes > 0 && vistaDespacho === 'pendientes' && (
@@ -1113,77 +1179,103 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear, dialogs }) 
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
-        <table className="w-full text-left border-collapse min-w-[800px] text-sm">
-          <thead>
-            <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
-              <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide w-1/4">Datos del Paquete</th>
-              <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Dirección y Contenido</th>
-              <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide w-1/3">Gestión de Guía y Soportes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pedidosAMostrar.length === 0 ? <tr><td colSpan="3" className="p-10 text-center text-slate-400 italic font-bold">No hay envíos pendientes en esta vista.</td></tr> : pedidosAMostrar.map(p => (
-              <tr key={p.id} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
-                <td className="p-4 align-top">
-                  <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">
-                     {p.clienteNombre}
+      {vistaDespacho === 'inventario' ? (
+        <div className="animate-in fade-in">
+          <div className="mb-6 bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-400 flex items-center gap-2"><CheckSquare2 className="text-sky-500"/> Esta vista es exclusiva para validar las cantidades físicas en el almacén de despacho. Las marcas no se guardan.</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+             {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
+                const key = `${p.nombre}|${pres}`;
+                const disp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key]||0);
+                if (disp === 0) return null; // Solo mostramos lo que hay
+                return (
+                  <div key={key} onClick={()=>toggleCheck(key)} className={`p-4 rounded-xl border-2 cursor-pointer transition-colors flex items-center justify-between ${inventarioChecked[key] ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800' : 'bg-white border-slate-100 dark:bg-slate-800 dark:border-slate-700 hover:border-sky-300'}`}>
+                    <div>
+                      <div className={`font-bold text-sm ${inventarioChecked[key] ? 'text-emerald-800 dark:text-emerald-400 line-through opacity-70' : 'text-slate-800 dark:text-slate-100'}`}>{p.nombre}</div>
+                      <div className={`text-xs font-semibold mt-1 ${inventarioChecked[key] ? 'text-emerald-600 dark:text-emerald-500 opacity-70' : 'text-slate-500'}`}>{pres}</div>
+                    </div>
+                    <div className={`text-2xl font-black ${inventarioChecked[key] ? 'text-emerald-600 dark:text-emerald-500 opacity-70' : 'text-sky-600 dark:text-sky-400'}`}>
+                      {disp}
+                    </div>
                   </div>
-                  <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-2">{p.courier}</div>
-                  <div className="text-xs font-semibold text-slate-500 mt-2">Tel: {p.clienteTelefono}</div>
-                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mt-3">Sale: {p.fechaDespacho}</div>
-                </td>
-                <td className="p-4 align-top">
-                  {p.esMercadoLibre && vistaDespacho === 'pendientes' && (
-                    <div className="mb-3 bg-yellow-400 text-slate-900 p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider animate-pulse">
-                      <AlertTriangle size={18} className="text-slate-900 shrink-0" /> ¡MERCADOLIBRE! IMPRIMIR GUÍA DE ML
-                    </div>
-                  )}
-                  <div className="font-medium bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-3 whitespace-pre-wrap shadow-sm text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
-                  <div className="text-[13px] font-semibold text-slate-600 dark:text-slate-400 flex items-start gap-2 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg"><div className="mt-0.5 text-sky-600"><Package size={16}/></div>{p.direccion}</div>
-                </td>
-                <td className="p-4 align-top bg-slate-50/50 dark:bg-slate-900/30">
-                  {p.status === 'Despachado' ? (
-                    <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                      <div className="text-sm mb-4"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100 text-lg">{p.guia}</span></div>
-                      <div className="flex flex-col gap-3 mb-5">
-                        {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors"><ImageIcon size={16}/> Ver Recibo Digital</a>}
-                        {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors"><Camera size={16}/> Ver Foto del Paquete</a>}
-                      </div>
-                      <div className="text-xs text-emerald-600 dark:text-emerald-400 font-black mb-3 uppercase tracking-widest flex items-center gap-1"><CheckCircle size={14}/> Despachado OK</div>
-                      <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors">Corregir Información de Envío</button>
-                    </div>
-                  ) : (
-                    <div className="space-y-4 bg-white dark:bg-slate-800 p-5 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm">
-                      <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.guia || ''} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
-                      
-                      <div className="flex gap-2 relative">
-                        <input type="text" placeholder="URL Recibo Guía" className="w-full text-xs p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl pr-12 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white font-semibold transition-colors" value={guiasInput[p.id]?.link || ''} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
-                        <label className="absolute right-1.5 top-1.5 p-2 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-lg cursor-pointer transition-colors shadow-sm" title="Subir Foto de Galería">
-                          {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
-                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
-                        </label>
-                      </div>
-
-                      <div className="flex gap-2 relative">
-                        <input type="text" placeholder="URL Foto Empaque" className="w-full text-xs p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl pr-12 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white font-semibold transition-colors" value={guiasInput[p.id]?.fotoProductos || ''} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
-                        <label className="absolute right-1.5 top-1.5 p-2 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-lg cursor-pointer transition-colors shadow-sm" title="Subir Foto de Galería">
-                          {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
-                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} />
-                        </label>
-                      </div>
-
-                      <button onClick={() => guardarGuia(p)} className="w-full bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold py-3.5 rounded-xl mt-2 flex items-center justify-center gap-2 transition-all shadow-md hover:-translate-y-0.5">
-                        <Truck size={18}/> Confirmar y Archivar
-                      </button>
-                    </div>
-                  )}
-                </td>
+                )
+             })))}
+          </div>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
+          <table className="w-full text-left border-collapse min-w-[800px] text-sm">
+            <thead>
+              <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
+                <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide w-1/4">Datos del Paquete</th>
+                <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Dirección y Contenido</th>
+                <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide w-1/3">Gestión de Guía y Soportes</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {pedidosAMostrar.length === 0 ? <tr><td colSpan="3" className="p-10 text-center text-slate-400 italic font-bold">No hay envíos pendientes en esta vista.</td></tr> : pedidosAMostrar.map(p => (
+                <tr key={p.id} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                  <td className="p-4 align-top">
+                    <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">
+                       {p.clienteNombre}
+                    </div>
+                    <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-2">{p.courier}</div>
+                    <div className="text-xs font-semibold text-slate-500 mt-2">Tel: {p.clienteTelefono}</div>
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mt-3">Sale: {p.fechaDespacho}</div>
+                  </td>
+                  <td className="p-4 align-top">
+                    {p.esMercadoLibre && vistaDespacho === 'pendientes' && (
+                      <div className="mb-3 bg-yellow-400 text-slate-900 p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider animate-pulse">
+                        <AlertTriangle size={18} className="text-slate-900 shrink-0" /> ¡MERCADOLIBRE! IMPRIMIR GUÍA DE ML
+                      </div>
+                    )}
+                    <div className="font-medium bg-[#f0f4f8] dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-3 whitespace-pre-wrap shadow-sm text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
+                    <div className="text-[13px] font-semibold text-slate-600 dark:text-slate-400 flex items-start gap-2 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg"><div className="mt-0.5 text-sky-600"><Package size={16}/></div>{p.direccion}</div>
+                  </td>
+                  <td className="p-4 align-top bg-slate-50/50 dark:bg-slate-900/30">
+                    {p.status === 'Despachado' ? (
+                      <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                        <div className="text-sm mb-4"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100 text-lg">{p.guia}</span></div>
+                        <div className="flex flex-col gap-3 mb-5">
+                          {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors"><ImageIcon size={16}/> Ver Recibo Digital</a>}
+                          {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors"><Camera size={16}/> Ver Foto del Paquete</a>}
+                        </div>
+                        <div className="text-xs text-emerald-600 dark:text-emerald-400 font-black mb-3 uppercase tracking-widest flex items-center gap-1"><CheckCircle size={14}/> Despachado OK</div>
+                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors">Corregir Información de Envío</button>
+                      </div>
+                    ) : (
+                      <div className="space-y-4 bg-white dark:bg-slate-800 p-5 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm">
+                        <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.guia || ''} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                        
+                        <div className="flex gap-2 relative">
+                          <input type="text" placeholder="URL Recibo Guía" className="w-full text-xs p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl pr-12 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white font-semibold transition-colors" value={guiasInput[p.id]?.link || ''} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
+                          <label className="absolute right-1.5 top-1.5 p-2 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-lg cursor-pointer transition-colors shadow-sm" title="Subir Foto de Galería">
+                            {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
+                          </label>
+                        </div>
+
+                        <div className="flex gap-2 relative">
+                          <input type="text" placeholder="URL Foto Empaque" className="w-full text-xs p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl pr-12 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white font-semibold transition-colors" value={guiasInput[p.id]?.fotoProductos || ''} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
+                          <label className="absolute right-1.5 top-1.5 p-2 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-lg cursor-pointer transition-colors shadow-sm" title="Subir Foto de Galería">
+                            {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} />
+                          </label>
+                        </div>
+
+                        <button onClick={() => guardarGuia(p)} className="w-full bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold py-3.5 rounded-xl mt-2 flex items-center justify-center gap-2 transition-all shadow-md hover:-translate-y-0.5">
+                          <Truck size={18}/> Confirmar y Archivar
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1348,7 +1440,7 @@ function SubPanelMovimientos({ movimientos, stock, db, appId, loggear, perfil, c
                   <span className={`px-2.5 py-1 rounded-md text-[10px] font-black tracking-widest uppercase border ${m.tipo === 'INGRESO' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' : 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800'}`}>{m.tipo}</span>
                   <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-2 flex items-center gap-1">Hacia: <span className="text-slate-800 dark:text-slate-200">Almacén {m.destino}</span></div>
                 </td>
-                <td className="p-4 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700 m-2 rounded-lg shadow-sm">
+                <td className="p-4 text-sm font-medium text-slate-700 dark:text-slate-300 bg-[#f0f4f8] dark:bg-slate-900 border border-slate-100 dark:border-slate-700 m-2 rounded-lg shadow-sm">
                   {Object.entries(m.items).map(([k,q]) => <div key={k} className="flex gap-2 mb-1"><span className="font-bold text-slate-800 dark:text-slate-100">{q}x</span> <span>{k.replace('|', ' ')}</span></div>)}
                 </td>
                 <td className="p-4">
@@ -1485,7 +1577,7 @@ function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs }) {
                   <td className="p-4 font-bold text-slate-500 dark:text-slate-400 text-xs uppercase tracking-widest">{c.categoria}</td>
                   <td className="p-4">
                     <div className="font-bold text-slate-800 dark:text-slate-100 text-base">{p.nombre}</div>
-                    <div className="flex gap-2 mt-2">
+                    <div className="flex flex-wrap gap-2 mt-2">
                        {p.presentaciones.map((pres, i) => (
                          <span key={pres} className="text-xs font-semibold bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 px-2 py-1 rounded">
                            {pres} {p.precios && p.precios[i] > 0 ? `($${p.precios[i]})` : ''}
@@ -1656,11 +1748,32 @@ function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId, loggear, perfi
   );
 }
 
-function PanelReportes({ pedidos }) {
+function PanelReportes({ pedidos, stock, catalogo }) {
   const hoyStr = new Date().toISOString().split('T')[0];
   const [fechaInicio, setFechaInicio] = useState(hoyStr); const [fechaFin, setFechaFin] = useState(hoyStr);
   const pedidosFiltrados = pedidos.filter(p => p.status !== 'Rechazado' && !p.esPublico && new Date(p.fechaCreacion).toISOString().split('T')[0] >= fechaInicio && new Date(p.fechaCreacion).toISOString().split('T')[0] <= fechaFin);
   
+  const [valorInventarioTotal, setValorInventarioTotal] = useState(0);
+
+  useEffect(() => {
+    let valorGlobal = 0;
+    Object.entries(stock).forEach(([key, val]) => {
+       let disp = typeof val === 'object' ? val.envios : val;
+       if (disp > 0) {
+         const [nom, pres] = key.split('|');
+         let precioItem = 0;
+         catalogo.forEach(c => c.productos.forEach(p => {
+             if(p.nombre === nom) {
+                 const idx = p.presentaciones.indexOf(pres);
+                 if(idx >= 0 && p.precios) precioItem = p.precios[idx] || 0;
+             }
+         }));
+         valorGlobal += disp * precioItem;
+       }
+    });
+    setValorInventarioTotal(valorGlobal);
+  }, [stock, catalogo]);
+
   const exportarCSV = () => {
     const encabezados = "Fecha,Cliente,Telefono,Asesora,Courier,Productos,Monto Original Pagado,Sobrantes Cliente,Moneda Pago,Monto Equivalente Neto USD ($),Monto Equivalente VES (Bs),Tasa Aplicada,Estado\n";
     const filas = pedidosFiltrados.map(p => {
@@ -1671,7 +1784,8 @@ function PanelReportes({ pedidos }) {
       const productosTexto = typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos);
       const productos = `"${(productosTexto || '').replace(/\n/g, ' ')}"`;
       const sobrante = p.sobranteUsd || 0;
-      const netoUsd = (p.montoUsd||0) - sobrante;
+      const descuento = p.descuentoUsd || 0;
+      const netoUsd = (p.montoUsd||0) - sobrante - descuento;
       return `${fecha},${cliente},${tlf},${asesora},${p.courier},${productos},${p.monto},${sobrante},${p.moneda},${netoUsd.toFixed(2)},${(p.montoVes||0).toFixed(2)},${p.tasaAplicada},${p.status}`;
     }).join("\n");
 
@@ -1682,9 +1796,10 @@ function PanelReportes({ pedidos }) {
     link.click();
   };
 
-  const totalUSD = pedidosFiltrados.reduce((acc, curr) => acc + ((curr.montoUsd || 0) - (curr.sobranteUsd || 0)), 0);
+  const totalUSD = pedidosFiltrados.reduce((acc, curr) => acc + ((curr.montoUsd || 0) - (curr.sobranteUsd || 0) - (curr.descuentoUsd || 0)), 0);
   const totalVES = pedidosFiltrados.reduce((acc, curr) => acc + (curr.montoVes || 0), 0);
   const totalSobrantes = pedidosFiltrados.reduce((acc, curr) => acc + (curr.sobranteUsd || 0), 0);
+  const totalDescuentos = pedidosFiltrados.reduce((acc, curr) => acc + (curr.descuentoUsd || 0), 0);
 
   return (
     <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
@@ -1702,18 +1817,23 @@ function PanelReportes({ pedidos }) {
         <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-2.5 rounded-xl font-bold text-slate-700 dark:text-white outline-none focus:border-emerald-500" />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 p-6 rounded-2xl text-center shadow-sm">
-          <div className="text-xs font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 mb-2">Ingresos Netos (USD)</div>
-          <div className="text-4xl font-black text-emerald-900 dark:text-emerald-300">${totalUSD.toFixed(2)}</div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 p-5 rounded-2xl text-center shadow-sm">
+          <div className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 mb-2">Ingresos Netos (USD)</div>
+          <div className="text-3xl font-black text-emerald-900 dark:text-emerald-300">${totalUSD.toFixed(2)}</div>
         </div>
-        <div className="bg-sky-50 dark:bg-sky-900/20 border border-sky-100 dark:border-sky-800 p-6 rounded-2xl text-center shadow-sm">
-          <div className="text-xs font-black uppercase tracking-widest text-sky-600 dark:text-sky-400 mb-2">Ingresos Equivalentes (VES)</div>
-          <div className="text-4xl font-black text-sky-900 dark:text-sky-300">Bs. {totalVES.toFixed(2)}</div>
+        <div className="bg-sky-50 dark:bg-sky-900/20 border border-sky-100 dark:border-sky-800 p-5 rounded-2xl text-center shadow-sm">
+          <div className="text-[10px] font-black uppercase tracking-widest text-sky-600 dark:text-sky-400 mb-2">Ingresos Equiv. (VES)</div>
+          <div className="text-3xl font-black text-sky-900 dark:text-sky-300">Bs. {totalVES.toFixed(2)}</div>
         </div>
-        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800 p-6 rounded-2xl text-center shadow-sm">
-          <div className="text-xs font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 mb-2">Dinero Restado (Sobrantes)</div>
-          <div className="text-4xl font-black text-amber-900 dark:text-amber-300">${totalSobrantes.toFixed(2)}</div>
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800 p-5 rounded-2xl text-center shadow-sm">
+          <div className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 mb-2">Restado (Sobrantes/Desc)</div>
+          <div className="text-3xl font-black text-amber-900 dark:text-amber-300">${(totalSobrantes + totalDescuentos).toFixed(2)}</div>
+        </div>
+        <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-100 dark:border-purple-800 p-5 rounded-2xl text-center shadow-sm shadow-purple-200 dark:shadow-none relative overflow-hidden">
+          <div className="absolute -right-3 -top-3 opacity-10"><Package size={80} className="text-purple-600"/></div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-purple-600 dark:text-purple-400 mb-2 relative z-10">Valor del Stock Actual</div>
+          <div className="text-3xl font-black text-purple-900 dark:text-purple-300 relative z-10">${valorInventarioTotal.toFixed(2)}</div>
         </div>
       </div>
 
@@ -1724,15 +1844,21 @@ function PanelReportes({ pedidos }) {
             {pedidosFiltrados.length === 0 ? <tr><td colSpan="4" className="p-8 text-center text-slate-400 italic font-medium">No hay ventas registradas en el periodo seleccionado.</td></tr> : 
               pedidosFiltrados.map(p => {
                 const sobrante = p.sobranteUsd || 0;
-                const netoUsd = (p.montoUsd||0) - sobrante;
+                const descuento = p.descuentoUsd || 0;
+                const netoUsd = (p.montoUsd||0) - sobrante - descuento;
                 return (
                 <tr key={p.id} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                   <td className="p-4 text-slate-500 dark:text-slate-400 font-medium">{new Date(p.fechaCreacion).toLocaleDateString()}</td>
                   <td className="p-4"><div className="font-bold text-slate-800 dark:text-slate-100 text-base">{p.clienteNombre}</div><div className="text-xs font-semibold text-slate-400">{p.clienteTelefono}</div></td>
                   <td className="p-4">
-                    <div className="font-black text-emerald-700 dark:text-emerald-400 text-lg">${netoUsd.toFixed(2)}</div>
+                    {p.esRegalo ? (
+                       <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1"><Gift size={14}/> REGALO VIP</div>
+                    ) : (
+                       <div className="font-black text-emerald-700 dark:text-emerald-400 text-lg">${netoUsd.toFixed(2)}</div>
+                    )}
                     {sobrante > 0 && <div className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/30 px-1 rounded my-1 w-max">Sobrante descontado: ${sobrante}</div>}
-                    <div className="text-xs text-slate-500 font-medium mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
+                    {descuento > 0 && <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-1 rounded my-1 w-max">Descuento aplicado: ${descuento}</div>}
+                    {!p.esRegalo && <div className="text-xs text-slate-500 font-medium mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>}
                   </td>
                   <td className="p-4 font-bold text-slate-700 dark:text-slate-300">{p.asesora}</td>
                 </tr>
@@ -1865,12 +1991,13 @@ function PanelLogs({ logs }) {
 // ==========================================
 // PORTAL PÚBLICO DE CLIENTES (NUEVO)
 // ==========================================
-function PublicPortal({ catalogo, db, appId, dialogs, onBack, darkMode, setDarkMode }) {
-  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null };
+function PublicPortal({ catalogo, stock, db, appId, dialogs, onBack, darkMode, setDarkMode }) {
+  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, referencia: '', linkComprobantePago: '' };
   const [formData, setFormData] = useState(defaultForm);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [cotizacionTotal, setCotizacionTotal] = useState(0);
+  const [subiendo, setSubiendo] = useState(false);
 
   const recalcularCotizacion = (carritoActual) => {
     let total = 0;
@@ -1886,6 +2013,28 @@ function PublicPortal({ catalogo, db, appId, dialogs, onBack, darkMode, setDarkM
       total += (pPrecio * qty);
     });
     setCotizacionTotal(total);
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!URL_GOOGLE_SCRIPT) return dialogs.alert("⚠️ Estamos actualizando nuestro sistema de pagos en línea. Por favor envía tu comprobante directamente por WhatsApp.", "Aviso");
+    
+    setSubiendo(true);
+    try {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onloadend = async () => {
+            const base64Data = reader.result.split(',')[1];
+            const response = await fetch(URL_GOOGLE_SCRIPT, {
+                method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ fileName: `Comprobante_Web_${Date.now()}.jpg`, mimeType: file.type, data: base64Data })
+            });
+            const result = await response.json();
+            if (result.url) { setFormData(prev => ({...prev, linkComprobantePago: result.url})); }
+            setSubiendo(false);
+        };
+    } catch (error) { console.error(error); dialogs.alert("Error subiendo la foto a nuestro servidor. Intenta de nuevo.", "Fallo de Red"); setSubiendo(false); }
   };
 
   const handleSubmit = async (e) => {
@@ -1911,7 +2060,10 @@ function PublicPortal({ catalogo, db, appId, dialogs, onBack, darkMode, setDarkM
         asesora: 'Portal Web'
       });
       
-      dialogs.alert(`¡Tu solicitud ha sido enviada con éxito!\n\nUna de nuestras asesoras te contactará al ${formData.clienteTelefono} en breve para coordinar el pago de tu cotización por $${cotizacionTotal}.`, "¡Solicitud Recibida!", onBack);
+      dialogs.alert(`¡Tu solicitud ha sido enviada con éxito!\n\nUna de nuestras asesoras te contactará al ${formData.clienteTelefono} en breve para confirmar la transacción e indicarte la guía de despacho.`, "¡Solicitud Recibida!", () => {
+        setFormData(defaultForm);
+        setCotizacionTotal(0);
+      });
     } catch(err) {
       console.error(err);
       dialogs.alert("Ocurrió un error al enviar tu solicitud. Intenta nuevamente.", "Error");
@@ -1920,10 +2072,9 @@ function PublicPortal({ catalogo, db, appId, dialogs, onBack, darkMode, setDarkM
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 pb-10 transition-colors">
+    <div className="min-h-screen bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 pb-10 transition-colors">
       <header className="bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 p-6 flex items-center justify-between shadow-sm sticky top-0 z-10">
-        <img src={BRAND_LOGO_LIGHT} alt="Logo Bluher" className="h-10 mix-blend-multiply dark:hidden" />
-        <div className="hidden dark:flex items-center gap-2 text-sky-400 font-black text-xl tracking-widest"><Package/> BLUHER</div>
+        <img src={BRAND_LOGO} alt="Logo Bluher" className="h-10 mix-blend-multiply dark:mix-blend-normal invert dark:invert-0 brightness-200 dark:brightness-100" />
         <div className="flex gap-4 items-center">
           <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full shadow text-slate-500 dark:text-slate-400 transition-colors">
             {darkMode ? <Sun size={18}/> : <Moon size={18}/>}
@@ -1935,7 +2086,7 @@ function PublicPortal({ catalogo, db, appId, dialogs, onBack, darkMode, setDarkM
       <div className="max-w-4xl mx-auto mt-8 p-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div className="text-center mb-10">
           <h1 className="text-4xl font-black text-slate-800 dark:text-white tracking-tight mb-3">Arma tu pedido online</h1>
-          <p className="text-slate-500 dark:text-slate-400 font-medium text-lg">Selecciona los productos que deseas y un asesor validará tu pago por WhatsApp.</p>
+          <p className="text-slate-500 dark:text-slate-400 font-medium text-lg">Selecciona tus productos favoritos y reporta tu pago directamente.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1971,17 +2122,36 @@ function PublicPortal({ catalogo, db, appId, dialogs, onBack, darkMode, setDarkM
             )}
           </div>
 
+          <div className="md:col-span-2 mt-4 bg-[#003366] dark:bg-slate-950 p-6 rounded-2xl border border-slate-700 dark:border-slate-800 text-white">
+            <h3 className="font-black text-lg mb-4 flex items-center gap-2 text-sky-300"><DollarSign size={20}/> Reporte de Pago</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+               <InputDark label="Banco Origen y Nro. de Referencia" value={formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} placeholder="Ej: Banesco 4321098..." required />
+               
+               <div className="flex flex-col">
+                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Comprobante / Captura (Opcional)</label>
+                 <div className="flex gap-2 relative">
+                    <input type="text" placeholder="URL Foto Subida" readOnly className="w-full text-xs p-3 border-2 border-slate-700 rounded-xl outline-none focus:border-sky-500 bg-slate-800 font-semibold transition-colors" value={formData.linkComprobantePago} />
+                    <label className="absolute right-1.5 top-1.5 p-2 bg-sky-600 text-white hover:bg-sky-500 rounded-lg cursor-pointer transition-colors shadow-sm" title="Subir Captura de Pago">
+                      {subiendo ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+                      <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+                    </label>
+                  </div>
+               </div>
+            </div>
+          </div>
+
           <div className="md:col-span-2 mt-6">
             <button type="submit" disabled={enviando} className="w-full text-white bg-slate-900 dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-200 font-black py-4 rounded-xl shadow-lg flex justify-center items-center gap-3 text-lg transition-all duration-300 hover:-translate-y-0.5">
-              {enviando ? <Loader2 className="animate-spin" /> : <><CheckCircle size={22} /> Enviar Solicitud de Pedido</>}
+              {enviando ? <Loader2 className="animate-spin" /> : <><CheckCircle size={22} /> Enviar Solicitud y Pago</>}
             </button>
-            <p className="text-center text-xs text-slate-400 mt-4 font-medium">Al enviar, serás contactado por el equipo de Bluher para indicar las cuentas de pago.</p>
+            <p className="text-center text-xs text-slate-400 mt-4 font-medium">Al enviar, nuestro equipo de ventas validará tu información en breve.</p>
           </div>
         </form>
       </div>
 
       <ModalCatalogo 
         catalogo={catalogo} 
+        stock={stock}
         isOpen={isCatalogOpen} 
         onClose={()=>setIsCatalogOpen(false)} 
         dialogs={dialogs}
@@ -2074,7 +2244,7 @@ function VistaImpresion({ pedidos }) {
   ); 
 }
 
-function ModalCatalogo({ catalogo, isOpen, onClose, onConfirm, dialogs }) {
+function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConfirm, dialogs }) {
   const [carrito, setCarrito] = useState({});
   const [totalCotizacion, setTotalCotizacion] = useState(0);
 
@@ -2102,7 +2272,7 @@ function ModalCatalogo({ catalogo, isOpen, onClose, onConfirm, dialogs }) {
     setTotalCotizacion(total);
   }, [carrito, catalogo]);
 
-  if (!isOpen) return null; // Safe early return after all Hooks
+  if (!isOpen) return null; // Componente completamente seguro
 
   const handleConfirm = () => {
     const lineas = [];
@@ -2145,8 +2315,20 @@ function ModalCatalogo({ catalogo, isOpen, onClose, onConfirm, dialogs }) {
                   const key = `${p.nombre}|${pres}`; 
                   const qty = carrito[key]||0; 
                   const precio = p.precios ? p.precios[i] : 0;
+                  const disp = stock ? (typeof stock[key] === 'object' ? stock[key].envios : (stock[key]||0)) : 0;
                   return (
-                    <div key={pres} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-2 rounded-xl border border-slate-100 dark:border-slate-700/50"><div className="flex flex-col"><span className="font-bold text-slate-600 dark:text-slate-400 text-[11px] px-1 uppercase tracking-wider">{pres}</span>{precio > 0 && <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-black px-1">${precio}</span>}</div><div className="flex gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-sm"><button onClick={()=>updateQty(key,-1)} className="px-2.5 py-1 text-slate-400 dark:text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-black transition-colors">-</button><span className="w-6 text-center font-black text-sm py-1 text-sky-700 dark:text-sky-400">{qty}</span><button onClick={()=>updateQty(key,1)} className="px-2.5 py-1 text-sky-600 dark:text-sky-500 hover:text-sky-800 dark:hover:text-sky-300 font-black transition-colors">+</button></div></div>
+                    <div key={pres} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-2 rounded-xl border border-slate-100 dark:border-slate-700/50">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-slate-600 dark:text-slate-400 text-[11px] px-1 uppercase tracking-wider">{pres}</span>
+                        {precio > 0 && <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-black px-1">${precio}</span>}
+                        {stock && <span className={`text-[9px] font-black px-1 ${disp === 0 ? 'text-red-500' : 'text-sky-500'}`}>Disp: {disp}</span>}
+                      </div>
+                      <div className="flex gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-sm">
+                        <button onClick={()=>updateQty(key,-1)} className="px-2.5 py-1 text-slate-400 dark:text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-black transition-colors">-</button>
+                        <span className="w-6 text-center font-black text-sm py-1 text-sky-700 dark:text-sky-400">{qty}</span>
+                        <button onClick={()=>updateQty(key,1)} className="px-2.5 py-1 text-sky-600 dark:text-sky-500 hover:text-sky-800 dark:hover:text-sky-300 font-black transition-colors">+</button>
+                      </div>
+                    </div>
                   )
                 })}
               </div>
