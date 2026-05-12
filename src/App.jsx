@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN DE MARCA BLUEHER ---
-const BRAND_LOGO = "logobluher.jpg"; 
+const BRAND_LOGO = "logobluher.jpg"; // Truco CSS aplicado abajo para eliminar el fondo blanco
 
 // --- CONFIGURACIÓN DE FIREBASE ---
 const getEnvVar = (key) => {
@@ -106,8 +106,139 @@ const DEFAULT_CATALOGO = [
 ];
 
 // ==========================================
-// SISTEMA DE MODALES GLOBALES
+// COMPONENTES COMPARTIDOS Y MODALES GLOBALES
 // ==========================================
+function Input({ label, ...props }) { 
+  return (
+    <div className="flex flex-col">
+      <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2 dark:text-slate-400 transition-colors">{label}</label>
+      <input className="p-3.5 border-2 border-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white rounded-2xl focus:border-sky-500 outline-none font-bold transition-all shadow-sm" {...props}/>
+    </div>
+  ); 
+}
+
+function InputDark({ label, ...props }) { 
+  return (
+    <div className="flex flex-col">
+      <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2 transition-colors">{label}</label>
+      <input className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all shadow-inner disabled:opacity-50" {...props}/>
+    </div>
+  ); 
+}
+
+function StatusBadge({ status }) { 
+  const b = { 
+    'Pendiente': 'bg-amber-100 text-amber-700 border-amber-200', 
+    'Validado': 'bg-sky-100 text-sky-700 border-sky-200', 
+    'Despachado': 'bg-emerald-100 text-emerald-700 border-emerald-200', 
+    'En Espera (Sin Stock)': 'bg-orange-100 text-orange-700 border-orange-200', 
+    'Por Pagar / Cotización': 'bg-purple-100 text-purple-700 border-purple-200' 
+  }; 
+  return <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${b[status] || 'bg-slate-100 text-slate-600'}`}>{status}</span>; 
+}
+
+function TabButton({ active, onClick, icon, label, badge, badgeColor }) { 
+  return (
+    <button onClick={onClick} className={`flex items-center justify-between w-full p-4 rounded-2xl font-black transition-all ${active ? 'bg-sky-600 text-white shadow-xl scale-105' : 'text-sky-100/60 dark:text-slate-400 hover:bg-sky-900/40 dark:hover:bg-slate-800/80 hover:text-white'}`}>
+      <div className="flex items-center gap-3">{icon} <span className="hidden md:inline text-xs uppercase tracking-widest">{label}</span></div> 
+      {badge > 0 && <span className={`${badgeColor || 'bg-red-500'} text-white text-[9px] px-2 py-0.5 rounded-full font-bold shadow-lg`}>{badge}</span>}
+    </button>
+  ); 
+}
+
+function VistaImpresion({ pedidos }) { 
+  if (pedidos.length === 0) {
+    return (
+      <div className="hidden print:block p-8 text-center text-xl font-bold italic text-slate-400">
+        No hay pedidos listos y validados para imprimir guías de despacho.
+      </div>
+    );
+  }
+
+  return (
+    <div className="hidden print:block w-full bg-white text-black p-4">
+      <h1 className="text-3xl font-black text-center mb-8 tracking-tight">HOJA DE DESPACHO BLUHER <br/><span className="text-xl font-medium">FECHA DE CORTE: {new Date().toLocaleDateString('es-VE')}</span></h1>
+      
+      <div className="grid grid-cols-2 gap-6">
+        {pedidos.map((p) => (
+          <div key={p.id} className="border-4 border-slate-900 p-6 rounded-2xl break-inside-avoid shadow-sm relative">
+            {p.esMercadoLibre && <div className="absolute top-0 right-0 bg-black text-white font-black px-4 py-1 rounded-bl-xl text-sm uppercase tracking-widest border-b-2 border-l-2 border-slate-900">MERCADOLIBRE</div>}
+            <div className="flex justify-between border-b-2 border-slate-300 pb-3 mb-4 mt-2">
+              <span className="font-black text-2xl uppercase tracking-widest">{p.courier || 'ENVÍO'}</span>
+              <span className="text-sm font-bold bg-slate-100 px-3 py-1 rounded-lg">Fecha de Salida: {p.fechaDespacho}</span>
+            </div>
+            <div className="space-y-2 text-base">
+              <p><span className="font-black text-slate-600">DESTINATARIO:</span> <span className="font-bold text-xl ml-2">{p.clienteNombre?.toUpperCase()}</span></p>
+              <p><span className="font-black text-slate-600">DOCUMENTO DE IDENTIDAD:</span> <span className="font-bold ml-2">{p.clienteCedula}</span></p>
+              <p><span className="font-black text-slate-600">TELÉFONO DE CONTACTO:</span> <span className="font-bold ml-2">{p.clienteTelefono}</span></p>
+              <div className="mt-4"><span className="font-black text-slate-600 block mb-1">DIRECCIÓN DE ENTREGA DECLARADA:</span></div>
+              <p className="pl-4 border-l-4 border-slate-300 leading-relaxed font-bold bg-slate-50 p-2 rounded-r-lg">{p.direccion}</p>
+              <div className="mt-4 border-t-2 border-dashed border-slate-300 pt-4"><span className="font-black text-slate-600 block mb-2">LISTADO DE PRODUCTOS EMPACADOS:</span> 
+                 <div className="font-bold whitespace-pre-wrap leading-relaxed">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  ); 
+}
+
+function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConfirm, dialogs }) {
+  const [carrito, setCarrito] = useState({});
+  const updateQty = (key, delta) => { 
+    setCarrito(prev => { 
+      const n = Math.max(0, (prev[key]||0)+delta); 
+      if(n===0){const c={...prev}; delete c[key]; return c;} 
+      return {...prev, [key]:n}; 
+    }); 
+  };
+  if (!isOpen) return null;
+  const handleConfirm = () => {
+    const lineas = [];
+    Object.entries(carrito).forEach(([k, q]) => lineas.push(`- ${q}x ${k.replace('|', ' ')}`));
+    if (lineas.length === 0) return dialogs.alert("Selecciona productos del catálogo.");
+    onConfirm(lineas.join('\n'), carrito);
+  };
+  return (
+    <div className="fixed inset-0 bg-slate-900/80 z-[200] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in">
+      <div className="bg-white dark:bg-slate-800 rounded-[3rem] w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden shadow-2xl border dark:border-slate-700 transition-colors">
+        <div className="p-8 border-b dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800 transition-colors">
+           <h2 className="text-2xl font-black flex items-center gap-3 dark:text-white"><Search className="text-sky-600"/> Catálogo Oficial</h2>
+           <button onClick={onClose} className="p-3 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 transition-colors text-slate-500"><X size={24}/></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-8 bg-[#f8fafc] dark:bg-slate-900 grid grid-cols-1 md:grid-cols-2 gap-8 transition-colors">
+           {catalogo.filter(c=>c.categoria !== 'Complementos Automáticos').map(c => (
+              <div key={c.categoria} className="space-y-4">
+                 <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] border-b dark:border-slate-700 pb-2 transition-colors">{c.categoria}</h3>
+                 {c.productos.map(p => (
+                    <div key={p.nombre} className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] border dark:border-slate-700 shadow-sm space-y-4 hover:shadow-md transition-all">
+                       <div className="font-black text-base text-slate-800 dark:text-slate-100 transition-colors">{p.nombre}</div>
+                       {p.presentaciones.map((pres, i) => {
+                          const k = `${p.nombre}|${pres}`; const q = carrito[k] || 0;
+                          const disp = stock ? (typeof stock[k] === 'object' ? stock[k].envios : (stock[k]||0)) : 0;
+                          return (
+                            <div key={pres} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-4 rounded-[1.5rem] border dark:border-slate-700 transition-colors">
+                               <div className="flex flex-col"><span className="font-bold opacity-60 text-[10px] dark:text-slate-400 uppercase tracking-widest">{pres}</span><span className="font-black text-emerald-600 text-lg">${p.precios[i]}</span><span className={`text-[9px] font-black ${disp===0?'text-red-500':'text-sky-500'}`}>Stock: {disp}</span></div>
+                               <div className="flex items-center gap-3 bg-white dark:bg-slate-800 p-2 rounded-2xl border dark:border-slate-700 shadow-inner transition-colors">
+                                  <button type="button" onClick={()=>updateQty(k,-1)} className="w-8 h-8 flex items-center justify-center font-black text-slate-400 hover:text-slate-800 transition-colors">-</button>
+                                  <span className="font-black w-6 text-center dark:text-white text-lg">{q}</span>
+                                  <button type="button" onClick={()=>updateQty(k,1)} className="w-8 h-8 flex items-center justify-center font-black text-sky-600 hover:text-sky-800 transition-colors">+</button>
+                               </div>
+                            </div>
+                          )
+                       })}
+                    </div>
+                 ))}
+              </div>
+           ))}
+        </div>
+        <div className="p-8 border-t dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800 transition-colors"><div className="font-black opacity-50 dark:text-slate-400 tracking-widest uppercase text-xs">Items: {Object.values(carrito).reduce((a,b)=>a+b,0)}</div><button onClick={handleConfirm} className="bg-sky-600 text-white px-12 py-5 rounded-[2rem] font-black shadow-2xl hover:bg-sky-700 transition-all uppercase tracking-widest">Confirmar Selección</button></div>
+      </div>
+    </div>
+  );
+}
+
 function GlobalDialog({ config, setConfig }) {
   const [inputValue, setInputValue] = useState('');
 
@@ -128,7 +259,7 @@ function GlobalDialog({ config, setConfig }) {
   const handleCancel = () => setConfig(null);
 
   return (
-    <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+    <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
        <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl max-w-md w-full p-8 border border-slate-200 dark:border-slate-700 transition-colors animate-in zoom-in-95">
          <div className="flex items-center gap-4 mb-4">
            {config.type === 'alert' ? <div className="p-3 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-full"><AlertTriangle size={28}/></div> : <div className="p-3 bg-sky-100 dark:bg-sky-900/30 text-sky-600 rounded-full"><CheckCircle size={28}/></div>}
@@ -154,8 +285,9 @@ function GlobalDialog({ config, setConfig }) {
   );
 }
 
+
 // ==========================================
-// COMPONENTE PRINCIPAL
+// COMPONENTE PRINCIPAL APP
 // ==========================================
 export default function App() {
   const [user, setUser] = useState(null);
@@ -194,18 +326,17 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // --- RULE 3: AUTH FIRST ---
+  // --- AUTH FIRST ---
   useEffect(() => {
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else {
-          // Intentamos la auth anónima. Si falla, solo lo ignoramos sin crashear.
           try {
              await signInAnonymously(auth);
           } catch(e) {
-             console.warn("Autenticación anónima deshabilitada en Firebase. El portal público puede presentar errores al enviar.");
+             console.warn("Autenticación anónima deshabilitada en Firebase.");
           }
         }
       } catch (error) { console.error("Auth error", error); }
@@ -224,7 +355,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- DATA FETCHING (Gated by Auth para evitar Error de Permisos) ---
+  // --- DATA FETCHING (Gated by Auth) ---
   useEffect(() => {
     if (!user) return;
     let isFirstLoad = true;
@@ -259,13 +390,13 @@ export default function App() {
     return () => unsubs.forEach(u => u());
   }, [user]);
 
-  // Cargar datos operativos solo si el perfil fue aprobado (o si es necesario para el portal)
+  // Cargar datos operativos 
   useEffect(() => {
     if (!user) return;
     const unsubs = [];
     const onError = (e) => console.warn("Firestore Listener Error:", e.message);
 
-    // Públicamente disponibles (Catálogo y Stock)
+    // Públicamente disponibles (Catálogo, Stock, Config)
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), (docSnap) => {
       setCatalogo(docSnap.exists() && docSnap.data().categorias ? docSnap.data().categorias : DEFAULT_CATALOGO);
     }, onError));
@@ -278,7 +409,7 @@ export default function App() {
       if(docSnap.exists()) setConfigGral(docSnap.data());
     }, onError));
 
-    // Data restringida a empleados aprobados
+    // Data restringida
     if (userProfile && userProfile.isApproved) {
       unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), (snapshot) => {
         setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.fechaCreacion - a.fechaCreacion));
@@ -486,8 +617,9 @@ export default function App() {
 }
 
 // ==========================================
-// 1. PANEL DE VENTAS 
+// PANELES OPERATIVOS
 // ==========================================
+
 function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
@@ -496,6 +628,7 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
   const [formData, setFormData] = useState(defaultForm);
   const [editId, setEditId] = useState(null); 
   const [pedidoDevuelto, setPedidoDevuelto] = useState(null); 
+  
   const [enviando, setEnviando] = useState(false);
   const [textoCrudo, setTextoCrudo] = useState('');
   const [analizando, setAnalizando] = useState(false);
@@ -503,18 +636,6 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
 
   const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
   const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
-
-  useEffect(() => {
-    if (!formData.carritoObj) return;
-    let sub = 0;
-    Object.entries(formData.carritoObj).forEach(([key, qty]) => {
-      const [nom, pres] = key.split('|');
-      catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const idx=prod.presentaciones.indexOf(pres); if (idx >= 0 && prod.precios) sub += (prod.precios[idx]*qty); }}));
-    });
-    const d = parseFloat(formData.descuentoPorcentaje) || 0;
-    const final = sub * (1 - d/100);
-    setFormData(prev => ({ ...prev, montoPago: final.toFixed(2), tasa: prev.tasa || config.tasaDia }));
-  }, [formData.carritoObj, formData.descuentoPorcentaje, config.tasaDia, catalogo]);
 
   const copiarLinkTienda = () => {
     const linkTienda = `${window.location.origin}${window.location.pathname}#tienda`;
@@ -602,7 +723,7 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
     setFormData({
       clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, direccion: pedido.direccion,
       productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda, 
-      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje || '0', pagoAdicional: '', refAdicional: ''
+      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: ''
     });
     setEditId(pedido.id);
     setPedidoDevuelto(pedido);
@@ -788,8 +909,8 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
              <Input label="Teléfono de Contacto" name="clienteTelefono" value={formData.clienteTelefono} onChange={(e)=>setFormData({...formData, clienteTelefono: e.target.value})} required />
              
              <div className="flex flex-col">
-               <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Empresa de Envío</label>
-               <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} className="p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-[#f0f4f8] dark:bg-slate-900 outline-none focus:ring-2 focus:ring-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+               <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Empresa de Envío</label>
+               <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} className="p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 cursor-pointer shadow-sm">
                  <option value="ZOOM">ZOOM</option> <option value="MRW">MRW</option> <option value="Tealca">Tealca</option> <option value="Domesa">Domesa</option>
                </select>
              </div>
@@ -806,43 +927,44 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
              </div>
 
              <div className="md:col-span-2">
-               <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2 block">Dirección de Envío Completa</label>
-               <textarea name="direccion" value={formData.direccion} onChange={(e)=>setFormData({...formData, direccion: e.target.value})} required rows={2} className="w-full p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-[#f0f4f8] dark:bg-slate-900 outline-none focus:ring-2 focus:ring-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200"></textarea>
+               <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors block">Dirección de Envío Completa</label>
+               <textarea name="direccion" value={formData.direccion} onChange={(e)=>setFormData({...formData, direccion: e.target.value})} required rows={2} className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm"></textarea>
              </div>
              
-             <div className="md:col-span-2 bg-slate-50 dark:bg-slate-800/50 p-6 rounded-2xl border border-slate-100 dark:border-slate-700">
+             <div className="md:col-span-2 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl border border-slate-100 dark:border-slate-700">
                <div className="flex justify-between items-center mb-4">
                  <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"><Package size={20} className="text-sky-600"/> Inventario a Despachar</label>
-                 <button type="button" onClick={() => setIsCatalogOpen(true)} className="text-sm font-bold text-sky-700 dark:text-sky-400 bg-sky-100/50 dark:bg-sky-900/30 hover:bg-sky-100 dark:hover:bg-sky-900 py-2 px-5 rounded-lg transition-colors flex items-center gap-2"><Search size={16} /> Catálogo Visual</button>
+                 <button type="button" onClick={() => setIsCatalogOpen(true)} className="text-sm font-bold text-sky-700 dark:text-sky-400 bg-sky-100/50 dark:bg-sky-900/30 hover:bg-sky-100 dark:hover:bg-sky-900 py-2.5 px-6 rounded-xl transition-colors flex items-center gap-2 shadow-sm"><Search size={16} /> Catálogo Visual</button>
                </div>
                {formData.productos ? (
-                 <div className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap bg-white dark:bg-slate-900 p-4 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm font-medium leading-relaxed">{typeof formData.productos === 'string' ? formData.productos : JSON.stringify(formData.productos)}</div>
+                 <div className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm font-medium leading-relaxed">{typeof formData.productos === 'string' ? formData.productos : JSON.stringify(formData.productos)}</div>
                ) : (
-                 <div className="text-sm text-slate-400 italic font-bold text-center p-6 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl bg-white/50 dark:bg-slate-900/50">El carrito está vacío. Haz clic en "Catálogo Visual" para agregar productos.</div>
+                 <div className="text-sm text-slate-400 italic font-bold text-center p-8 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl bg-white/50 dark:bg-slate-800/50">El carrito está vacío. Haz clic en "Catálogo Visual" para agregar productos.</div>
                )}
              </div>
 
-             <div className={`md:col-span-2 p-6 rounded-2xl shadow-inner grid grid-cols-1 md:grid-cols-4 gap-5 transition-colors ${formData.esRegalo ? 'bg-purple-900/20 border-2 border-purple-500 text-purple-300' : 'bg-[#003366] dark:bg-slate-950 text-white'}`}>
+             <div className={`md:col-span-2 p-8 rounded-3xl shadow-inner grid grid-cols-1 md:grid-cols-4 gap-6 transition-colors ${formData.esRegalo ? 'bg-purple-900/20 border-2 border-purple-500 text-purple-300' : 'bg-[#003366] dark:bg-slate-950 text-white'}`}>
                <div className="flex flex-col"><InputDark disabled={formData.esRegalo} type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 45.20" /></div>
                <div className="flex flex-col">
-                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Moneda</label>
-                 <select value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} className="p-3 border-2 border-slate-600 rounded-xl bg-slate-700 outline-none focus:border-sky-500 transition-all font-bold text-white cursor-pointer disabled:opacity-50">
+                 <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2 transition-colors">Moneda de Pago</label>
+                 <select disabled={formData.esRegalo} value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} className="p-3.5 border-2 border-slate-700 rounded-2xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold text-white cursor-pointer disabled:opacity-50 shadow-inner">
                    <option value="USD">Dólares (USD)</option> <option value="VES">Bolívares (VES)</option>
                  </select>
                </div>
-               <div className="flex flex-col relative"><InputDark disabled={formData.esRegalo} type="number" step="0.01" label="Monto Pagado" value={formData.montoPago} onChange={(e)=>setFormData({...formData, montoPago: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 30.50" />
-                 {formData.tasa && formData.montoPago && <span className="text-xs text-emerald-400 font-bold absolute -bottom-5 left-0">{formData.moneda === 'USD' ? `Eq: Bs. ${((parseFloat(formData.montoPago)||0) * parseFloat(formData.tasa)).toFixed(2)}` : `Eq: $${((parseFloat(formData.montoPago)||0) / parseFloat(formData.tasa)).toFixed(2)}`}</span>}
+               <div className="flex flex-col relative">
+                  <InputDark disabled={formData.esRegalo} type="number" step="0.01" label="Monto Final a Pagar" value={formData.esRegalo ? '0' : formData.montoPago} onChange={(e)=>setFormData({...formData, montoPago: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 30.50" />
+                  {!formData.esRegalo && formData.tasa && formData.montoPago && <span className="text-xs text-sky-400 font-bold absolute -bottom-5 left-2">{formData.moneda === 'USD' ? `Equivale: Bs. ${((parseFloat(formData.montoPago)||0) * parseFloat(formData.tasa)).toFixed(2)}` : `Equivale: $${((parseFloat(formData.montoPago)||0) / parseFloat(formData.tasa)).toFixed(2)}`}</span>}
                </div>
-               <InputDark label="Referencia / Banco" value={formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required={!formData.esRegalo} placeholder="Ej. 1234 Banesco" />
+               <InputDark disabled={formData.esRegalo} label="Referencia / Banco" value={formData.esRegalo ? 'MUESTRA / OBSEQUIO VIP' : formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required={!formData.esRegalo} placeholder="Ej. 1234 Banesco" />
                
                {!formData.esRegalo && (
-                 <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-4"><InputDark type="number" step="0.01" label="Descuento Adicional Otorgado (%)" value={formData.descuentoPorcentaje} onChange={(e)=>setFormData({...formData, descuentoPorcentaje: e.target.value})} placeholder="Ej: 5 (Opcional)" /></div>
+                 <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-6"><InputDark type="number" step="0.01" label="Descuento Adicional Otorgado (%)" value={formData.descuentoPorcentaje} onChange={(e)=>setFormData({...formData, descuentoPorcentaje: e.target.value})} placeholder="Ej: 5 (Opcional)" /></div>
                )}
              </div>
              
              <div className="md:col-span-2 mt-4">
-                <button type="submit" disabled={enviando} className={`w-full text-white font-bold py-4 rounded-xl shadow-lg flex justify-center items-center gap-3 text-lg transition-all duration-300 hover:-translate-y-0.5 ${editId ? 'bg-amber-600 hover:bg-amber-700 hover:shadow-amber-600/30' : 'bg-sky-600 hover:bg-sky-700 hover:shadow-sky-600/30'}`}>
-                  {enviando ? <Loader2 className="animate-spin" /> : <><CheckCircle size={22} /> {editId ? 'Actualizar y Reenviar Pedido' : 'Procesar Orden de Venta'}</>}
+                <button type="submit" disabled={enviando} className={`w-full text-white font-black py-5 rounded-3xl shadow-2xl flex justify-center items-center gap-3 text-lg transition-all hover:scale-[1.02] tracking-widest uppercase ${editId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-sky-600 hover:bg-sky-700'}`}>
+                  {enviando ? <Loader2 className="animate-spin" /> : <><CheckCircle size={24} /> {editId ? 'Actualizar y Reenviar Pedido' : 'Procesar Orden de Venta'}</>}
                 </button>
              </div>
           </form>
@@ -864,14 +986,17 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
               {pedidos.filter(p => !p.esPublico).length === 0 ? <tr><td colSpan="4" className="p-8 text-center text-slate-400 italic font-bold">No hay ventas registradas aún.</td></tr> : 
                 pedidos.filter(p => !p.esPublico).map(p => (
                 <tr key={p.id} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
-                  <td className="p-4">
+                  <td className="p-4 align-top">
                     <div className="font-bold text-slate-800 dark:text-slate-100 text-base flex items-center gap-2">
                        {p.clienteNombre}
                        {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
                     </div>
                     <div className="text-xs font-semibold text-slate-400 mt-1">{new Date(p.fechaCreacion).toLocaleDateString()}</div>
+                    <div className="mt-2 text-[11px] bg-slate-50 dark:bg-slate-900/50 p-2 rounded border border-slate-100 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300">
+                       {p.productos}
+                    </div>
                   </td>
-                  <td className="p-4">
+                  <td className="p-4 align-top">
                     {p.esRegalo ? (
                        <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1"><Gift size={14}/> REGALO VIP</div>
                     ) : (
@@ -881,11 +1006,11 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
                        </>
                     )}
                   </td>
-                  <td className="p-4">
+                  <td className="p-4 align-top">
                     <StatusBadge status={p.status} />
                     {p.status === 'Rechazado' && <div className="text-[10px] text-red-600 mt-1.5 font-bold bg-red-50 dark:bg-red-900/30 p-2 rounded-lg border border-red-100 dark:border-red-800 max-w-[200px] line-clamp-2 leading-relaxed" title={p.motivoRechazo}>Motivo: {p.motivoRechazo}</div>}
                   </td>
-                  <td className="p-4 text-right">
+                  <td className="p-4 align-top text-right">
                     <div className="flex flex-col items-end gap-2">
                       {p.status === 'Rechazado' && (
                         <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 hover:bg-amber-200 text-xs font-bold py-1.5 px-3 rounded-lg transition-colors shadow-sm">Corregir Orden</button>
@@ -915,14 +1040,12 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
            {enEspera.length === 0 ? <p className="text-sm text-amber-600 dark:text-amber-400">No hay pedidos en lista de espera.</p> : (
              <div className="space-y-4">
                {enEspera.map(p => (
-                 <div key={p.id} className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-amber-100 dark:border-slate-700 flex justify-between items-center">
+                 <div key={p.id} className="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-amber-100 dark:border-slate-700 flex justify-between items-center transition-colors">
                    <div>
-                     <div className="font-bold text-slate-800 dark:text-slate-200">{p.clienteNombre}</div>
-                     <div className="text-xs text-slate-500 mt-1">{p.clienteTelefono} - {new Date(p.fechaCreacion).toLocaleDateString()}</div>
+                     <div className="font-bold text-lg">{p.clienteNombre}</div>
+                     <div className="text-xs opacity-60">Desde {new Date(p.fechaCreacion).toLocaleDateString()}</div>
                    </div>
-                   <div className="flex gap-2">
-                     <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-sky-100 text-sky-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-sky-200 transition-colors">Retomar Pedido</button>
-                   </div>
+                   <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-sky-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-sky-700 transition-colors">Retomar Pedido</button>
                  </div>
                ))}
              </div>
@@ -936,11 +1059,11 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
            {pedidosWeb.length === 0 ? <p className="text-sm text-emerald-600 dark:text-emerald-400">No hay nuevos pedidos de clientes web.</p> : (
              <div className="space-y-4">
                {pedidosWeb.map(p => (
-                 <div key={p.id} className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-emerald-100 dark:border-slate-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                 <div key={p.id} className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-emerald-100 dark:border-slate-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-colors shadow-sm">
                    <div>
-                     <div className="font-bold text-slate-800 dark:text-slate-200">{p.clienteNombre} <span className="text-xs font-normal text-slate-500">({p.clienteTelefono})</span></div>
+                     <div className="font-black text-lg uppercase tracking-tight">{p.clienteNombre} <span className="text-xs font-normal text-slate-500">({p.clienteTelefono})</span></div>
                      <div className="text-xs font-semibold text-emerald-600 mt-1">Total Cotizado: ${p.montoUsd}</div>
-                     <div className="text-xs text-slate-500 mt-2 bg-slate-50 dark:bg-slate-900 p-2 rounded whitespace-pre-wrap">{p.productos}</div>
+                     <div className="text-xs text-slate-500 mt-2 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg whitespace-pre-wrap">{p.productos}</div>
                      
                      <div className="flex flex-col gap-1 mt-3">
                         <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Ref: {p.referencia}</div>
@@ -948,9 +1071,9 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
                      </div>
                    </div>
                    <div className="flex flex-col gap-2 shrink-0">
-                     <button onClick={() => cargarPedidoParaEditar(p)} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-700 flex items-center gap-1 transition-colors"><CheckCircle size={14}/> Procesar Venta</button>
-                     <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="bg-amber-500 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-amber-600 flex items-center gap-1 transition-colors"><Clock size={14}/> Mover a Espera</button>
-                     <button onClick={() => cambiarEstadoPedido(p.id, 'Rechazado')} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-100 flex items-center gap-1 transition-colors"><XCircle size={14}/> Descartar Web</button>
+                     <button onClick={() => {setFormData({...p, montoPago: p.montoUsd.toString(), tasa: p.tasaAplicada.toString()}); setEditId(p.id); setVista('nuevo');}} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-emerald-700 flex items-center gap-2 transition-colors shadow-md"><CheckCircle size={14}/> Validar Venta</button>
+                     <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="bg-amber-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-amber-600 flex items-center gap-2 transition-colors shadow-md"><Clock size={14}/> Mover a Espera</button>
+                     <button onClick={() => cambiarEstadoPedido(p.id, 'Rechazado')} className="bg-red-50 text-red-600 px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-red-100 flex items-center gap-2 transition-colors"><XCircle size={14}/> Descartar</button>
                    </div>
                  </div>
                ))}
@@ -981,7 +1104,7 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, logg
 // ==========================================
 // 3. PANEL DE ADMINISTRACIÓN
 // ==========================================
-function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId, dialogs, config }) {
+function PanelAdmin({ perfil, config, pedidos, db, appId, dialogs, loggear }) {
   const [vistaAdmin, setVistaAdmin] = useState('pendientes');
   const esAuditor = [ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(perfil?.role);
   const esAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(perfil?.role);
@@ -1002,27 +1125,36 @@ function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId, dialogs, confi
   };
 
   const validarPago = async (pedido) => {
-    try {
-      const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
-      let currentStock = { ...stock };
-      Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => {
-         let actualEnvios = typeof currentStock[itemKey] === 'object' ? currentStock[itemKey].envios : (currentStock[itemKey] || 0);
-         let actualRecep = typeof currentStock[itemKey] === 'object' ? currentStock[itemKey].recepcion : 0;
-         currentStock[itemKey] = { envios: Math.max(0, actualEnvios - qty), recepcion: actualRecep };
-      });
-      await setDoc(stockRef, currentStock);
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Validado' });
-      loggear('PAGO_VALIDADO', `Aprobación y descuento de stock: ${pedido.clienteNombre}`);
-    } catch(e) { console.error(e); dialogs.alert("Ocurrió un error al validar el pago.", "Error"); }
+    dialogs.prompt("¿El cliente pagó de más?\n\nSi hay dinero SOBRANTE a favor del cliente, ingrésalo en dólares ($). Deja 0 si el pago fue exacto.", async (valSobrante) => {
+      let sobranteUsd = parseFloat(valSobrante) || 0;
+
+      try {
+        const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
+        let currentStock = { ...stock };
+        Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => {
+           let actualEnvios = typeof currentStock[itemKey] === 'object' ? currentStock[itemKey].envios : (currentStock[itemKey] || 0);
+           let actualRecep = typeof currentStock[itemKey] === 'object' ? currentStock[itemKey].recepcion : 0;
+           currentStock[itemKey] = { envios: Math.max(0, actualEnvios - qty), recepcion: actualRecep };
+        });
+        await setDoc(stockRef, currentStock);
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Validado', sobranteUsd });
+        loggear('PAGO_VALIDADO', `Aprobación y descuento de stock: ${pedido.clienteNombre} ${sobranteUsd > 0 ? `(Sobrante registrado: $${sobranteUsd})` : ''}`);
+      } catch(e) { console.error(e); dialogs.alert("Ocurrió un error al validar el pago.", "Error"); }
+    }, "Validar Pago");
   };
 
   const rechazarPago = (pedido) => {
     dialogs.prompt(`Escribe el motivo de devolución a Ventas para el pedido de ${pedido.clienteNombre}:\n(Ej: Faltan dinero en la transferencia, Producto sin stock)`, async (motivo) => {
       if (!motivo) return;
-      try {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Rechazado', motivoRechazo: motivo });
-        loggear('PAGO_RECHAZADO', `Devolución: ${pedido.clienteNombre} - ${motivo}`);
-      } catch(e) { console.error(e); }
+      
+      dialogs.prompt("¿Cuánto dinero FALTÓ en el pago?\n\nIngresa el monto faltante en dólares ($). Deja 0 si lo devuelves por otra razón que no sea dinero.", async (valFaltante) => {
+        let faltanteUsd = parseFloat(valFaltante) || 0;
+        try {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Rechazado', motivoRechazo: motivo, faltanteUsd });
+          loggear('PAGO_RECHAZADO', `Devolución: ${pedido.clienteNombre} - ${motivo} (Faltante: $${faltanteUsd})`);
+        } catch(e) { console.error(e); }
+      }, "Monto Faltante");
+
     }, "Devolver Pedido");
   };
 
@@ -1078,23 +1210,32 @@ function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId, dialogs, confi
                    </div>
                  </td>
                  <td className="p-4 align-top">
-                   <div className="font-black text-slate-800 dark:text-slate-100 text-xl">${(p.montoUsd||0).toFixed(2)}</div>
-                   <div className="font-bold text-emerald-600 dark:text-emerald-400 text-base mb-1">Bs. {(p.montoVes||0).toFixed(2)}</div>
-                   <div className="text-xs text-slate-500 mb-2">Tasa: Bs. {p.tasaAplicada}</div>
-                   <div className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded inline-block mb-3 border border-slate-200 dark:border-slate-700">Ref: {p.referencia}</div>
+                   {p.esRegalo ? (
+                      <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 mb-2"><Gift size={20}/> REGALO VIP</div>
+                   ) : (
+                      <>
+                        <div className="font-black text-slate-800 dark:text-slate-100 text-2xl">${(p.montoUsd||0).toFixed(2)}</div>
+                        <div className="font-bold text-emerald-600 dark:text-emerald-400 text-lg mb-2">Bs. {(p.montoVes||0).toFixed(2)}</div>
+                        <div className="text-xs font-semibold text-slate-500 mb-1">Tasa Aplicada: Bs. {p.tasaAplicada}</div>
+                        {p.sobranteUsd > 0 && <div className="text-xs font-bold text-purple-600 dark:text-purple-400 mb-2">+ Sobrante: ${p.sobranteUsd}</div>}
+                        {p.faltanteUsd > 0 && <div className="text-xs font-bold text-red-600 dark:text-red-400 mb-2">- Faltante: ${p.faltanteUsd}</div>}
+                        {p.descuentoPorcentaje > 0 && <div className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded w-max my-1 border border-emerald-200 dark:border-emerald-800">Descuento aplicado: {p.descuentoPorcentaje}%</div>}
+                      </>
+                   )}
+                   <div className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-[#f0f4f8] dark:bg-slate-800 px-3 py-1.5 rounded-lg inline-block my-3 border border-slate-200 dark:border-slate-700">Ref: {p.referencia}</div>
                    <div><StatusBadge status={p.status}/></div>
                  </td>
                  <td className="p-4 align-top text-right">
                    <div className="flex flex-col gap-2 items-end">
                      {esAdmin && p.status === 'Pendiente' && (
                        <>
-                         <button onClick={()=>validarPago(p)} className="bg-sky-600 text-white px-4 py-2 rounded-lg font-bold text-xs shadow-md hover:bg-sky-700 transition-colors w-full sm:w-auto">Aprobar y Descontar</button>
-                         <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-4 py-2 rounded-lg font-bold text-xs transition-colors w-full sm:w-auto">Devolver</button>
+                         <button onClick={()=>validarPago(p)} className="bg-sky-600 text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-md hover:bg-sky-700 transition-all hover:-translate-y-0.5 w-full sm:w-auto">Aprobar y Descontar</button>
+                         <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-5 py-2.5 rounded-xl font-bold text-xs transition-colors w-full sm:w-auto">Devolver Pedido</button>
                        </>
                      )}
                      {(esAuditor || esAdmin) && p.status !== 'Pendiente' && (
-                       <button onClick={()=>marcarAuditoria(p.id, p.auditado)} className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 border-2 transition-colors w-full sm:w-auto ${p.auditado ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
-                         {p.auditado ? <><ShieldCheck size={14}/> Validado Auditor</> : <><Eye size={14}/> Marcar Revisión</>}
+                       <button onClick={()=>marcarAuditoria(p.id, p.auditado)} className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border-2 transition-all w-full sm:w-auto ${p.auditado ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+                         {p.auditado ? <><ShieldCheck size={16}/> Auditoría Validada</> : <><Eye size={16}/> Marcar Revisión</>}
                        </button>
                      )}
                    </div>
@@ -1237,46 +1378,52 @@ function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, log
                     <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">
                        {p.clienteNombre}
                     </div>
-                    <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1">{p.courier}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">{p.clienteTelefono}</div>
-                    <div className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider mt-2">Sale: {p.fechaDespacho}</div>
+                    <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-2">{p.courier}</div>
+                    <div className="text-xs font-semibold text-slate-500 mt-2">Tel: {p.clienteTelefono}</div>
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mt-3">Sale: {p.fechaDespacho}</div>
                   </td>
                   <td className="p-4 align-top">
-                    <div className="font-medium bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700 mb-3 whitespace-pre-wrap shadow-sm text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
-                    <div className="text-[13px] text-slate-500 dark:text-slate-400 flex items-start gap-2"><div className="mt-0.5 text-sky-600 dark:text-sky-400"><Package size={14}/></div>{p.direccion}</div>
+                    {p.esMercadoLibre && vistaDespacho === 'pendientes' && (
+                      <div className="mb-3 bg-yellow-400 text-slate-900 p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider animate-pulse">
+                        <AlertTriangle size={18} className="text-slate-900 shrink-0" /> ¡MERCADOLIBRE! IMPRIMIR GUÍA DE ML
+                      </div>
+                    )}
+                    <div className="font-medium bg-[#f0f4f8] dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-3 whitespace-pre-wrap shadow-sm text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
+                    <div className="text-[13px] font-semibold text-slate-600 dark:text-slate-400 flex items-start gap-2 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg"><div className="mt-0.5 text-sky-600"><Package size={16}/></div>{p.direccion}</div>
                   </td>
                   <td className="p-4 align-top bg-slate-50/50 dark:bg-slate-900/30">
                     {p.status === 'Despachado' ? (
-                      <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                        <div className="text-sm mb-3"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100">{p.guia}</span></div>
-                        <div className="flex flex-col gap-2 mb-4">
-                          {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-semibold flex items-center gap-1.5"><ImageIcon size={14}/> Recibo Digital</a>}
-                          {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-semibold flex items-center gap-1.5"><Camera size={14}/> Foto del Paquete</a>}
+                      <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                        <div className="text-sm mb-4"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100 text-lg">{p.guia}</span></div>
+                        <div className="flex flex-col gap-3 mb-5">
+                          {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors"><ImageIcon size={16}/> Ver Recibo Digital</a>}
+                          {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors"><Camera size={16}/> Ver Foto del Paquete</a>}
                         </div>
-                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-semibold underline decoration-slate-300 transition-colors">Modificar Envío</button>
+                        <div className="text-xs text-emerald-600 dark:text-emerald-400 font-black mb-3 uppercase tracking-widest flex items-center gap-1"><CheckCircle size={14}/> Despachado OK</div>
+                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors">Corregir Información de Envío</button>
                       </div>
                     ) : (
-                      <div className="space-y-3 bg-white dark:bg-slate-800 p-4 rounded-xl border border-sky-100 dark:border-slate-700 shadow-sm">
-                        <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-2.5 border-2 border-slate-200 dark:border-slate-600 rounded-lg font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.guia || ''} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                      <div className="space-y-4 bg-white dark:bg-slate-800 p-5 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm">
+                        <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.guia || ''} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
                         
                         <div className="flex gap-2 relative">
-                          <input type="text" placeholder="URL Recibo Guía" className="w-full text-xs p-2.5 border-2 border-slate-200 dark:border-slate-600 rounded-lg pr-10 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.link || ''} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
-                          <label className="absolute right-1.5 top-1.5 p-1.5 bg-sky-100 dark:bg-sky-900/50 text-sky-600 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-md cursor-pointer transition-colors" title="Subir Foto">
-                            {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
+                          <input type="text" placeholder="URL Recibo Guía" className="w-full text-xs p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl pr-12 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white font-semibold transition-colors" value={guiasInput[p.id]?.link || ''} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
+                          <label className="absolute right-1.5 top-1.5 p-2 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-lg cursor-pointer transition-colors shadow-sm" title="Subir Foto de Galería">
+                            {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
                             <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
                           </label>
                         </div>
 
                         <div className="flex gap-2 relative">
-                          <input type="text" placeholder="URL Foto Empaque" className="w-full text-xs p-2.5 border-2 border-slate-200 dark:border-slate-600 rounded-lg pr-10 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.fotoProductos || ''} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
-                          <label className="absolute right-1.5 top-1.5 p-1.5 bg-sky-100 dark:bg-sky-900/50 text-sky-600 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-md cursor-pointer transition-colors" title="Subir Foto">
-                            {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                          <input type="text" placeholder="URL Foto Empaque" className="w-full text-xs p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl pr-12 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white font-semibold transition-colors" value={guiasInput[p.id]?.fotoProductos || ''} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
+                          <label className="absolute right-1.5 top-1.5 p-2 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-lg cursor-pointer transition-colors shadow-sm" title="Subir Foto de Galería">
+                            {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
                             <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} />
                           </label>
                         </div>
 
-                        <button onClick={() => guardarGuia(p)} className="w-full bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold py-2.5 rounded-lg mt-2 flex items-center justify-center gap-2 transition-all shadow-md">
-                          Confirmar y Archivar
+                        <button onClick={() => guardarGuia(p)} className="w-full bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold py-3.5 rounded-xl mt-2 flex items-center justify-center gap-2 transition-all shadow-md hover:-translate-y-0.5">
+                          <Truck size={18}/> Confirmar y Archivar
                         </button>
                       </div>
                     )}
@@ -1777,23 +1924,79 @@ function PanelReportes({ pedidos, catalogo, stock }) {
   const descuentos = validados.reduce((acc, curr) => acc + (curr.descuentoUsd || 0), 0);
   const totalUSD = validados.reduce((acc, curr) => acc + (curr.montoUsd || 0), 0) - sobrantes;
 
+  const topProductos = useMemo(() => {
+    const map = {};
+    validados.forEach(p => {
+        if (p.carritoObj) {
+            Object.entries(p.carritoObj).forEach(([key, qty]) => {
+                if (!map[key]) map[key] = { cantidad: 0, valor: 0 };
+                map[key].cantidad += qty;
+                const [n, pr] = key.split('|');
+                let precioUnitario = 0;
+                catalogo.forEach(c => c.productos.forEach(prod => {
+                    if (prod.nombre === n) {
+                        const idx = prod.presentaciones.indexOf(pr);
+                        if (idx >= 0) precioUnitario = prod.precios[idx] || 0;
+                    }
+                }));
+                map[key].valor += (qty * precioUnitario);
+            });
+        }
+    });
+    return Object.entries(map)
+        .map(([key, data]) => ({ key, ...data }))
+        .sort((a, b) => b.cantidad - a.cantidad)
+        .slice(0, 10);
+  }, [validados, catalogo]);
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-       <div className="bg-emerald-600 text-white p-10 rounded-[2.5rem] shadow-2xl flex items-center justify-between transition-transform hover:scale-105 border-b-8 border-emerald-800">
-          <div>
-            <div className="text-xs uppercase font-black tracking-widest opacity-60 mb-1">Cierre Neto Ventas</div>
-            <div className="text-5xl font-black">${totalUSD.toFixed(2)}</div>
-            {(sobrantes > 0 || descuentos > 0) && <div className="text-xs mt-2 opacity-70 font-bold">Restado: ${sobrantes} Sobrante | ${descuentos.toFixed(2)} Desc.</div>}
-          </div>
-          <DollarSign size={60} className="opacity-20"/>
-       </div>
-       <div className="bg-purple-600 text-white p-10 rounded-[2.5rem] shadow-2xl flex items-center justify-between transition-transform hover:scale-105 border-b-8 border-purple-800">
-          <div>
-            <div className="text-xs uppercase font-black tracking-widest opacity-60 mb-1">Valorización de Almacén</div>
-            <div className="text-5xl font-black">${totalVal.toFixed(2)}</div>
-          </div>
-          <Archive size={60} className="opacity-20"/>
-       </div>
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+         <div className="bg-emerald-600 text-white p-10 rounded-[2.5rem] shadow-2xl flex items-center justify-between transition-transform hover:scale-105 border-b-8 border-emerald-800">
+            <div>
+              <div className="text-xs uppercase font-black tracking-widest opacity-60 mb-1">Cierre Neto Ventas</div>
+              <div className="text-5xl font-black">${totalUSD.toFixed(2)}</div>
+              {(sobrantes > 0 || descuentos > 0) && <div className="text-xs mt-2 opacity-70 font-bold">Restado: ${sobrantes} Sobrante | ${descuentos.toFixed(2)} Desc.</div>}
+            </div>
+            <DollarSign size={60} className="opacity-20"/>
+         </div>
+         <div className="bg-purple-600 text-white p-10 rounded-[2.5rem] shadow-2xl flex items-center justify-between transition-transform hover:scale-105 border-b-8 border-purple-800">
+            <div>
+              <div className="text-xs uppercase font-black tracking-widest opacity-60 mb-1">Valorización de Almacén</div>
+              <div className="text-5xl font-black">${totalVal.toFixed(2)}</div>
+            </div>
+            <Archive size={60} className="opacity-20"/>
+         </div>
+      </div>
+
+      <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+         <h3 className="text-xl font-black mb-6 text-slate-800 dark:text-slate-100 flex items-center gap-2"><Sparkles className="text-sky-600"/> Top 10 Productos Más Vendidos</h3>
+         <div className="overflow-x-auto">
+           <table className="w-full text-left text-sm border-collapse">
+             <thead>
+               <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
+                 <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Producto y Presentación</th>
+                 <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-center">Unidades Vendidas</th>
+                 <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Ingreso Generado</th>
+               </tr>
+             </thead>
+             <tbody>
+               {topProductos.length === 0 ? <tr><td colSpan="3" className="p-6 text-center text-slate-400 italic">No hay datos para mostrar.</td></tr> : topProductos.map((prod, idx) => (
+                  <tr key={prod.key} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                     <td className="p-4">
+                        <div className="flex items-center gap-3">
+                           <div className="w-6 h-6 rounded-full bg-sky-100 dark:bg-sky-900 text-sky-600 dark:text-sky-400 flex items-center justify-center font-black text-xs">{idx + 1}</div>
+                           <span className="font-bold text-slate-800 dark:text-slate-100">{prod.key.replace('|', ' - ')}</span>
+                        </div>
+                     </td>
+                     <td className="p-4 text-center font-black text-sky-600 dark:text-sky-400 text-lg">{prod.cantidad}</td>
+                     <td className="p-4 text-right font-black text-emerald-600 dark:text-emerald-400 text-lg">${prod.valor.toFixed(2)}</td>
+                  </tr>
+               ))}
+             </tbody>
+           </table>
+         </div>
+      </div>
     </div>
   );
 }
@@ -1901,135 +2104,10 @@ function PanelLogs({ logs }) {
           {logs.map(l => (
             <div key={l.id} className="p-3 border-b dark:border-slate-800 text-[10px] flex gap-6 hover:bg-white dark:hover:bg-slate-800 transition-colors rounded-lg">
                <span className="font-black text-sky-600 dark:text-sky-400 shrink-0">{new Date(l.fecha).toLocaleString()}</span>
-               <span className="font-medium text-slate-600 dark:text-slate-300"><b className="dark:text-white uppercase">{l.usuarioNombre}</b>: {l.detalle}</span>
+               <span className="font-medium text-slate-600 dark:text-slate-300"><b className="dark:text-white uppercase">{l.usuarioEmail}</b>: {l.detalle}</span>
             </div>
           ))}
        </div>
-    </div>
-  );
-}
-
-// ==========================================
-// PORTAL PÚBLICO DE CLIENTES (REFORZADO)
-// ==========================================
-function PublicPortal({ catalogo, stock, config, db, appId, dialogs, onBack, darkMode, setDarkMode }) {
-  const [f, setF] = useState({ clienteNombre: '', clienteTelefono: '', referencia: '', link: '', carrito: null, txt: '' });
-  const [sub, setSub] = useState(false);
-  const [total, setTotal] = useState(0);
-  const [isCatOpen, setOpen] = useState(false);
-
-  const upFile = async (e) => {
-    const file = e.target.files[0]; if (!file) return; setSub(true);
-    try {
-      const reader = new FileReader(); reader.readAsDataURL(file);
-      reader.onloadend = async () => {
-        const base64 = reader.result.split(',')[1];
-        const res = await fetch(URL_GOOGLE_SCRIPT, { method: 'POST', body: JSON.stringify({ fileName: `PAGO_${Date.now()}.jpg`, mimeType: file.type, data: base64 }) });
-        const data = await res.json(); setF(prev => ({ ...prev, link: data.url })); setSub(false);
-      };
-    } catch(e) { setSub(false); dialogs.alert("Error subiendo el archivo."); }
-  };
-
-  const send = async (e) => {
-    e.preventDefault();
-    if (!f.link) return dialogs.alert("La captura de pago es OBLIGATORIA para enviar el pedido.");
-    try {
-      const auth_curr = getAuth(); if (!auth_curr.currentUser) await signInAnonymously(auth_curr);
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), { ...f, montoUsd: total, status: 'Por Pagar / Cotización', esPublico: true, fechaCreacion: Date.now(), linkComprobantePago: f.link, tasaAplicada: config.tasaDia });
-      dialogs.alert("¡Pedido Enviado! En breve te contactaremos."); onBack();
-    } catch(e) { dialogs.alert("Error de red."); }
-  };
-
-  return (
-    <div className="min-h-screen bg-[#f0f4f8] dark:bg-slate-900 pb-20 transition-colors">
-      <header className="bg-white dark:bg-slate-950 p-6 border-b dark:border-slate-800 flex justify-between items-center sticky top-0 z-50 shadow-sm transition-colors">
-        <img src={BRAND_LOGO} alt="Logo" className="h-10 mix-blend-multiply dark:invert brightness-200 dark:brightness-100" />
-        <div className="flex gap-4 items-center">
-          <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full shadow text-sky-600 transition-all">{darkMode ? <Sun/> : <Moon/>}</button>
-          <button onClick={onBack} className="text-sm font-bold text-slate-500 hover:text-sky-600 transition-colors flex items-center gap-1"><LogOut size={16}/> Salir</button>
-        </div>
-      </header>
-      <div className="max-w-xl mx-auto mt-10 p-10 bg-white dark:bg-slate-800 rounded-[3rem] shadow-2xl space-y-8 border dark:border-slate-700 animate-in slide-in-from-bottom-4 transition-colors">
-        <h1 className="text-3xl font-black text-center dark:text-white uppercase tracking-tighter">Compra Bluher</h1>
-        <div className="text-center p-6 bg-sky-50 dark:bg-sky-900/30 rounded-3xl border-2 border-sky-100 dark:border-sky-800 transition-colors"><div className="font-bold text-sky-600 text-xs mb-1 uppercase tracking-widest">Tasa del Día: {config.tasaDia} Bs/$</div><div className="text-4xl font-black text-slate-800 dark:text-white">${total.toFixed(2)}</div><div className="text-sky-600 font-bold">≈ {(total * config.tasaDia).toFixed(2)} Bs.</div></div>
-        <form onSubmit={send} className="space-y-6">
-          <Input label="Tu Nombre Completo" value={f.clienteNombre} onChange={e=>setF({...f, clienteNombre: e.target.value})} required />
-          <Input label="WhatsApp" value={f.clienteTelefono} onChange={e=>setF({...f, clienteTelefono: e.target.value})} required placeholder="0412-0000000" />
-          <button type="button" onClick={()=>setOpen(true)} className="w-full py-4 bg-sky-100 text-sky-700 font-black rounded-2xl border-2 border-sky-200 uppercase tracking-widest text-xs shadow-md hover:bg-sky-200 transition-colors">Catálogo de Productos</button>
-          <div className="p-6 bg-slate-900 text-white rounded-[2rem] space-y-6 border-b-8 border-sky-600 shadow-xl transition-colors">
-             <InputDark label="Referencia o Banco de Pago" value={f.referencia} onChange={e=>setF({...f, referencia: e.target.value})} required />
-             <label className="block bg-sky-600 p-4 text-center rounded-2xl font-black uppercase tracking-tighter cursor-pointer shadow-lg hover:bg-sky-500 transition-colors">
-                {sub ? <div className="flex justify-center items-center gap-2"><Loader2 className="animate-spin" size={20}/> Sincronizando...</div> : <div className="flex justify-center items-center gap-2"><Camera size={20}/> Subir Capture (OBLIGATORIO)</div>}
-                <input type="file" onChange={upFile} className="hidden" accept="image/*"/>
-             </label>
-             {f.link && <div className="text-[10px] text-emerald-400 font-bold flex items-center justify-center gap-2 animate-bounce"><CheckCircle size={12}/> Pago cargado exitosamente</div>}
-          </div>
-          <button type="submit" className="w-full py-5 bg-[#003366] text-white font-black rounded-3xl shadow-2xl hover:scale-[1.02] transition-transform text-lg uppercase tracking-widest">Finalizar Compra</button>
-        </form>
-      </div>
-      <ModalCatalogo catalogo={catalogo} stock={stock} isOpen={isCatOpen} onClose={()=>setOpen(false)} dialogs={dialogs}
-        onConfirm={(txt, obj)=>{
-          setF(prev => ({...prev, txt, carrito: obj }));
-          let subtotal = 0;
-          Object.entries(obj).forEach(([k,q]) => { const [n, p] = k.split('|'); catalogo.forEach(c => c.productos.forEach(pr => { if(pr.nombre===n){ const idx=pr.presentaciones.indexOf(p); subtotal += pr.precios[idx]*q; }})); });
-          setTotal(subtotal); setOpen(false);
-        }} />
-    </div>
-  );
-}
-
-// --- UTILS ---
-function Input({ label, ...props }) { return (<div className="flex flex-col"><label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2 dark:text-slate-400 transition-colors">{label}</label><input className="p-3.5 border-2 border-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white rounded-2xl focus:border-sky-500 outline-none font-bold transition-all shadow-sm" {...props}/></div>); }
-function InputDark({ label, ...props }) { return (<div className="flex flex-col"><label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2 transition-colors">{label}</label><input className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all shadow-inner disabled:opacity-50" {...props}/></div>); }
-function StatusBadge({ status }) { const b = { 'Pendiente': 'bg-amber-100 text-amber-700 border-amber-200', 'Validado': 'bg-sky-100 text-sky-700 border-sky-200', 'Despachado': 'bg-emerald-100 text-emerald-700 border-emerald-200', 'En Espera (Sin Stock)': 'bg-orange-100 text-orange-700 border-orange-200', 'Por Pagar / Cotización': 'bg-purple-100 text-purple-700 border-purple-200' }; return <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${b[status] || 'bg-slate-100 text-slate-600'}`}>{status}</span>; }
-function TabButton({ active, onClick, icon, label, badge, badgeColor }) { return (<button onClick={onClick} className={`flex items-center justify-between w-full p-4 rounded-2xl font-black transition-all ${active ? 'bg-sky-600 text-white shadow-xl scale-105' : 'text-sky-100/60 dark:text-slate-400 hover:bg-sky-900/40 dark:hover:bg-slate-800/80 hover:text-white'}`}><div className="flex items-center gap-3">{icon} <span className="hidden md:inline text-xs uppercase tracking-widest">{label}</span></div> {badge > 0 && <span className={`${badgeColor || 'bg-red-500'} text-white text-[9px] px-2 py-0.5 rounded-full font-bold shadow-lg`}>{badge}</span>}</button>); }
-function VistaImpresion({ pedidos }) { return <div className="hidden"></div>; }
-
-function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConfirm, dialogs }) {
-  const [carrito, setCarrito] = useState({});
-  const updateQty = (key, delta) => { setCarrito(prev => { const n = Math.max(0, (prev[key]||0)+delta); if(n===0){const c={...prev}; delete c[key]; return c;} return {...prev, [key]:n}; }); };
-  if (!isOpen) return null;
-  const handleConfirm = () => {
-    const lineas = [];
-    Object.entries(carrito).forEach(([k, q]) => lineas.push(`- ${q}x ${k.replace('|', ' ')}`));
-    if (lineas.length === 0) return dialogs.alert("Selecciona productos del catálogo.");
-    onConfirm(lineas.join('\n'), carrito);
-  };
-  return (
-    <div className="fixed inset-0 bg-slate-900/80 z-[200] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in">
-      <div className="bg-white dark:bg-slate-800 rounded-[3rem] w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden shadow-2xl border dark:border-slate-700 transition-colors">
-        <div className="p-8 border-b dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800 transition-colors">
-           <h2 className="text-2xl font-black flex items-center gap-3 dark:text-white"><Search className="text-sky-600"/> Catálogo Oficial</h2>
-           <button onClick={onClose} className="p-3 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 transition-colors text-slate-500"><X size={24}/></button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-8 bg-[#f8fafc] dark:bg-slate-900 grid grid-cols-1 md:grid-cols-2 gap-8 transition-colors">
-           {catalogo.filter(c=>c.categoria !== 'Complementos Automáticos').map(c => (
-              <div key={c.categoria} className="space-y-4">
-                 <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] border-b dark:border-slate-700 pb-2 transition-colors">{c.categoria}</h3>
-                 {c.productos.map(p => (
-                    <div key={p.nombre} className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] border dark:border-slate-700 shadow-sm space-y-4 hover:shadow-md transition-all">
-                       <div className="font-black text-base text-slate-800 dark:text-slate-100 transition-colors">{p.nombre}</div>
-                       {p.presentaciones.map((pres, i) => {
-                          const k = `${p.nombre}|${pres}`; const q = carrito[k] || 0;
-                          const disp = stock ? (typeof stock[k] === 'object' ? stock[k].envios : (stock[k]||0)) : 0;
-                          return (
-                            <div key={pres} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-4 rounded-[1.5rem] border dark:border-slate-700 transition-colors">
-                               <div className="flex flex-col"><span className="font-bold opacity-60 text-[10px] dark:text-slate-400 uppercase tracking-widest">{pres}</span><span className="font-black text-emerald-600 text-lg">${p.precios[i]}</span><span className={`text-[9px] font-black ${disp===0?'text-red-500':'text-sky-500'}`}>Stock: {disp}</span></div>
-                               <div className="flex items-center gap-3 bg-white dark:bg-slate-800 p-2 rounded-2xl border dark:border-slate-700 shadow-inner transition-colors">
-                                  <button type="button" onClick={()=>updateQty(k,-1)} className="w-8 h-8 flex items-center justify-center font-black text-slate-400 hover:text-slate-800 transition-colors">-</button>
-                                  <span className="font-black w-6 text-center dark:text-white text-lg">{q}</span>
-                                  <button type="button" onClick={()=>updateQty(k,1)} className="w-8 h-8 flex items-center justify-center font-black text-sky-600 hover:text-sky-800 transition-colors">+</button>
-                               </div>
-                            </div>
-                          )
-                       })}
-                    </div>
-                 ))}
-              </div>
-           ))}
-        </div>
-        <div className="p-8 border-t dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800 transition-colors"><div className="font-black opacity-50 dark:text-slate-400 tracking-widest uppercase text-xs">Items: {Object.values(carrito).reduce((a,b)=>a+b,0)}</div><button onClick={handleConfirm} className="bg-sky-600 text-white px-12 py-5 rounded-[2rem] font-black shadow-2xl hover:bg-sky-700 transition-all uppercase tracking-widest">Confirmar Selección</button></div>
-      </div>
     </div>
   );
 }
