@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN DE MARCA BLUEHER ---
-const BRAND_LOGO = "logobluher.jpg"; // Truco CSS aplicado abajo para eliminar el fondo blanco
+const BRAND_LOGO = "logobluher.jpg"; 
 
 // --- CONFIGURACIÓN DE FIREBASE ---
 const getEnvVar = (key) => {
@@ -60,7 +60,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
-const appId = typeof __app_id !== 'undefined' ? __app_id : (getEnvVar('VITE_FIREBASE_APP_ID') || 'app-logiweb-prod');
+const appId = typeof __app_id !== 'undefined' ? __app_id : (getEnvVar('VITE_FIREBASE_APP_ID') || 'app-bluher-official');
 
 const URL_GOOGLE_SCRIPT = getEnvVar('VITE_GOOGLE_SCRIPT_URL');
 const GEMINI_API_KEY = getEnvVar('VITE_GEMINI_API_KEY');
@@ -128,12 +128,10 @@ function GlobalDialog({ config, setConfig }) {
   const handleCancel = () => setConfig(null);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-       <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl max-w-md w-full p-8 animate-in zoom-in-95 duration-200 border border-slate-200 dark:border-slate-700">
+    <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+       <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl max-w-md w-full p-8 border border-slate-200 dark:border-slate-700 transition-colors animate-in zoom-in-95">
          <div className="flex items-center gap-4 mb-4">
-           {config.type === 'alert' && <div className="p-3 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-500 rounded-full"><AlertTriangle size={28}/></div>}
-           {config.type === 'confirm' && <div className="p-3 bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-500 rounded-full"><AlertTriangle size={28}/></div>}
-           {config.type === 'prompt' && <div className="p-3 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-500 rounded-full"><MessageSquare size={28}/></div>}
+           {config.type === 'alert' ? <div className="p-3 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-full"><AlertTriangle size={28}/></div> : <div className="p-3 bg-sky-100 dark:bg-sky-900/30 text-sky-600 rounded-full"><CheckCircle size={28}/></div>}
            <h3 className="text-2xl font-black text-slate-800 dark:text-slate-100">{config.title}</h3>
          </div>
          <p className="text-slate-600 dark:text-slate-300 mb-8 whitespace-pre-wrap font-medium leading-relaxed">{config.message}</p>
@@ -141,15 +139,15 @@ function GlobalDialog({ config, setConfig }) {
            <input 
              autoFocus 
              type="text" 
-             className="w-full p-4 border-2 border-slate-200 dark:border-slate-600 rounded-xl mb-8 outline-none focus:ring-2 focus:ring-sky-500 font-medium text-slate-800 dark:text-slate-100 transition-all bg-[#f0f4f8] dark:bg-slate-700" 
+             className="w-full p-4 border-2 border-slate-200 dark:border-slate-600 rounded-xl mb-8 outline-none focus:ring-2 focus:ring-sky-500 font-medium text-slate-800 dark:text-white bg-[#f0f4f8] dark:bg-slate-700" 
              value={inputValue} 
              onChange={e=>setInputValue(e.target.value)} 
              onKeyDown={(e) => e.key === 'Enter' && handleConfirm()}
            />
          )}
          <div className="flex justify-end gap-3">
-           {config.type !== 'alert' && <button onClick={handleCancel} className="px-6 py-3 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 font-bold transition-colors">Cancelar</button>}
-           <button onClick={handleConfirm} className="px-6 py-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5">{config.type === 'alert' ? 'Entendido' : 'Confirmar'}</button>
+           {config.type !== 'alert' && <button onClick={handleCancel} className="px-6 py-3 rounded-xl text-slate-600 dark:text-slate-400 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">Cancelar</button>}
+           <button onClick={handleConfirm} className="px-6 py-3 rounded-xl bg-sky-600 text-white font-bold shadow-lg hover:bg-sky-700 transition-colors">Confirmar</button>
          </div>
        </div>
     </div>
@@ -170,44 +168,45 @@ export default function App() {
   const [notasInventario, setNotasInventario] = useState({});
   const [movimientos, setMovimientos] = useState([]);
   const [usuarios, setUsuarios] = useState([]);
+  const [configGral, setConfigGral] = useState({ tasaDia: 1 });
   const [logs, setLogs] = useState([]);
 
   const [activeTab, setActiveTab] = useState('ventas');
-  
-  // States para diseño y portal público
   const [darkMode, setDarkMode] = useState(false);
   const [isPublicRoute, setIsPublicRoute] = useState(window.location.hash === '#tienda');
 
-  // --- CONTROLADOR DE DIÁLOGOS ---
   const [dialogConfig, setDialogConfig] = useState(null);
   const dialogs = useMemo(() => ({
-    alert: (msg, title) => setDialogConfig({ type: 'alert', message: msg, title: title || "Aviso del Sistema" }),
-    confirm: (msg, onConfirm, title) => setDialogConfig({ type: 'confirm', message: msg, title: title || "Confirmación Requerida", onConfirm }),
-    prompt: (msg, onConfirm, title) => setDialogConfig({ type: 'prompt', message: msg, title: title || "Ingresar Información", onConfirm })
+    alert: (msg, title) => setDialogConfig({ type: 'alert', message: msg, title: title || "Bluher" }),
+    confirm: (msg, onConfirm, title) => setDialogConfig({ type: 'confirm', message: msg, title: title || "Confirmación", onConfirm }),
+    prompt: (msg, onConfirm, title) => setDialogConfig({ type: 'prompt', message: msg, title: title || "Entrada de Datos", onConfirm })
   }), []);
 
-  // --- MANEJO DE RUTAS (PORTAL PÚBLICO) ---
+  // --- MODO OSCURO GLOBAL ---
+  useEffect(() => {
+    if (darkMode) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+  }, [darkMode]);
+
   useEffect(() => {
     const handleHashChange = () => setIsPublicRoute(window.location.hash === '#tienda');
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // --- MANEJO DE MODO OSCURO GLOBAL ---
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [darkMode]);
-
-  // --- 1. MANEJO DE AUTENTICACIÓN ---
+  // --- RULE 3: AUTH FIRST ---
   useEffect(() => {
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          // Intentamos la auth anónima. Si falla, solo lo ignoramos sin crashear.
+          try {
+             await signInAnonymously(auth);
+          } catch(e) {
+             console.warn("Autenticación anónima deshabilitada en Firebase. El portal público puede presentar errores al enviar.");
+          }
         }
       } catch (error) { console.error("Auth error", error); }
     };
@@ -216,8 +215,8 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser && !currentUser.isAnonymous) {
         setUser(currentUser);
-      } else if (currentUser && currentUser.isAnonymous && typeof __initial_auth_token !== 'undefined') {
-        // Ignorar anónimo temporal
+      } else if (currentUser && currentUser.isAnonymous) {
+        setUser(currentUser); 
       } else {
         setUser(null); setUserProfile(null); setAuthLoading(false);
       }
@@ -225,49 +224,91 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- 2. PERFIL DE USUARIO ---
+  // --- DATA FETCHING (Gated by Auth para evitar Error de Permisos) ---
   useEffect(() => {
     if (!user) return;
     let isFirstLoad = true;
+    const unsubs = [];
     
+    // Perfil
     const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
-    const unsub = onSnapshot(userRef, async (snap) => {
+    unsubs.push(onSnapshot(userRef, async (snap) => {
       if (snap.exists()) {
         const profile = snap.data();
         setUserProfile(profile);
-
         if (isFirstLoad) {
            isFirstLoad = false;
            if (!profile.isOnline) {
               updateDoc(userRef, { isOnline: true });
               addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
                  accion: 'INICIO_SESION', detalle: 'El usuario inició sesión en el sistema.', usuarioEmail: profile.email, usuarioNombre: profile.nombre, usuarioRol: profile.role, fecha: Date.now()
-              }).catch(console.error);
+              }).catch(()=>console.warn("Log silencioso falló"));
            }
         }
-
-        if (profile.isApproved && activeTab === 'ventas') {
-          if (profile.role === ROLES.ADMINISTRACION) setActiveTab('admin');
-          if (profile.role === ROLES.DESPACHO) setActiveTab('despacho');
-          if (profile.role === ROLES.AUDITOR_INVENTARIO) setActiveTab('inventario');
-        }
-      } else {
+      } else if (!user.isAnonymous) {
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
-        registrarLogSistem(newProfile, 'NUEVO_REGISTRO', `El usuario ${user.email} se ha registrado y espera aprobación.`);
       }
       setAuthLoading(false);
     }, (err) => { 
-      console.error("Error cargando perfil:", err); 
+      console.warn("Perfil sin acceso aún:", err.message); 
       setAuthLoading(false); 
-    });
-    return () => unsub();
-  }, [user, activeTab]);
+    }));
+
+    return () => unsubs.forEach(u => u());
+  }, [user]);
+
+  // Cargar datos operativos solo si el perfil fue aprobado (o si es necesario para el portal)
+  useEffect(() => {
+    if (!user) return;
+    const unsubs = [];
+    const onError = (e) => console.warn("Firestore Listener Error:", e.message);
+
+    // Públicamente disponibles (Catálogo y Stock)
+    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), (docSnap) => {
+      setCatalogo(docSnap.exists() && docSnap.data().categorias ? docSnap.data().categorias : DEFAULT_CATALOGO);
+    }, onError));
+
+    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), (docSnap) => {
+      setStockInventario(docSnap.exists() ? docSnap.data() : {});
+    }, onError));
+
+    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), (docSnap) => {
+      if(docSnap.exists()) setConfigGral(docSnap.data());
+    }, onError));
+
+    // Data restringida a empleados aprobados
+    if (userProfile && userProfile.isApproved) {
+      unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), (snapshot) => {
+        setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.fechaCreacion - a.fechaCreacion));
+      }, onError));
+
+      unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => {
+        setNotasInventario(docSnap.exists() ? docSnap.data() : {});
+      }, onError));
+
+      unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), (snapshot) => {
+        setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.fechaCreacion - a.fechaCreacion));
+      }, onError));
+
+      const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(userProfile.role);
+      if (esAdminOAuditor) {
+        unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
+          setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }, onError));
+        unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), (snapshot) => {
+          setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.fecha - a.fecha));
+        }, onError));
+      }
+    }
+
+    return () => unsubs.forEach(unsub => unsub());
+  }, [user, userProfile?.isApproved]);
 
   useEffect(() => {
     const handleUnload = () => {
-      if (user) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { isOnline: false });
+      if (user && !user.isAnonymous) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { isOnline: false });
     };
     window.addEventListener('beforeunload', handleUnload);
     return () => window.removeEventListener('beforeunload', handleUnload);
@@ -282,41 +323,6 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
   const loggear = (accion, detalle) => registrarLogSistem(userProfile, accion, detalle);
-
-  // --- 3. CARGA DE DATOS ---
-  useEffect(() => {
-    const unsubs = [];
-    
-    // Cargar Catálogo (Visible para todos, incluso anónimos en portal web)
-    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), (docSnap) => {
-      setCatalogo(docSnap.exists() && docSnap.data().categorias ? docSnap.data().categorias : DEFAULT_CATALOGO);
-    }));
-
-    // Cargar Stock publicamente necesario para validaciones en ventas y portal
-    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), (docSnap) => {
-      setStockInventario(docSnap.exists() ? docSnap.data() : {});
-    }));
-
-    if (!user || !userProfile || !userProfile.isApproved) return;
-    
-    unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), (snapshot) => {
-      setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.fechaCreacion - a.fechaCreacion));
-    }));
-
-    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => setNotasInventario(docSnap.exists() ? docSnap.data() : {})));
-
-    unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), (snapshot) => {
-      setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.fechaCreacion - a.fechaCreacion));
-    }));
-
-    const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(userProfile?.role);
-    if (esAdminOAuditor) {
-      unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))));
-      unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), (snapshot) => setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => b.fecha - a.fecha))));
-    }
-
-    return () => unsubs.forEach(unsub => unsub());
-  }, [user, userProfile]);
 
   const signInGoogle = async () => {
     try { setAuthLoading(true); await signInWithPopup(auth, googleProvider); } 
@@ -348,8 +354,8 @@ export default function App() {
 
   if (isPublicRoute) {
     // VISTA PORTAL PÚBLICO
-    content = <PublicPortal catalogo={catalogo} stock={stockInventario} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
-  } else if (authLoading || (user && !userProfile)) {
+    content = <PublicPortal catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
+  } else if (authLoading || (user && !userProfile && !user.isAnonymous)) {
     // VISTA CARGANDO
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
@@ -360,7 +366,7 @@ export default function App() {
         {user && <button onClick={cerrarSesion} className="text-sky-600 dark:text-sky-400 text-sm hover:underline font-semibold mt-4">Cancelar y regresar</button>}
       </div>
     );
-  } else if (!user) {
+  } else if (!user || user.isAnonymous) {
     // VISTA LOGIN
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-[#f0f4f8] to-[#d8e4f0] dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
@@ -455,8 +461,8 @@ export default function App() {
         <main className="flex-1 p-4 md:p-10 overflow-y-auto print:p-0 print:m-0 print:bg-white print:block relative">
           <div className="max-w-6xl mx-auto print:max-w-none print:mx-0">
             <div className="print:hidden">
-              {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} />}
-              {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
+              {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} />}
+              {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} config={configGral} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
               {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
               {activeTab === 'reportes' && showReportes && <PanelReportes pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
               {activeTab === 'inventario' && showInventario && <PanelInventario stock={stockInventario} notas={notasInventario} catalogo={catalogo} movimientos={movimientos} db={db} appId={appId} loggear={loggear} perfil={userProfile} dialogs={dialogs} />}
@@ -482,17 +488,14 @@ export default function App() {
 // ==========================================
 // 1. PANEL DE VENTAS 
 // ==========================================
-function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
+function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
-  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: 'USD', montoPago: '', tasa: '', esMercadoLibre: false, esRegalo: false, descuentoUsd: '' };
+  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: 'USD', montoPago: '', tasa: config.tasaDia || '1', esMercadoLibre: false, esRegalo: false, descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' };
   
   const [formData, setFormData] = useState(defaultForm);
   const [editId, setEditId] = useState(null); 
   const [pedidoDevuelto, setPedidoDevuelto] = useState(null); 
-  
-  const [pagoAdicional, setPagoAdicional] = useState({ monto: '', ref: '' }); 
-
   const [enviando, setEnviando] = useState(false);
   const [textoCrudo, setTextoCrudo] = useState('');
   const [analizando, setAnalizando] = useState(false);
@@ -500,6 +503,18 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
 
   const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
   const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
+
+  useEffect(() => {
+    if (!formData.carritoObj) return;
+    let sub = 0;
+    Object.entries(formData.carritoObj).forEach(([key, qty]) => {
+      const [nom, pres] = key.split('|');
+      catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const idx=prod.presentaciones.indexOf(pres); if (idx >= 0 && prod.precios) sub += (prod.precios[idx]*qty); }}));
+    });
+    const d = parseFloat(formData.descuentoPorcentaje) || 0;
+    const final = sub * (1 - d/100);
+    setFormData(prev => ({ ...prev, montoPago: final.toFixed(2), tasa: prev.tasa || config.tasaDia }));
+  }, [formData.carritoObj, formData.descuentoPorcentaje, config.tasaDia, catalogo]);
 
   const copiarLinkTienda = () => {
     const linkTienda = `${window.location.origin}${window.location.pathname}#tienda`;
@@ -587,11 +602,10 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
     setFormData({
       clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, direccion: pedido.direccion,
       productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda, 
-      montoPago: pedido.monto?.toString(), tasa: pedido.tasaAplicada?.toString(), esMercadoLibre: pedido.esMercadoLibre || false, esRegalo: pedido.esRegalo || false, descuentoUsd: pedido.descuentoUsd?.toString() || ''
+      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje || '0', pagoAdicional: '', refAdicional: ''
     });
     setEditId(pedido.id);
     setPedidoDevuelto(pedido);
-    setPagoAdicional({ monto: '', ref: '' });
     setVista('nuevo');
   };
 
@@ -599,7 +613,6 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
     setFormData(defaultForm);
     setEditId(null);
     setPedidoDevuelto(null);
-    setPagoAdicional({ monto: '', ref: '' });
   };
 
   const handleSubmit = async (e) => {
@@ -632,12 +645,12 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
     setEnviando(true);
     let montoNum = formData.esRegalo ? 0 : (parseFloat(formData.montoPago) || 0);
     const tasa = parseFloat(formData.tasa) || 1;
-    let descuento = parseFloat(formData.descuentoUsd) || 0;
+    let descuento = parseFloat(formData.descuentoPorcentaje) || 0;
     let pagoExtUsd = 0;
 
     // Si había faltante y se agregó pago extra
-    if (editId && pedidoDevuelto?.faltanteUsd > 0 && pagoAdicional.monto) {
-      let extra = parseFloat(pagoAdicional.monto) || 0;
+    if (editId && pedidoDevuelto?.faltanteUsd > 0 && formData.pagoAdicional) {
+      let extra = parseFloat(formData.pagoAdicional) || 0;
       if (formData.moneda === 'VES') {
          pagoExtUsd = extra / tasa; // Convertir a dólares si lo metieron en Bs
       } else {
@@ -685,10 +698,10 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
     try {
       if (editId) {
         let updateData = {
-          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, motivoRechazo: '', faltanteUsd: 0, descuentoUsd: descuento 
+          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, motivoRechazo: '', faltanteUsd: 0, descuentoPorcentaje: descuento 
         };
-        if (pagoAdicional.ref) {
-           updateData.referencia = `${formData.referencia} | EXTRA: ${pagoAdicional.ref}`;
+        if (formData.refAdicional) {
+           updateData.referencia = `${formData.referencia} | EXTRA: ${formData.refAdicional}`;
            updateData.pagoAdicionalUsd = pagoExtUsd;
         }
 
@@ -697,7 +710,7 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
         dialogs.alert(`El pedido de ${formData.clienteNombre} fue actualizado exitosamente.`, "Pedido Actualizado");
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), {
-          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, auditado: false, fechaCreacion: Date.now(), fechaDespacho: fechaDespachoStr, esPublico: false, descuentoUsd: descuento
+          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, auditado: false, fechaCreacion: Date.now(), fechaDespacho: fechaDespachoStr, esPublico: false, descuentoPorcentaje: descuento
         });
         loggear('PEDIDO_CREADO', `Venta registrada: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)}) ${formData.esRegalo ? '[REGALO]' : ''}`);
         if (finalStatus === 'Pendiente') {
@@ -721,7 +734,7 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
 
   return (
     <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
-      <div className="flex flex-wrap gap-4 mb-8 border-b border-slate-100 dark:border-slate-700 pb-2">
+      <div className="flex flex-wrap gap-4 mb-8 border-b border-slate-100 dark:border-slate-700 pb-2 overflow-x-auto">
         {puedeCrear && <button onClick={() => { setVista('nuevo'); if(editId) cancelarEdicion(); }} className={`pb-3 font-bold flex items-center gap-2 transition-colors ${vista === 'nuevo' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ShoppingCart size={18} /> {editId ? 'Corrigiendo Pedido' : 'Nueva Venta'}</button>}
         <button onClick={() => setVista('historial')} className={`pb-3 font-bold flex items-center gap-2 transition-colors ${vista === 'historial' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ClipboardList size={18} /> Historial y Estatus</button>
         <button onClick={() => setVista('espera')} className={`pb-3 font-bold flex items-center gap-2 transition-colors ${vista === 'espera' ? 'text-amber-500 border-b-2 border-amber-500' : 'text-slate-400 hover:text-amber-500'}`}><Clock size={18} /> Lista de Espera {enEspera.length > 0 && <span className="bg-amber-100 text-amber-700 px-2 rounded-full text-[10px]">{enEspera.length}</span>}</button>
@@ -731,7 +744,7 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
 
       {vista === 'nuevo' && puedeCrear && (
         <div className="animate-in fade-in duration-300">
-          {editId && pedidoDevuelto && (
+          {editId && pedidoDevuelto?.status === 'Rechazado' && (
             <div className="mb-8 bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-5 rounded-r-xl shadow-sm">
               <div className="flex gap-4">
                 <div className="p-2 bg-red-100 dark:bg-red-900/50 rounded-full text-red-600 dark:text-red-400 shrink-0 h-max"><AlertTriangle size={20} /></div>
@@ -743,8 +756,8 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
                     <div className="mt-4 bg-white dark:bg-slate-800 p-4 rounded-xl border border-red-200 dark:border-red-800">
                       <div className="text-sm font-bold text-red-600 dark:text-red-400 mb-3">⚠️ Dinero Faltante Detectado: ${pedidoDevuelto.faltanteUsd.toFixed(2)} USD</div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <Input label="Monto adicional pagado" type="number" step="0.01" value={pagoAdicional.monto} onChange={e=>setPagoAdicional({...pagoAdicional, monto: e.target.value})} placeholder="Ej: 5.50" />
-                        <Input label="Referencia del pago adicional" type="text" value={pagoAdicional.ref} onChange={e=>setPagoAdicional({...pagoAdicional, ref: e.target.value})} placeholder="Ref: 4321..." />
+                        <Input label="Monto adicional pagado" type="number" step="0.01" value={formData.pagoAdicional} onChange={e=>setFormData({...formData, pagoAdicional: e.target.value})} placeholder="Ej: 5.50" />
+                        <Input label="Referencia del pago adicional" type="text" value={formData.refAdicional} onChange={e=>setFormData({...formData, refAdicional: e.target.value})} placeholder="Ref: 4321..." />
                       </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400 mt-2 italic">* Este monto se sumará automáticamente al total original registrado.</div>
                     </div>
@@ -821,6 +834,10 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
                  {formData.tasa && formData.montoPago && <span className="text-xs text-emerald-400 font-bold absolute -bottom-5 left-0">{formData.moneda === 'USD' ? `Eq: Bs. ${((parseFloat(formData.montoPago)||0) * parseFloat(formData.tasa)).toFixed(2)}` : `Eq: $${((parseFloat(formData.montoPago)||0) / parseFloat(formData.tasa)).toFixed(2)}`}</span>}
                </div>
                <InputDark label="Referencia / Banco" value={formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required={!formData.esRegalo} placeholder="Ej. 1234 Banesco" />
+               
+               {!formData.esRegalo && (
+                 <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-4"><InputDark type="number" step="0.01" label="Descuento Adicional Otorgado (%)" value={formData.descuentoPorcentaje} onChange={(e)=>setFormData({...formData, descuentoPorcentaje: e.target.value})} placeholder="Ej: 5 (Opcional)" /></div>
+               )}
              </div>
              
              <div className="md:col-span-2 mt-4">
@@ -855,8 +872,14 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
                     <div className="text-xs font-semibold text-slate-400 mt-1">{new Date(p.fechaCreacion).toLocaleDateString()}</div>
                   </td>
                   <td className="p-4">
-                    <div className="font-black text-slate-800 dark:text-slate-100 text-lg">${(p.montoUsd||0).toFixed(2)}</div>
-                    <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
+                    {p.esRegalo ? (
+                       <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1"><Gift size={14}/> REGALO VIP</div>
+                    ) : (
+                       <>
+                        <div className="font-black text-slate-800 dark:text-slate-100 text-lg">${(p.montoUsd||0).toFixed(2)}</div>
+                        <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
+                       </>
+                    )}
                   </td>
                   <td className="p-4">
                     <StatusBadge status={p.status} />
@@ -886,8 +909,59 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
         </div>
       )}
 
+      {vista === 'espera' && (
+        <div className="animate-in fade-in bg-amber-50 dark:bg-amber-900/10 p-6 rounded-xl border border-amber-200 dark:border-amber-800">
+           <h3 className="font-bold text-amber-800 dark:text-amber-500 mb-4 flex items-center gap-2"><Clock/> Clientes en Espera (Sin Stock)</h3>
+           {enEspera.length === 0 ? <p className="text-sm text-amber-600 dark:text-amber-400">No hay pedidos en lista de espera.</p> : (
+             <div className="space-y-4">
+               {enEspera.map(p => (
+                 <div key={p.id} className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-amber-100 dark:border-slate-700 flex justify-between items-center">
+                   <div>
+                     <div className="font-bold text-slate-800 dark:text-slate-200">{p.clienteNombre}</div>
+                     <div className="text-xs text-slate-500 mt-1">{p.clienteTelefono} - {new Date(p.fechaCreacion).toLocaleDateString()}</div>
+                   </div>
+                   <div className="flex gap-2">
+                     <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-sky-100 text-sky-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-sky-200 transition-colors">Retomar Pedido</button>
+                   </div>
+                 </div>
+               ))}
+             </div>
+           )}
+        </div>
+      )}
+
+      {vista === 'web' && (
+        <div className="animate-in fade-in bg-emerald-50 dark:bg-emerald-900/10 p-6 rounded-xl border border-emerald-200 dark:border-emerald-800">
+           <h3 className="font-bold text-emerald-800 dark:text-emerald-500 mb-4 flex items-center gap-2"><Store/> Pedidos Recibidos del Portal Web</h3>
+           {pedidosWeb.length === 0 ? <p className="text-sm text-emerald-600 dark:text-emerald-400">No hay nuevos pedidos de clientes web.</p> : (
+             <div className="space-y-4">
+               {pedidosWeb.map(p => (
+                 <div key={p.id} className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-emerald-100 dark:border-slate-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                   <div>
+                     <div className="font-bold text-slate-800 dark:text-slate-200">{p.clienteNombre} <span className="text-xs font-normal text-slate-500">({p.clienteTelefono})</span></div>
+                     <div className="text-xs font-semibold text-emerald-600 mt-1">Total Cotizado: ${p.montoUsd}</div>
+                     <div className="text-xs text-slate-500 mt-2 bg-slate-50 dark:bg-slate-900 p-2 rounded whitespace-pre-wrap">{p.productos}</div>
+                     
+                     <div className="flex flex-col gap-1 mt-3">
+                        <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Ref: {p.referencia}</div>
+                        {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-600 hover:underline flex items-center gap-1"><ImageIcon size={12}/> Ver Comprobante Subido</a>}
+                     </div>
+                   </div>
+                   <div className="flex flex-col gap-2 shrink-0">
+                     <button onClick={() => cargarPedidoParaEditar(p)} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-700 flex items-center gap-1 transition-colors"><CheckCircle size={14}/> Procesar Venta</button>
+                     <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="bg-amber-500 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-amber-600 flex items-center gap-1 transition-colors"><Clock size={14}/> Mover a Espera</button>
+                     <button onClick={() => cambiarEstadoPedido(p.id, 'Rechazado')} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-100 flex items-center gap-1 transition-colors"><XCircle size={14}/> Descartar Web</button>
+                   </div>
+                 </div>
+               ))}
+             </div>
+           )}
+        </div>
+      )}
+
       <ModalCatalogo 
         catalogo={catalogo} 
+        stock={stock}
         isOpen={isCatalogOpen} 
         onClose={()=>setIsCatalogOpen(false)} 
         dialogs={dialogs}
@@ -907,13 +981,25 @@ function PanelVentas({ perfil, pedidos, catalogo, stock, db, appId, loggear, dia
 // ==========================================
 // 3. PANEL DE ADMINISTRACIÓN
 // ==========================================
-function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId, dialogs }) {
+function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId, dialogs, config }) {
   const [vistaAdmin, setVistaAdmin] = useState('pendientes');
   const esAuditor = [ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(perfil?.role);
   const esAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(perfil?.role);
 
   const pendientes = pedidos.filter(p => p.status === 'Pendiente');
   const historial = pedidos.filter(p => p.status !== 'Pendiente');
+
+  const actualizarTasa = async () => {
+    dialogs.prompt("Ingresa la nueva tasa del día en Bolívares (Bs/$):", async (nuevaTasa) => {
+      const tasaNum = parseFloat(nuevaTasa);
+      if (isNaN(tasaNum) || tasaNum <= 0) return dialogs.alert("Ingresa un número válido.");
+      try {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { tasaDia: tasaNum });
+        loggear('ACTUALIZACION_TASA', `Se cambió la tasa del día a: ${tasaNum} Bs/$`);
+        dialogs.alert("Tasa actualizada correctamente para todo el sistema.");
+      } catch(e) { dialogs.alert("Error actualizando tasa."); }
+    }, "Ajustar Tasa del Día");
+  };
 
   const validarPago = async (pedido) => {
     try {
@@ -951,6 +1037,14 @@ function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId, dialogs }) {
 
   return (
     <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+      <div className="bg-[#003366] text-white p-10 rounded-[2.5rem] flex flex-col md:flex-row justify-between items-center border-4 border-sky-400/20 shadow-2xl mb-8">
+          <div className="text-center md:text-left mb-6 md:mb-0">
+            <div className="text-xs font-black uppercase tracking-widest opacity-60 mb-1">Tasa Oficial Bluher</div>
+            <h2 className="text-5xl font-black">{config?.tasaDia || 1} Bs/$</h2>
+          </div>
+          {esAdmin && <button onClick={actualizarTasa} className="bg-sky-500 px-10 py-4 rounded-2xl font-black shadow-lg hover:bg-sky-400 transition-colors uppercase tracking-widest">Ajustar Tasa</button>}
+       </div>
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><CheckSquare className="text-sky-600"/> Validación de Pagos</h2>
@@ -1017,7 +1111,7 @@ function PanelAdmin({ perfil, pedidos, stock, loggear, db, appId, dialogs }) {
 // ==========================================
 // 4. PANEL DE DESPACHO
 // ==========================================
-function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear, dialogs }) {
+function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs }) {
   const [vistaDespacho, setVistaDespacho] = useState('pendientes');
 
   const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
@@ -1026,6 +1120,7 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear, dialogs }) 
 
   const [guiasInput, setGuiasInput] = useState({});
   const [subiendo, setSubiendo] = useState({ id: null, field: null });
+  const [inventarioChecked, setInventarioChecked] = useState({}); 
 
   const handleGuiaChange = (id, field, value) => setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
 
@@ -1068,95 +1163,130 @@ function PanelDespacho({ pedidos, cambiarEstado, db, appId, loggear, dialogs }) 
 
   const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
 
+  const toggleCheck = (key) => {
+    setInventarioChecked(prev => ({...prev, [key]: !prev[key]}));
+  };
+
   return (
     <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
       
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><Truck className="text-sky-600"/> Logística de Envíos</h2>
-          <div className="flex gap-2 mt-4 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-max">
+          <div className="flex flex-wrap gap-2 mt-4 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-max">
             <button onClick={() => setVistaDespacho('pendientes')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Por Empacar ({pedidosValidados.length})</button>
             <button onClick={() => setVistaDespacho('historial')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Enviados</button>
+            <button onClick={() => setVistaDespacho('inventario')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'inventario' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Validar Inventario</button>
           </div>
         </div>
-        <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm">
-          <Printer size={16} /> Imprimir Etiquetas
-        </button>
+        {vistaDespacho !== 'inventario' && (
+          <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm">
+            <Printer size={18} /> Imprimir Etiquetas
+          </button>
+        )}
       </div>
 
       {pedidosPendientes > 0 && vistaDespacho === 'pendientes' && (
         <div className="mb-8 bg-sky-50/50 dark:bg-sky-900/20 border border-sky-100 dark:border-sky-800 p-5 rounded-xl flex items-start gap-4 shadow-sm">
           <div className="p-2 bg-sky-100 dark:bg-sky-900/50 rounded-full text-sky-600 dark:text-sky-400 shrink-0"><Clock size={20} /></div>
           <div>
-            <h3 className="text-sky-900 dark:text-sky-300 font-bold">Órdenes en proceso</h3>
+            <h3 className="text-sky-900 dark:text-sky-300 font-bold text-lg">Órdenes en proceso</h3>
             <p className="text-sky-800/80 dark:text-sky-200/80 text-sm mt-1 font-medium">Hay <strong>{pedidosPendientes} pedido(s)</strong> siendo verificados por administración. Te sugerimos esperar a que los validen todos antes de imprimir para que las etiquetas salgan en la misma página.</p>
           </div>
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
-        <table className="w-full text-left border-collapse min-w-[800px] text-sm">
-          <thead>
-            <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
-              <th className="p-4 border-b dark:border-slate-700 font-bold w-1/4">Datos del Paquete</th>
-              <th className="p-4 border-b dark:border-slate-700 font-bold">Dirección y Contenido</th>
-              <th className="p-4 border-b dark:border-slate-700 font-bold w-1/3">Gestión de Guía y Soportes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pedidosAMostrar.length === 0 ? <tr><td colSpan="3" className="p-10 text-center text-slate-400 italic font-bold">No hay envíos pendientes.</td></tr> : pedidosAMostrar.map(p => (
-              <tr key={p.id} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
-                <td className="p-4 align-top">
-                  <div className="font-bold text-slate-800 dark:text-slate-100 text-base">{p.clienteNombre}</div>
-                  <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1">{p.courier}</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">{p.clienteTelefono}</div>
-                  <div className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider mt-2">Sale: {p.fechaDespacho}</div>
-                </td>
-                <td className="p-4 align-top">
-                  <div className="font-medium bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700 mb-3 whitespace-pre-wrap shadow-sm text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
-                  <div className="text-[13px] text-slate-500 dark:text-slate-400 flex items-start gap-2"><div className="mt-0.5 text-sky-600 dark:text-sky-400"><Package size={14}/></div>{p.direccion}</div>
-                </td>
-                <td className="p-4 align-top bg-slate-50/50 dark:bg-slate-900/30">
-                  {p.status === 'Despachado' ? (
-                    <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                      <div className="text-sm mb-3"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100">{p.guia}</span></div>
-                      <div className="flex flex-col gap-2 mb-4">
-                        {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-semibold flex items-center gap-1.5"><ImageIcon size={14}/> Recibo Digital</a>}
-                        {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-semibold flex items-center gap-1.5"><Camera size={14}/> Foto del Paquete</a>}
-                      </div>
-                      <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-semibold underline decoration-slate-300 transition-colors">Modificar Envío</button>
+      {vistaDespacho === 'inventario' ? (
+        <div className="animate-in fade-in">
+          <div className="mb-6 bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-400 flex items-center gap-2"><CheckSquare2 className="text-sky-500"/> Esta vista es exclusiva para validar las cantidades físicas en el almacén de despacho. Las marcas no se guardan.</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+             {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
+                const key = `${p.nombre}|${pres}`;
+                const disp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key]||0);
+                if (disp === 0) return null; // Solo mostramos lo que hay
+                return (
+                  <div key={key} onClick={()=>toggleCheck(key)} className={`p-4 rounded-xl border-2 cursor-pointer transition-colors flex items-center justify-between ${inventarioChecked[key] ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800' : 'bg-white border-slate-100 dark:bg-slate-800 dark:border-slate-700 hover:border-sky-300'}`}>
+                    <div>
+                      <div className={`font-bold text-sm ${inventarioChecked[key] ? 'text-emerald-800 dark:text-emerald-400 line-through opacity-70' : 'text-slate-800 dark:text-slate-100'}`}>{p.nombre}</div>
+                      <div className={`text-xs font-semibold mt-1 ${inventarioChecked[key] ? 'text-emerald-600 dark:text-emerald-500 opacity-70' : 'text-slate-500'}`}>{pres}</div>
                     </div>
-                  ) : (
-                    <div className="space-y-3 bg-white dark:bg-slate-800 p-4 rounded-xl border border-sky-100 dark:border-slate-700 shadow-sm">
-                      <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-2.5 border-2 border-slate-200 dark:border-slate-600 rounded-lg font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.guia || ''} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
-                      
-                      <div className="flex gap-2 relative">
-                        <input type="text" placeholder="URL Recibo Guía" className="w-full text-xs p-2.5 border-2 border-slate-200 dark:border-slate-600 rounded-lg pr-10 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.link || ''} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
-                        <label className="absolute right-1.5 top-1.5 p-1.5 bg-sky-100 dark:bg-sky-900/50 text-sky-600 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-md cursor-pointer transition-colors" title="Subir Foto">
-                          {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
-                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
-                        </label>
-                      </div>
-
-                      <div className="flex gap-2 relative">
-                        <input type="text" placeholder="URL Foto Empaque" className="w-full text-xs p-2.5 border-2 border-slate-200 dark:border-slate-600 rounded-lg pr-10 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.fotoProductos || ''} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
-                        <label className="absolute right-1.5 top-1.5 p-1.5 bg-sky-100 dark:bg-sky-900/50 text-sky-600 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-md cursor-pointer transition-colors" title="Subir Foto">
-                          {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
-                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} />
-                        </label>
-                      </div>
-
-                      <button onClick={() => guardarGuia(p)} className="w-full bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold py-2.5 rounded-lg mt-2 flex items-center justify-center gap-2 transition-all shadow-md">
-                        Confirmar y Archivar
-                      </button>
+                    <div className={`text-2xl font-black ${inventarioChecked[key] ? 'text-emerald-600 dark:text-emerald-500 opacity-70' : 'text-sky-600 dark:text-sky-400'}`}>
+                      {disp}
                     </div>
-                  )}
-                </td>
+                  </div>
+                )
+             })))}
+          </div>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
+          <table className="w-full text-left border-collapse min-w-[800px] text-sm">
+            <thead>
+              <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
+                <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide w-1/4">Datos del Paquete</th>
+                <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Dirección y Contenido</th>
+                <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide w-1/3">Gestión de Guía y Soportes</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {pedidosAMostrar.length === 0 ? <tr><td colSpan="3" className="p-10 text-center text-slate-400 italic font-bold">No hay envíos pendientes en esta vista.</td></tr> : pedidosAMostrar.map(p => (
+                <tr key={p.id} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                  <td className="p-4 align-top">
+                    <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">
+                       {p.clienteNombre}
+                    </div>
+                    <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1">{p.courier}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">{p.clienteTelefono}</div>
+                    <div className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider mt-2">Sale: {p.fechaDespacho}</div>
+                  </td>
+                  <td className="p-4 align-top">
+                    <div className="font-medium bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700 mb-3 whitespace-pre-wrap shadow-sm text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
+                    <div className="text-[13px] text-slate-500 dark:text-slate-400 flex items-start gap-2"><div className="mt-0.5 text-sky-600 dark:text-sky-400"><Package size={14}/></div>{p.direccion}</div>
+                  </td>
+                  <td className="p-4 align-top bg-slate-50/50 dark:bg-slate-900/30">
+                    {p.status === 'Despachado' ? (
+                      <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                        <div className="text-sm mb-3"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100">{p.guia}</span></div>
+                        <div className="flex flex-col gap-2 mb-4">
+                          {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-semibold flex items-center gap-1.5"><ImageIcon size={14}/> Recibo Digital</a>}
+                          {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-semibold flex items-center gap-1.5"><Camera size={14}/> Foto del Paquete</a>}
+                        </div>
+                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-semibold underline decoration-slate-300 transition-colors">Modificar Envío</button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 bg-white dark:bg-slate-800 p-4 rounded-xl border border-sky-100 dark:border-slate-700 shadow-sm">
+                        <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-2.5 border-2 border-slate-200 dark:border-slate-600 rounded-lg font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.guia || ''} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                        
+                        <div className="flex gap-2 relative">
+                          <input type="text" placeholder="URL Recibo Guía" className="w-full text-xs p-2.5 border-2 border-slate-200 dark:border-slate-600 rounded-lg pr-10 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.link || ''} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
+                          <label className="absolute right-1.5 top-1.5 p-1.5 bg-sky-100 dark:bg-sky-900/50 text-sky-600 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-md cursor-pointer transition-colors" title="Subir Foto">
+                            {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
+                          </label>
+                        </div>
+
+                        <div className="flex gap-2 relative">
+                          <input type="text" placeholder="URL Foto Empaque" className="w-full text-xs p-2.5 border-2 border-slate-200 dark:border-slate-600 rounded-lg pr-10 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.fotoProductos || ''} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
+                          <label className="absolute right-1.5 top-1.5 p-1.5 bg-sky-100 dark:bg-sky-900/50 text-sky-600 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-md cursor-pointer transition-colors" title="Subir Foto">
+                            {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} />
+                          </label>
+                        </div>
+
+                        <button onClick={() => guardarGuia(p)} className="w-full bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold py-2.5 rounded-lg mt-2 flex items-center justify-center gap-2 transition-all shadow-md">
+                          Confirmar y Archivar
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1644,7 +1774,7 @@ function PanelReportes({ pedidos, catalogo, stock }) {
   
   const validados = pedidos.filter(p => p.status !== 'Rechazado' && !p.esPublico);
   const sobrantes = validados.reduce((acc, curr) => acc + (curr.sobranteUsd || 0), 0);
-  const descuentos = validados.reduce((acc, curr) => acc + (curr.descuentoPorcentaje ? ((curr.montoUsd/(1-curr.descuentoPorcentaje/100)) * (curr.descuentoPorcentaje/100)) : 0), 0);
+  const descuentos = validados.reduce((acc, curr) => acc + (curr.descuentoUsd || 0), 0);
   const totalUSD = validados.reduce((acc, curr) => acc + (curr.montoUsd || 0), 0) - sobrantes;
 
   return (
@@ -1668,9 +1798,238 @@ function PanelReportes({ pedidos, catalogo, stock }) {
   );
 }
 
+function PanelUsuarios({ usuarios, db, appId, loggear, dialogs }) {
+  const cambiarRol = async (uid, isApproved, newRole, email) => {
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid), { isApproved, role: newRole });
+    loggear('GESTION_USUARIO', `Acceso de ${email} -> Rol: ${newRole} (Aprobado: ${isApproved})`);
+  };
+
+  const eliminarUsuario = (uid, email) => {
+    dialogs.confirm(`Estás a punto de eliminar de forma permanente la cuenta de usuario:\n\n${email}\n\n¿Estás absolutamente seguro de realizar esta acción?`, async () => {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid));
+        loggear('USUARIO_ELIMINADO', `El administrador eliminó la cuenta del sistema: ${email}`);
+        dialogs.alert("La cuenta de usuario ha sido eliminada del sistema exitosamente.", "Usuario Eliminado");
+      } catch(e) {
+        console.error(e);
+        dialogs.alert("Ocurrió un error en la base de datos al intentar eliminar la cuenta.", "Error Interno");
+      }
+    }, "Eliminar Usuario");
+  };
+
+  const formatearSistema = () => {
+    dialogs.confirm("⚠️ PELIGRO CRÍTICO ⚠️\n\nEstás a punto de ELIMINAR TODOS los Pedidos, Movimientos de Inventario y Logs de Auditoría.\n\nEl Stock de los almacenes también se reiniciará a CERO. Las cuentas de usuario y el catálogo se mantendrán intactos.\n\n¿Estás absolutamente seguro de querer limpiar todo el entorno?", () => {
+      dialogs.prompt("Para confirmar esta acción irreversible, escribe la palabra exacta: BORRAR", async (val) => {
+        if (val !== "BORRAR") {
+           dialogs.alert("La palabra de seguridad es incorrecta. La operación ha sido cancelada por seguridad.", "Operación Cancelada");
+           return;
+        }
+        try {
+          const wipeCollection = async (collName) => {
+            const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', collName));
+            const promises = snap.docs.map(d => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', collName, d.id)));
+            await Promise.all(promises);
+          };
+
+          await wipeCollection('pedidos');
+          await wipeCollection('movimientos');
+          await wipeCollection('logs');
+
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), {});
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), {});
+
+          loggear('SISTEMA_REINICIADO', 'El administrador formateó toda la data operativa del sistema.');
+          dialogs.alert("¡El entorno ha sido restablecido a CERO exitosamente! La página se recargará automáticamente.", "Formateo Completo");
+          setTimeout(() => window.location.reload(), 3000);
+        } catch(e) {
+          console.error(e);
+          dialogs.alert("Error de conexión al intentar formatear las bases de datos.", "Fallo Crítico");
+        }
+      }, "Confirmación de Seguridad");
+    }, "Formatear Entorno");
+  };
+
+  return (
+    <div className="flex flex-col gap-8">
+      <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl border dark:border-slate-700 shadow-sm transition-colors">
+        <h2 className="text-2xl font-black mb-6 flex gap-3 items-center text-slate-800 dark:text-white"><Users className="text-indigo-600 dark:text-indigo-400"/> Gestión de Accesos y Roles</h2>
+        <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead><tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400"><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Colaborador Registrado</th><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Asignación de Permisos</th></tr></thead>
+            <tbody>
+              {usuarios.map(u => (
+                <tr key={u.id} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                  <td className="p-4">
+                    <div className="flex items-center gap-3">
+                       <div className="font-bold text-slate-800 dark:text-white text-base">{u.nombre}</div>
+                       {u.isOnline && <span title="Sesión Activa" className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse shadow-sm shadow-emerald-200"></span>}
+                    </div>
+                    <span className="text-xs font-semibold text-slate-400 mt-0.5 block">{u.email}</span>
+                  </td>
+                  <td className="p-4 flex gap-3 justify-end items-center">
+                     <select value={u.role} onChange={e=>cambiarRol(u.id, true, e.target.value, u.email)} className="bg-white dark:bg-slate-900 border-2 dark:border-slate-700 p-2 rounded-xl font-bold text-xs shadow-sm focus:border-sky-500 outline-none transition-colors">
+                       <option value="Pendiente" disabled>Usuario Nuevo (Pendiente)</option>
+                       {Object.values(ROLES).map(r => <option key={r} value={r}>{r}</option>)}
+                     </select>
+                     {u.isApproved && <button onClick={()=>cambiarRol(u.id, false, 'Bloqueado', u.email)} className="text-xs bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 px-4 py-3 rounded-xl font-bold transition-colors">Suspender</button>}
+                     <button onClick={()=>eliminarUsuario(u.id, u.email)} className="text-xs bg-red-50 dark:bg-red-900/30 hover:bg-red-600 hover:text-white text-red-600 dark:text-red-400 dark:hover:text-white px-4 py-3 rounded-xl font-bold transition-colors flex items-center gap-1.5"><Trash2 size={14}/> Eliminar</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-red-50 dark:bg-red-950/30 p-8 rounded-2xl shadow-sm border border-red-200 dark:border-red-900/50 relative overflow-hidden transition-colors">
+        <div className="absolute -right-4 -top-4 opacity-10"><AlertTriangle size={150} className="text-red-600"/></div>
+        <h2 className="text-2xl font-black mb-3 flex items-center gap-3 text-red-800 dark:text-red-400 relative z-10"><AlertTriangle /> Zona de Restauración del Sistema</h2>
+        <p className="text-red-800/80 dark:text-red-300/80 text-sm mb-6 max-w-3xl relative z-10 font-medium leading-relaxed">Utiliza esta opción con extremo cuidado, idealmente solo al finalizar las pruebas o cambiar de base de datos. Esta acción eliminará permanentemente todas las ventas, las transferencias logísticas y los respaldos. Todo el inventario físico regresará al nivel cero (0).</p>
+        <button onClick={formatearSistema} className="bg-red-600 hover:bg-red-700 text-white font-black py-4 px-8 rounded-xl shadow-lg flex items-center gap-3 transition-all hover:-translate-y-0.5 relative z-10 text-lg">
+          <Trash2 size={22} /> Formatear Base de Datos
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PanelLogs({ logs }) {
+  return (
+    <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl border dark:border-slate-700 h-[70vh] flex flex-col shadow-sm transition-colors">
+       <h2 className="text-2xl font-black mb-6 dark:text-white uppercase tracking-tighter">Auditoría Bluher</h2>
+       <div className="flex-1 overflow-y-auto rounded-2xl border dark:border-slate-700 p-4 space-y-2 bg-[#f8fafc] dark:bg-slate-900/50 shadow-inner">
+          {logs.map(l => (
+            <div key={l.id} className="p-3 border-b dark:border-slate-800 text-[10px] flex gap-6 hover:bg-white dark:hover:bg-slate-800 transition-colors rounded-lg">
+               <span className="font-black text-sky-600 dark:text-sky-400 shrink-0">{new Date(l.fecha).toLocaleString()}</span>
+               <span className="font-medium text-slate-600 dark:text-slate-300"><b className="dark:text-white uppercase">{l.usuarioNombre}</b>: {l.detalle}</span>
+            </div>
+          ))}
+       </div>
+    </div>
+  );
+}
+
+// ==========================================
+// PORTAL PÚBLICO DE CLIENTES (REFORZADO)
+// ==========================================
+function PublicPortal({ catalogo, stock, config, db, appId, dialogs, onBack, darkMode, setDarkMode }) {
+  const [f, setF] = useState({ clienteNombre: '', clienteTelefono: '', referencia: '', link: '', carrito: null, txt: '' });
+  const [sub, setSub] = useState(false);
+  const [total, setTotal] = useState(0);
+  const [isCatOpen, setOpen] = useState(false);
+
+  const upFile = async (e) => {
+    const file = e.target.files[0]; if (!file) return; setSub(true);
+    try {
+      const reader = new FileReader(); reader.readAsDataURL(file);
+      reader.onloadend = async () => {
+        const base64 = reader.result.split(',')[1];
+        const res = await fetch(URL_GOOGLE_SCRIPT, { method: 'POST', body: JSON.stringify({ fileName: `PAGO_${Date.now()}.jpg`, mimeType: file.type, data: base64 }) });
+        const data = await res.json(); setF(prev => ({ ...prev, link: data.url })); setSub(false);
+      };
+    } catch(e) { setSub(false); dialogs.alert("Error subiendo el archivo."); }
+  };
+
+  const send = async (e) => {
+    e.preventDefault();
+    if (!f.link) return dialogs.alert("La captura de pago es OBLIGATORIA para enviar el pedido.");
+    try {
+      const auth_curr = getAuth(); if (!auth_curr.currentUser) await signInAnonymously(auth_curr);
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), { ...f, montoUsd: total, status: 'Por Pagar / Cotización', esPublico: true, fechaCreacion: Date.now(), linkComprobantePago: f.link, tasaAplicada: config.tasaDia });
+      dialogs.alert("¡Pedido Enviado! En breve te contactaremos."); onBack();
+    } catch(e) { dialogs.alert("Error de red."); }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#f0f4f8] dark:bg-slate-900 pb-20 transition-colors">
+      <header className="bg-white dark:bg-slate-950 p-6 border-b dark:border-slate-800 flex justify-between items-center sticky top-0 z-50 shadow-sm transition-colors">
+        <img src={BRAND_LOGO} alt="Logo" className="h-10 mix-blend-multiply dark:invert brightness-200 dark:brightness-100" />
+        <div className="flex gap-4 items-center">
+          <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full shadow text-sky-600 transition-all">{darkMode ? <Sun/> : <Moon/>}</button>
+          <button onClick={onBack} className="text-sm font-bold text-slate-500 hover:text-sky-600 transition-colors flex items-center gap-1"><LogOut size={16}/> Salir</button>
+        </div>
+      </header>
+      <div className="max-w-xl mx-auto mt-10 p-10 bg-white dark:bg-slate-800 rounded-[3rem] shadow-2xl space-y-8 border dark:border-slate-700 animate-in slide-in-from-bottom-4 transition-colors">
+        <h1 className="text-3xl font-black text-center dark:text-white uppercase tracking-tighter">Compra Bluher</h1>
+        <div className="text-center p-6 bg-sky-50 dark:bg-sky-900/30 rounded-3xl border-2 border-sky-100 dark:border-sky-800 transition-colors"><div className="font-bold text-sky-600 text-xs mb-1 uppercase tracking-widest">Tasa del Día: {config.tasaDia} Bs/$</div><div className="text-4xl font-black text-slate-800 dark:text-white">${total.toFixed(2)}</div><div className="text-sky-600 font-bold">≈ {(total * config.tasaDia).toFixed(2)} Bs.</div></div>
+        <form onSubmit={send} className="space-y-6">
+          <Input label="Tu Nombre Completo" value={f.clienteNombre} onChange={e=>setF({...f, clienteNombre: e.target.value})} required />
+          <Input label="WhatsApp" value={f.clienteTelefono} onChange={e=>setF({...f, clienteTelefono: e.target.value})} required placeholder="0412-0000000" />
+          <button type="button" onClick={()=>setOpen(true)} className="w-full py-4 bg-sky-100 text-sky-700 font-black rounded-2xl border-2 border-sky-200 uppercase tracking-widest text-xs shadow-md hover:bg-sky-200 transition-colors">Catálogo de Productos</button>
+          <div className="p-6 bg-slate-900 text-white rounded-[2rem] space-y-6 border-b-8 border-sky-600 shadow-xl transition-colors">
+             <InputDark label="Referencia o Banco de Pago" value={f.referencia} onChange={e=>setF({...f, referencia: e.target.value})} required />
+             <label className="block bg-sky-600 p-4 text-center rounded-2xl font-black uppercase tracking-tighter cursor-pointer shadow-lg hover:bg-sky-500 transition-colors">
+                {sub ? <div className="flex justify-center items-center gap-2"><Loader2 className="animate-spin" size={20}/> Sincronizando...</div> : <div className="flex justify-center items-center gap-2"><Camera size={20}/> Subir Capture (OBLIGATORIO)</div>}
+                <input type="file" onChange={upFile} className="hidden" accept="image/*"/>
+             </label>
+             {f.link && <div className="text-[10px] text-emerald-400 font-bold flex items-center justify-center gap-2 animate-bounce"><CheckCircle size={12}/> Pago cargado exitosamente</div>}
+          </div>
+          <button type="submit" className="w-full py-5 bg-[#003366] text-white font-black rounded-3xl shadow-2xl hover:scale-[1.02] transition-transform text-lg uppercase tracking-widest">Finalizar Compra</button>
+        </form>
+      </div>
+      <ModalCatalogo catalogo={catalogo} stock={stock} isOpen={isCatOpen} onClose={()=>setOpen(false)} dialogs={dialogs}
+        onConfirm={(txt, obj)=>{
+          setF(prev => ({...prev, txt, carrito: obj }));
+          let subtotal = 0;
+          Object.entries(obj).forEach(([k,q]) => { const [n, p] = k.split('|'); catalogo.forEach(c => c.productos.forEach(pr => { if(pr.nombre===n){ const idx=pr.presentaciones.indexOf(p); subtotal += pr.precios[idx]*q; }})); });
+          setTotal(subtotal); setOpen(false);
+        }} />
+    </div>
+  );
+}
+
 // --- UTILS ---
 function Input({ label, ...props }) { return (<div className="flex flex-col"><label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2 dark:text-slate-400 transition-colors">{label}</label><input className="p-3.5 border-2 border-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white rounded-2xl focus:border-sky-500 outline-none font-bold transition-all shadow-sm" {...props}/></div>); }
 function InputDark({ label, ...props }) { return (<div className="flex flex-col"><label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2 transition-colors">{label}</label><input className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all shadow-inner disabled:opacity-50" {...props}/></div>); }
 function StatusBadge({ status }) { const b = { 'Pendiente': 'bg-amber-100 text-amber-700 border-amber-200', 'Validado': 'bg-sky-100 text-sky-700 border-sky-200', 'Despachado': 'bg-emerald-100 text-emerald-700 border-emerald-200', 'En Espera (Sin Stock)': 'bg-orange-100 text-orange-700 border-orange-200', 'Por Pagar / Cotización': 'bg-purple-100 text-purple-700 border-purple-200' }; return <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${b[status] || 'bg-slate-100 text-slate-600'}`}>{status}</span>; }
 function TabButton({ active, onClick, icon, label, badge, badgeColor }) { return (<button onClick={onClick} className={`flex items-center justify-between w-full p-4 rounded-2xl font-black transition-all ${active ? 'bg-sky-600 text-white shadow-xl scale-105' : 'text-sky-100/60 dark:text-slate-400 hover:bg-sky-900/40 dark:hover:bg-slate-800/80 hover:text-white'}`}><div className="flex items-center gap-3">{icon} <span className="hidden md:inline text-xs uppercase tracking-widest">{label}</span></div> {badge > 0 && <span className={`${badgeColor || 'bg-red-500'} text-white text-[9px] px-2 py-0.5 rounded-full font-bold shadow-lg`}>{badge}</span>}</button>); }
 function VistaImpresion({ pedidos }) { return <div className="hidden"></div>; }
+
+function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConfirm, dialogs }) {
+  const [carrito, setCarrito] = useState({});
+  const updateQty = (key, delta) => { setCarrito(prev => { const n = Math.max(0, (prev[key]||0)+delta); if(n===0){const c={...prev}; delete c[key]; return c;} return {...prev, [key]:n}; }); };
+  if (!isOpen) return null;
+  const handleConfirm = () => {
+    const lineas = [];
+    Object.entries(carrito).forEach(([k, q]) => lineas.push(`- ${q}x ${k.replace('|', ' ')}`));
+    if (lineas.length === 0) return dialogs.alert("Selecciona productos del catálogo.");
+    onConfirm(lineas.join('\n'), carrito);
+  };
+  return (
+    <div className="fixed inset-0 bg-slate-900/80 z-[200] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in">
+      <div className="bg-white dark:bg-slate-800 rounded-[3rem] w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden shadow-2xl border dark:border-slate-700 transition-colors">
+        <div className="p-8 border-b dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800 transition-colors">
+           <h2 className="text-2xl font-black flex items-center gap-3 dark:text-white"><Search className="text-sky-600"/> Catálogo Oficial</h2>
+           <button onClick={onClose} className="p-3 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 transition-colors text-slate-500"><X size={24}/></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-8 bg-[#f8fafc] dark:bg-slate-900 grid grid-cols-1 md:grid-cols-2 gap-8 transition-colors">
+           {catalogo.filter(c=>c.categoria !== 'Complementos Automáticos').map(c => (
+              <div key={c.categoria} className="space-y-4">
+                 <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] border-b dark:border-slate-700 pb-2 transition-colors">{c.categoria}</h3>
+                 {c.productos.map(p => (
+                    <div key={p.nombre} className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] border dark:border-slate-700 shadow-sm space-y-4 hover:shadow-md transition-all">
+                       <div className="font-black text-base text-slate-800 dark:text-slate-100 transition-colors">{p.nombre}</div>
+                       {p.presentaciones.map((pres, i) => {
+                          const k = `${p.nombre}|${pres}`; const q = carrito[k] || 0;
+                          const disp = stock ? (typeof stock[k] === 'object' ? stock[k].envios : (stock[k]||0)) : 0;
+                          return (
+                            <div key={pres} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-4 rounded-[1.5rem] border dark:border-slate-700 transition-colors">
+                               <div className="flex flex-col"><span className="font-bold opacity-60 text-[10px] dark:text-slate-400 uppercase tracking-widest">{pres}</span><span className="font-black text-emerald-600 text-lg">${p.precios[i]}</span><span className={`text-[9px] font-black ${disp===0?'text-red-500':'text-sky-500'}`}>Stock: {disp}</span></div>
+                               <div className="flex items-center gap-3 bg-white dark:bg-slate-800 p-2 rounded-2xl border dark:border-slate-700 shadow-inner transition-colors">
+                                  <button type="button" onClick={()=>updateQty(k,-1)} className="w-8 h-8 flex items-center justify-center font-black text-slate-400 hover:text-slate-800 transition-colors">-</button>
+                                  <span className="font-black w-6 text-center dark:text-white text-lg">{q}</span>
+                                  <button type="button" onClick={()=>updateQty(k,1)} className="w-8 h-8 flex items-center justify-center font-black text-sky-600 hover:text-sky-800 transition-colors">+</button>
+                               </div>
+                            </div>
+                          )
+                       })}
+                    </div>
+                 ))}
+              </div>
+           ))}
+        </div>
+        <div className="p-8 border-t dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800 transition-colors"><div className="font-black opacity-50 dark:text-slate-400 tracking-widest uppercase text-xs">Items: {Object.values(carrito).reduce((a,b)=>a+b,0)}</div><button onClick={handleConfirm} className="bg-sky-600 text-white px-12 py-5 rounded-[2rem] font-black shadow-2xl hover:bg-sky-700 transition-all uppercase tracking-widest">Confirmar Selección</button></div>
+      </div>
+    </div>
+  );
+}
