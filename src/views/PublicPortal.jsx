@@ -1,0 +1,308 @@
+import React, { useState, useMemo } from 'react';
+import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud } from 'lucide-react';
+import { collection, addDoc } from 'firebase/firestore';
+import { BRAND_LOGO } from '../config/constants';
+import { URL_GOOGLE_SCRIPT } from '../config/firebase'; // Asegúrate de exportar esto en firebase.js
+import { Input, InputDark } from '../components/ui';
+
+export default function PublicPortal({ catalogo, stock, config, db, appId, dialogs, onBack, darkMode, setDarkMode }) {
+  const [carrito, setCarrito] = useState({});
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
+  
+  // Estado del formulario de checkout
+  const [form, setForm] = useState({
+    nombre: '',
+    telefono: '',
+    direccion: '',
+    referencia: '',
+    comprobanteUrl: ''
+  });
+
+  const tasa = parseFloat(config?.tasaDia) || 1;
+
+  // Lógica del Carrito
+  const updateQty = (key, delta) => {
+    setCarrito(prev => {
+      const actual = prev[key] || 0;
+      const nuevo = Math.max(0, actual + delta);
+      
+      // Validar contra stock de envíos
+      const maxDisp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+      if (delta > 0 && nuevo > maxDisp) {
+        dialogs.alert(`Solo tenemos ${maxDisp} unidades disponibles de este producto.`, "Stock Límite");
+        return prev;
+      }
+
+      if (nuevo === 0) {
+        const copia = { ...prev };
+        delete copia[key];
+        return copia;
+      }
+      return { ...prev, [key]: nuevo };
+    });
+  };
+
+  // Calcular Totales
+  const { totalItems, subtotalUsd } = useMemo(() => {
+    let items = 0;
+    let usd = 0;
+    Object.entries(carrito).forEach(([key, qty]) => {
+      items += qty;
+      const [nombre, pres] = key.split('|');
+      catalogo.forEach(c => c.productos.forEach(p => {
+        if (p.nombre === nombre) {
+          const idx = p.presentaciones.indexOf(pres);
+          if (idx >= 0 && p.precios) usd += (p.precios[idx] * qty);
+        }
+      }));
+    });
+    return { totalItems: items, subtotalUsd: usd };
+  }, [carrito, catalogo]);
+
+  const totalVes = subtotalUsd * tasa;
+
+  // Subir Comprobante a Drive
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!URL_GOOGLE_SCRIPT) return dialogs.alert("El sistema de subida no está configurado.");
+
+    setSubiendoFoto(true);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onloadend = async () => {
+        const base64Data = reader.result.split(',')[1];
+        const response = await fetch(URL_GOOGLE_SCRIPT, {
+          method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ fileName: `ComprobanteWeb_${Date.now()}.jpg`, mimeType: file.type, data: base64Data })
+        });
+        const result = await response.json();
+        if (result.url) setForm({ ...form, comprobanteUrl: result.url });
+        setSubiendoFoto(false);
+      };
+    } catch (error) {
+      console.error(error);
+      dialogs.alert("Error subiendo el comprobante. Revisa tu conexión.", "Fallo de Red");
+      setSubiendoFoto(false);
+    }
+  };
+
+  // Enviar Pedido
+  const confirmarPedido = async (e) => {
+    e.preventDefault();
+    if (totalItems === 0) return dialogs.alert("Tu carrito está vacío.");
+    if (!form.nombre || !form.telefono || !form.direccion) return dialogs.alert("Llena los datos obligatorios.");
+
+    setEnviando(true);
+    try {
+      // Formatear productos para texto legible
+      const lineas = [];
+      Object.entries(carrito).forEach(([key, qty]) => {
+        lineas.push(`- ${qty}x ${key.replace('|', ' ')}`);
+      });
+      const productosString = lineas.join('\n');
+
+      const nuevoPedido = {
+        clienteNombre: form.nombre,
+        clienteTelefono: form.telefono,
+        direccion: form.direccion,
+        clienteCedula: 'WEB', // Dato no pedido en MVP público, pero requerido por tu BD
+        courier: 'Por Definir',
+        esMercadoLibre: false,
+        esRegalo: false,
+        asesora: 'Portal Web',
+        moneda: form.referencia ? 'VES' : 'USD',
+        monto: subtotalUsd,
+        montoUsd: subtotalUsd,
+        montoVes: totalVes,
+        tasaAplicada: tasa,
+        referencia: form.referencia || 'Pendiente',
+        linkComprobantePago: form.comprobanteUrl || '',
+        productos: productosString,
+        carritoObj: carrito,
+        status: 'Por Pagar / Cotización', // Cae directo en pestaña Web de Ventas
+        esPublico: true,
+        auditado: false,
+        fechaCreacion: Date.now()
+      };
+
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), nuevoPedido);
+      
+      dialogs.alert("¡Tu pedido ha sido enviado con éxito! Nuestro equipo lo validará pronto.", "¡Gracias por tu compra!");
+      setCarrito({});
+      setIsCartOpen(false);
+      setForm({ nombre: '', telefono: '', direccion: '', referencia: '', comprobanteUrl: '' });
+      
+    } catch (error) {
+      console.error(error);
+      dialogs.alert("Error al procesar tu pedido. Intenta nuevamente.", "Error");
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#f8fafc] dark:bg-slate-900 transition-colors text-slate-800 dark:text-slate-100 pb-20">
+      {/* HEADER PÚBLICO */}
+      <header className="sticky top-0 z-40 bg-white/80 dark:bg-slate-950/80 backdrop-blur-lg border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex justify-between items-center shadow-sm">
+        <button onClick={onBack} className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+          <ArrowLeft size={24} />
+        </button>
+        <img src={BRAND_LOGO} alt="Bluher" className="h-8 object-contain dark:invert" />
+        <div className="flex gap-2">
+          <button onClick={() => setDarkMode(!darkMode)} className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+            {darkMode ? <Sun size={20}/> : <Moon size={20}/>}
+          </button>
+          <button onClick={() => setIsCartOpen(true)} className="p-2 text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 rounded-full relative transition-colors">
+            <ShoppingCart size={24}/>
+            {totalItems > 0 && <span className="absolute top-0 right-0 bg-red-500 text-white text-[10px] font-black w-4 h-4 flex items-center justify-center rounded-full animate-bounce">{totalItems}</span>}
+          </button>
+        </div>
+      </header>
+
+      {/* HERO SECTION */}
+      <div className="bg-[#003366] text-white py-12 px-4 text-center border-b-4 border-sky-400">
+        <Store size={48} className="mx-auto mb-4 opacity-50" />
+        <h1 className="text-3xl md:text-4xl font-black mb-2 uppercase tracking-tighter">Tienda Oficial Bluher</h1>
+        <p className="text-sky-200 text-sm md:text-base font-medium max-w-lg mx-auto">Selecciona tus productos profesionales. Tasa de cálculo de hoy: <b>{tasa} Bs/$</b></p>
+      </div>
+
+      {/* CATÁLOGO DE PRODUCTOS */}
+      <main className="max-w-6xl mx-auto p-4 mt-8">
+        {catalogo.filter(c => c.categoria !== 'Complementos Automáticos').map((cat) => (
+          <div key={cat.categoria} className="mb-12">
+            <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 mb-6 border-b-2 border-sky-100 dark:border-slate-800 pb-2 uppercase tracking-widest">{cat.categoria}</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {cat.productos.map(prod => (
+                <div key={prod.nombre} className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 hover:shadow-lg transition-all hover:-translate-y-1">
+                  {prod.imagen ? (
+                    <div className="aspect-square bg-slate-50 dark:bg-slate-900 rounded-2xl mb-4 overflow-hidden"><img src={prod.imagen} alt={prod.nombre} className="w-full h-full object-cover" /></div>
+                  ) : (
+                    <div className="aspect-square bg-sky-50 dark:bg-sky-900/10 rounded-2xl mb-4 flex items-center justify-center text-sky-200 dark:text-sky-800"><Package size={64} /></div>
+                  )}
+                  <h3 className="font-black text-lg mb-4 leading-tight">{prod.nombre}</h3>
+                  <div className="space-y-3">
+                    {prod.presentaciones.map((pres, i) => {
+                      const key = `${prod.nombre}|${pres}`;
+                      const qty = carrito[key] || 0;
+                      const disp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+                      
+                      return (
+                        <div key={pres} className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl">
+                          <div>
+                            <div className="text-xs font-bold text-slate-500 uppercase">{pres}</div>
+                            <div className="font-black text-emerald-600 dark:text-emerald-400">${prod.precios[i]}</div>
+                          </div>
+                          {disp > 0 ? (
+                            <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-1">
+                              <button onClick={() => updateQty(key, -1)} className="w-8 h-8 flex items-center justify-center font-black text-slate-400 hover:text-slate-800 dark:hover:text-white">-</button>
+                              <span className="w-4 text-center font-black text-sm">{qty}</span>
+                              <button onClick={() => updateQty(key, 1)} className="w-8 h-8 flex items-center justify-center font-black text-sky-600 hover:text-sky-800 dark:hover:text-sky-300">+</button>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-black text-red-500 bg-red-50 px-2 py-1 rounded uppercase">Agotado</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </main>
+
+      {/* SIDEBAR DEL CARRITO / CHECKOUT */}
+      {isCartOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setIsCartOpen(false)}></div>
+          <div className="relative w-full max-w-md bg-white dark:bg-slate-900 h-full shadow-2xl flex flex-col animate-in slide-in-from-right">
+            <div className="p-6 border-b dark:border-slate-800 flex justify-between items-center bg-white dark:bg-slate-900">
+              <h2 className="text-2xl font-black flex items-center gap-2"><ShoppingCart className="text-sky-600"/> Tu Carrito</h2>
+              <button onClick={() => setIsCartOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white"><ArrowLeft size={24}/></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50 dark:bg-slate-950">
+              {totalItems === 0 ? (
+                <div className="text-center text-slate-400 mt-20 flex flex-col items-center">
+                  <ShoppingCart size={48} className="mb-4 opacity-20" />
+                  <p className="font-bold">Tu carrito está vacío.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Lista de Items */}
+                  <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
+                    <h3 className="text-xs font-black uppercase text-slate-400 mb-3 border-b dark:border-slate-700 pb-2">Resumen de Productos</h3>
+                    {Object.entries(carrito).map(([key, qty]) => (
+                      <div key={key} className="flex justify-between items-center mb-3 last:mb-0">
+                        <div className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                          <span className="text-sky-600 mr-2">{qty}x</span>{key.replace('|', ' - ')}
+                        </div>
+                        <button onClick={() => updateQty(key, -qty)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16}/></button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Formulario de Cliente */}
+                  <form id="checkout-form" onSubmit={confirmarPedido} className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 space-y-4">
+                     <h3 className="text-xs font-black uppercase text-slate-400 mb-2 border-b dark:border-slate-700 pb-2">Tus Datos de Envío</h3>
+                     {darkMode ? (
+                       <>
+                         <InputDark label="Nombre y Apellido" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} required/>
+                         <InputDark label="Teléfono (WhatsApp)" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
+                         <div className="flex flex-col">
+                           <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2">Dirección de Entrega</label>
+                           <textarea value={form.direccion} onChange={e=>setForm({...form, direccion: e.target.value})} required rows="2" className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all text-sm"></textarea>
+                         </div>
+                       </>
+                     ) : (
+                       <>
+                         <Input label="Nombre y Apellido" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} required/>
+                         <Input label="Teléfono (WhatsApp)" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
+                         <div className="flex flex-col">
+                           <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Dirección de Entrega</label>
+                           <textarea value={form.direccion} onChange={e=>setForm({...form, direccion: e.target.value})} required rows="2" className="p-3.5 border-2 border-slate-100 rounded-2xl focus:border-sky-500 outline-none font-bold transition-all text-sm bg-slate-50"></textarea>
+                         </div>
+                       </>
+                     )}
+
+                     <h3 className="text-xs font-black uppercase text-slate-400 mt-6 mb-2 border-b dark:border-slate-700 pb-2">Información de Pago (Opcional)</h3>
+                     <p className="text-[10px] text-slate-500 mb-3">Si ya realizaste el pago móvil o transferencia, adjunta la referencia.</p>
+                     
+                     {darkMode ? <InputDark label="Referencia o Banco" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} placeholder="Ej: 1234 Banesco"/> 
+                               : <Input label="Referencia o Banco" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} placeholder="Ej: 1234 Banesco"/>}
+                     
+                     <div className="mt-2">
+                        <label className={`flex items-center justify-center gap-2 w-full p-4 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-sm ${form.comprobanteUrl ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-slate-300 dark:border-slate-600 text-slate-500 hover:border-sky-500 hover:text-sky-600'}`}>
+                          {subiendoFoto ? <Loader2 size={20} className="animate-spin"/> : (form.comprobanteUrl ? <CheckCircle size={20}/> : <UploadCloud size={20}/>)}
+                          {form.comprobanteUrl ? 'Comprobante Cargado' : 'Subir Capture de Pantalla'}
+                          <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} disabled={subiendoFoto}/>
+                        </label>
+                     </div>
+                  </form>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Carrito */}
+            <div className="p-6 bg-white dark:bg-slate-900 border-t dark:border-slate-800">
+               <div className="flex justify-between items-center mb-2">
+                 <span className="text-slate-500 dark:text-slate-400 font-bold uppercase text-xs tracking-widest">Total a Pagar</span>
+                 <span className="text-3xl font-black text-slate-800 dark:text-white">${subtotalUsd.toFixed(2)}</span>
+               </div>
+               <div className="text-right text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-6">Equivale a: Bs. {totalVes.toFixed(2)}</div>
+               
+               <button form="checkout-form" type="submit" disabled={totalItems === 0 || enviando} className="w-full bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white font-black py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 uppercase tracking-widest transition-all hover:-translate-y-1 disabled:opacity-50 disabled:hover:translate-y-0">
+                 {enviando ? <Loader2 className="animate-spin"/> : 'Enviar Pedido por Web'}
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
