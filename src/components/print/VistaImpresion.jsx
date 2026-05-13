@@ -25,11 +25,11 @@ export default function VistaImpresion({ pedidos }) {
             </div>
             <div className="space-y-2 text-base">
               <p><span className="font-black text-slate-600">DESTINATARIO:</span> <span className="font-bold text-xl ml-2">{p.clienteNombre?.toUpperCase()}</span></p>
-              <p><span className="font-black text-slate-600">DOCUMENTO DE IDENTIDAD:</span> <span className="font-bold ml-2">{p.clienteCedula}</span></p>
-              <p><span className="font-black text-slate-600">TELÉFONO DE CONTACTO:</span> <span className="font-bold ml-2">{p.clienteTelefono}</span></p>
-              <div className="mt-4"><span className="font-black text-slate-600 block mb-1">DIRECCIÓN DE ENTREGA DECLARADA:</span></div>
+              <p><span className="font-black text-slate-600">CI / RIF:</span> <span className="font-bold ml-2">{p.clienteCedula}</span></p>
+              <p><span className="font-black text-slate-600">TLF:</span> <span className="font-bold ml-2">{p.clienteTelefono}</span></p>
+              <div className="mt-4"><span className="font-black text-slate-600 block mb-1">DIRECCIÓN:</span></div>
               <p className="pl-4 border-l-4 border-slate-300 leading-relaxed font-bold bg-slate-50 p-2 rounded-r-lg">{p.direccion}</p>
-              <div className="mt-4 border-t-2 border-dashed border-slate-300 pt-4"><span className="font-black text-slate-600 block mb-2">LISTADO DE PRODUCTOS EMPACADOS:</span> 
+              <div className="mt-4 border-t-2 border-dashed border-slate-300 pt-4"><span className="font-black text-slate-600 block mb-2">PRODUCTOS:</span> 
                  <div className="font-bold whitespace-pre-wrap leading-relaxed">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
               </div>
             </div>
