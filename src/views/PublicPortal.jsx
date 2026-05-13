@@ -1,10 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud, Search } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud, Search, Percent } from 'lucide-react';
 import { collection, addDoc } from 'firebase/firestore';
 import { BRAND_LOGO } from '../config/constants';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
-import { Input, InputDark } from '../components/ui';
 import { compressImage } from '../utils/image';
+import { Input, InputDark } from '../components/ui';
 
 export default function PublicPortal({ catalogo, stock, config, db, appId, dialogs, onBack, darkMode, setDarkMode }) {
   const [carrito, setCarrito] = useState({});
@@ -12,7 +12,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   const [enviando, setEnviando] = useState(false);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
   
-  // --- NUEVOS ESTADOS PARA BÚSQUEDA Y FILTROS ---
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
 
@@ -27,6 +26,16 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   });
 
   const tasa = parseFloat(config?.tasaDia) || 1;
+
+  // --- LÓGICA DE DESCUENTO GLOBAL PÚBLICO ---
+  const hoyTimestamp = new Date().getTime();
+  const isGlobalDiscountActive = config?.descuentoGlobalActivo &&
+     config?.descuentoGlobalPorcentaje > 0 &&
+     config?.descuentoGlobalInicio && config?.descuentoGlobalFin &&
+     hoyTimestamp >= new Date(config.descuentoGlobalInicio + 'T00:00:00').getTime() &&
+     hoyTimestamp <= new Date(config.descuentoGlobalFin + 'T23:59:59').getTime();
+
+  const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
 
   // Lógica del Carrito
   const updateQty = (key, delta) => {
@@ -49,33 +58,28 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
     });
   };
 
-  // --- LÓGICA DE FILTRADO DINÁMICO DE CATÁLOGO ---
   const catalogFiltered = useMemo(() => {
     return catalogo
       .filter(c => c.categoria !== 'Complementos Automáticos')
       .map(cat => {
-         // 1. Filtrar los productos dentro de la categoría según la barra de búsqueda
          const productosBusqueda = cat.productos.filter(prod => 
            prod.nombre.toLowerCase().includes(searchTerm.toLowerCase())
          );
          return { ...cat, productos: productosBusqueda };
       })
       .filter(cat => {
-         // 2. Comprobar si la categoría coincide con el filtro seleccionado
          const matchesCategory = selectedCategory === 'Todos' || cat.categoria === selectedCategory;
-         // 3. Ocultar la categoría si quedó vacía tras la búsqueda
          const hasProducts = cat.productos.length > 0;
          return matchesCategory && hasProducts;
       });
   }, [catalogo, searchTerm, selectedCategory]);
 
-  // Lista de categorías únicas para los botones de filtro
   const categoriasDisponibles = useMemo(() => {
     return ['Todos', ...catalogo.filter(c => c.categoria !== 'Complementos Automáticos').map(c => c.categoria)];
   }, [catalogo]);
 
-  // Calcular Totales
-  const { totalItems, subtotalUsd } = useMemo(() => {
+  // Calcular Totales (Incluyendo la rebaja de la campaña)
+  const { totalItems, subtotalUsdOriginal, subtotalUsd } = useMemo(() => {
     let items = 0;
     let usd = 0;
     Object.entries(carrito).forEach(([key, qty]) => {
@@ -88,12 +92,15 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         }
       }));
     });
-    return { totalItems: items, subtotalUsd: usd };
-  }, [carrito, catalogo]);
+    
+    // Aplicamos el descuento global matemáticamente al total
+    const discountedUsd = usd * (1 - globalDiscountPercent / 100);
+
+    return { totalItems: items, subtotalUsdOriginal: usd, subtotalUsd: discountedUsd };
+  }, [carrito, catalogo, globalDiscountPercent]);
 
   const totalVes = subtotalUsd * tasa;
 
-  // Subir Comprobante a Drive
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -101,9 +108,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
     setSubiendoFoto(true);
     try {
-      // 800px es la calidad ideal para un voucher bancario
       const base64Data = await compressImage(file, 800, 0.7);
-
       const response = await fetch(URL_GOOGLE_SCRIPT, {
         method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ fileName: `ComprobanteWeb_${Date.now()}.jpg`, mimeType: 'image/jpeg', data: base64Data })
@@ -113,12 +118,11 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       setSubiendoFoto(false);
     } catch (error) {
       console.error(error);
-      dialogs.alert("Error subiendo el comprobante. Revisa tu conexión.", "Fallo de Red");
+      dialogs.alert("Error subiendo el comprobante.", "Fallo de Red");
       setSubiendoFoto(false);
     }
   };
 
-  // Enviar Pedido
   const confirmarPedido = async (e) => {
     e.preventDefault();
     if (totalItems === 0) return dialogs.alert("Tu carrito está vacío.");
@@ -159,7 +163,8 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         status: 'Por Pagar / Cotización',
         esPublico: true,
         auditado: false,
-        fechaCreacion: Date.now()
+        fechaCreacion: Date.now(),
+        descuentoGlobalAplicado: globalDiscountPercent // Guardar registro de que compraron en campaña
       };
 
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), nuevoPedido);
@@ -196,6 +201,13 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         </div>
       </header>
 
+      {/* BANNER DE DESCUENTO GLOBAL */}
+      {isGlobalDiscountActive && (
+         <div className="bg-gradient-to-r from-pink-500 to-purple-600 text-white text-center py-2 px-4 font-bold text-xs sm:text-sm animate-pulse shadow-md">
+            ¡APROVECHA EL {globalDiscountPercent}% DE DESCUENTO EN TODA LA TIENDA HASTA EL {config.descuentoGlobalFin}!
+         </div>
+      )}
+
       {/* HERO SECTION */}
       <div className="bg-[#003366] text-white py-12 px-4 text-center border-b-4 border-sky-400">
         <Store size={48} className="mx-auto mb-4 opacity-50" />
@@ -206,8 +218,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       {/* SECCIÓN DE BÚSQUEDA Y FILTROS */}
       <div className="max-w-6xl mx-auto px-4 mt-8">
         <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
-          
-          {/* Barra de Búsqueda */}
           <div className="relative mb-6">
             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
               <Search size={20} />
@@ -221,7 +231,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
             />
           </div>
 
-          {/* Botones de Categorías */}
           <div className="flex flex-wrap gap-2">
             {categoriasDisponibles.map(cat => (
               <button 
@@ -264,11 +273,22 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                         const qty = carrito[key] || 0;
                         const disp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
                         
+                        // Lógica visual del descuento en producto
+                        const originalPrice = prod.precios[i];
+                        const discountedPrice = originalPrice * (1 - globalDiscountPercent / 100);
+
                         return (
                           <div key={pres} className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl">
                             <div>
                               <div className="text-xs font-bold text-slate-500 uppercase">{pres}</div>
-                              <div className="font-black text-emerald-600 dark:text-emerald-400">${prod.precios[i]}</div>
+                              {isGlobalDiscountActive ? (
+                                <div className="flex items-baseline gap-2">
+                                  <span className="font-black text-pink-600 dark:text-pink-400">${discountedPrice.toFixed(2)}</span>
+                                  <span className="text-xs font-bold text-slate-400 line-through">${originalPrice}</span>
+                                </div>
+                              ) : (
+                                <div className="font-black text-emerald-600 dark:text-emerald-400">${originalPrice}</div>
+                              )}
                             </div>
                             {disp > 0 ? (
                               <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-1">
@@ -388,9 +408,18 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
             {/* Footer Carrito */}
             <div className="p-6 bg-white dark:bg-slate-900 border-t dark:border-slate-800">
+               {isGlobalDiscountActive && (
+                 <div className="flex justify-between items-center mb-1 text-slate-400">
+                   <span className="text-xs font-bold">Subtotal Original</span>
+                   <span className="text-sm font-bold line-through">${subtotalUsdOriginal.toFixed(2)}</span>
+                 </div>
+               )}
                <div className="flex justify-between items-center mb-2">
                  <span className="text-slate-500 dark:text-slate-400 font-bold uppercase text-xs tracking-widest">Total a Pagar</span>
-                 <span className="text-3xl font-black text-slate-800 dark:text-white">${subtotalUsd.toFixed(2)}</span>
+                 <div className="flex items-center gap-2">
+                   {isGlobalDiscountActive && <span className="bg-pink-100 text-pink-700 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-pink-200">-{globalDiscountPercent}%</span>}
+                   <span className="text-3xl font-black text-slate-800 dark:text-white">${subtotalUsd.toFixed(2)}</span>
+                 </div>
                </div>
                <div className="text-right text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-6">Equivale a: Bs. {totalVes.toFixed(2)}</div>
                

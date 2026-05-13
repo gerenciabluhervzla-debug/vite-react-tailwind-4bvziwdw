@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Trash2, AlertTriangle } from 'lucide-react';
+import { Users, Trash2, AlertTriangle, Edit2 } from 'lucide-react';
 import { updateDoc, deleteDoc, doc, getDocs, collection, setDoc } from 'firebase/firestore';
 import { ROLES } from '../config/constants';
 
@@ -9,13 +9,22 @@ export default function PanelUsuarios({ usuarios, db, appId, loggear, dialogs })
     loggear('GESTION_USUARIO', `Acceso de ${email} -> Rol: ${newRole} (Aprobado: ${isApproved})`);
   };
 
+  const cambiarNombre = (uid, nombreActual) => {
+    dialogs.prompt(`Cambiar nombre del usuario (Actual: ${nombreActual}):`, async (nuevoNombre) => {
+       if (!nuevoNombre || nuevoNombre.trim() === '') return;
+       try {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid), { nombre: nuevoNombre.trim() });
+          loggear('USUARIO_RENOMBRADO', `De ${nombreActual} a ${nuevoNombre}`);
+       } catch(e) { console.error(e); }
+    }, "Renombrar Usuario");
+  };
+
   const eliminarUsuario = (uid, email) => {
     dialogs.confirm(`Estás a punto de eliminar de forma permanente la cuenta de usuario:\n\n${email}\n\n¿Estás absolutamente seguro de realizar esta acción?`, async () => {
       try {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid));
         loggear('USUARIO_ELIMINADO', `El administrador eliminó la cuenta del sistema: ${email}`);
         
-        // Timeout agregado para evitar superposición de modales
         setTimeout(() => {
           dialogs.alert("La cuenta de usuario ha sido eliminada del sistema exitosamente.", "Usuario Eliminado");
         }, 150);
@@ -31,7 +40,6 @@ export default function PanelUsuarios({ usuarios, db, appId, loggear, dialogs })
   const formatearSistema = () => {
     dialogs.confirm("⚠️ PELIGRO CRÍTICO ⚠️\n\nEstás a punto de ELIMINAR TODOS los Pedidos, Movimientos de Inventario y Logs de Auditoría.\n\nEl Stock de los almacenes también se reiniciará a CERO. Las cuentas de usuario y el catálogo se mantendrán intactos.\n\n¿Estás absolutamente seguro de querer limpiar todo el entorno?", () => {
       
-      // Añadimos un pequeño retraso para permitir que se cierre el primer modal antes de abrir el prompt
       setTimeout(() => {
         dialogs.prompt("Para confirmar esta acción irreversible, escribe la palabra exacta: BORRAR", async (val) => {
           if (val !== "BORRAR") {
@@ -57,7 +65,6 @@ export default function PanelUsuarios({ usuarios, db, appId, loggear, dialogs })
 
             loggear('SISTEMA_REINICIADO', 'El administrador formateó toda la data operativa del sistema.');
             
-            // Retraso para que el alert final funcione correctamente
             setTimeout(() => {
               dialogs.alert("¡El entorno ha sido restablecido a CERO exitosamente! La página se recargará automáticamente.", "Formateo Completo");
               setTimeout(() => window.location.reload(), 3000);
@@ -89,7 +96,11 @@ export default function PanelUsuarios({ usuarios, db, appId, loggear, dialogs })
                     <div className="flex items-center gap-3">
                        <div className="w-10 h-10 bg-sky-100 dark:bg-sky-900 text-sky-600 dark:text-sky-400 rounded-full flex items-center justify-center font-black">{u.nombre[0]}</div>
                        <div>
-                          <div className="font-bold dark:text-white text-base flex items-center gap-2">{u.nombre} {u.isOnline && <span title="Sesión Activa" className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse shadow-sm shadow-emerald-200 inline-block"></span>}</div>
+                          <div className="font-bold dark:text-white text-base flex items-center gap-2">
+                            {u.nombre} 
+                            <button onClick={() => cambiarNombre(u.id, u.nombre)} className="text-sky-600 hover:text-sky-800 transition-colors" title="Cambiar Nombre"><Edit2 size={14}/></button>
+                            {u.isOnline && <span title="Sesión Activa" className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse shadow-sm shadow-emerald-200 inline-block"></span>}
+                          </div>
                           <div className="text-[10px] text-slate-400 font-bold uppercase">{u.email}</div>
                        </div>
                     </div>

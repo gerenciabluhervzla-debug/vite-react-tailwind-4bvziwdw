@@ -3,6 +3,7 @@ import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, C
 import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image'; 
+import { ROLES } from '../config/constants';
 
 export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs, perfil }) {
   const [vistaDespacho, setVistaDespacho] = useState('pendientes');
@@ -14,7 +15,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const [guiasInput, setGuiasInput] = useState({});
   const [subiendo, setSubiendo] = useState({ id: null, field: null });
 
-  // Estados de Auditoría
   const [cierres, setCierres] = useState([]);
   const [conteoActivo, setConteoActivo] = useState(false);
   const [conteoFisico, setConteoFisico] = useState({});
@@ -31,7 +31,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
   const handleGuiaChange = (id, field, value) => setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
 
-  // --- SUBIDA DE FOTOS CON COMPRESIÓN ---
   const handleFileUpload = async (e, id, field) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -58,7 +57,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     } catch (error) { console.error(error); dialogs.alert("Error subiendo la foto a Drive.", "Fallo de Red"); setSubiendo({ id: null, field: null }); }
   };
 
-  // --- BOTÓN EXPLÍCITO: GUARDAR AVANCE ---
   const guardarAvance = async (pedido) => {
     const inputData = guiasInput[pedido.id] || {};
     const updateData = {};
@@ -67,22 +65,20 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     if (inputData.link !== undefined) updateData.linkGuia = inputData.link;
     if (inputData.fotoProductos !== undefined) updateData.linkFotoProductos = inputData.fotoProductos;
 
-    if (Object.keys(updateData).length === 0) return dialogs.alert("No has agregado nueva información (N° de guía o fotos) para guardar.", "Sin Cambios");
+    if (Object.keys(updateData).length === 0) return dialogs.alert("No has agregado nueva información para guardar.", "Sin Cambios");
 
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), updateData);
       loggear('AVANCE_DESPACHO', `Avance guardado para ${pedido.clienteNombre}`);
-      dialogs.alert("Se ha guardado tu avance (Fotos o N° Guía). El pedido seguirá en la lista de pendientes hasta que lo archives definitivamente.", "Progreso Guardado");
+      dialogs.alert("Se ha guardado tu avance (Fotos o N° Guía).", "Progreso Guardado");
     } catch (error) {
       console.error(error);
       dialogs.alert("Error al intentar guardar el avance.", "Error");
     }
   };
 
-  // --- ARCHIVAR PEDIDO FINAL ---
   const guardarGuia = async (pedido) => {
     const inputData = guiasInput[pedido.id] || {};
-    
     const guiaFinal = inputData.guia !== undefined ? inputData.guia : pedido.guia;
     const linkFinal = inputData.link !== undefined ? inputData.link : pedido.linkGuia;
     const fotoFinal = inputData.fotoProductos !== undefined ? inputData.fotoProductos : pedido.linkFotoProductos;
@@ -100,7 +96,18 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     } catch(e) { console.error(e); dialogs.alert("Error al intentar archivar el pedido.", "Error"); }
   };
 
-  // --- LÓGICA DEL CIERRE DE INVENTARIO ---
+  // --- AUTORIZAR ENVÍO FUERA DE HORARIO (SOLO ADMIN) ---
+  const forzarEnvioHoy = async (id) => {
+    dialogs.confirm("¿Autorizar que este pedido se imprima y se envíe HOY de forma excepcional?", async () => {
+      try {
+        const fechaHoy = new Date().toLocaleDateString('es-VE');
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id), { fechaDespacho: fechaHoy });
+        loggear('ENVIO_FORZADO', `Se autorizó envío fuera de horario para pedido ${id}`);
+        setTimeout(() => dialogs.alert("Envío autorizado exitosamente.", "Actualizado"), 150);
+      } catch (error) { console.error(error); }
+    }, "Autorizar Excepción");
+  };
+
   const iniciarConteo = () => {
     const inicial = {};
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
@@ -134,7 +141,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   };
 
   const guardarCierre = async () => {
-    dialogs.confirm("¿Estás seguro de registrar el cierre de inventario de hoy? Esta acción guardará el historial y descargará tu reporte.", async () => {
+    dialogs.confirm("¿Estás seguro de registrar el cierre de inventario de hoy?", async () => {
       const productosCierre = [];
       let totalDiferencias = 0;
 
@@ -143,9 +150,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
         const fisico = conteoFisico[key] || 0;
         const diferencia = fisico - sistema; 
-        
         if (diferencia !== 0) totalDiferencias++;
-
         productosCierre.push({ categoria: c.categoria, nombre: p.nombre, presentacion: pres, sistema, fisico, diferencia, nota: notasConteo[key] || '' });
       })));
 
@@ -163,12 +168,9 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         loggear('CIERRE_INVENTARIO', `Cierre registrado con ${totalDiferencias} diferencias.`);
         setConteoActivo(false);
         generarCSV(nuevoCierre);
-        dialogs.alert("El cierre fue guardado en el historial y el reporte CSV se ha descargado.", "Cierre Completado");
-      } catch (error) {
-        console.error(error);
-        dialogs.alert("Ocurrió un error al guardar el historial de cierre.", "Error");
-      }
-    }, "Confirmar Cierre de Inventario");
+        setTimeout(() => dialogs.alert("Cierre guardado en historial y reporte CSV descargado.", "Completado"), 150);
+      } catch (error) { console.error(error); }
+    }, "Confirmar Cierre");
   };
 
   const cierresFiltrados = cierres.filter(c => {
@@ -179,6 +181,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   });
 
   const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
+  const todayStr = new Date().toLocaleDateString('es-VE');
 
   return (
     <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
@@ -195,7 +198,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
         {['pendientes', 'historial'].includes(vistaDespacho) && (
           <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm w-full md:w-auto justify-center">
-            <Printer size={18} /> Imprimir Etiquetas
+            <Printer size={18} /> Imprimir Etiquetas ({todayStr})
           </button>
         )}
       </div>
@@ -210,39 +213,47 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {/* --- VISTA NORMAL DE LOGÍSTICA (DISEÑO RESPONSIVO CON CARDS/GRID) --- */}
       {['pendientes', 'historial'].includes(vistaDespacho) && (
         <div className="rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden bg-white dark:bg-slate-800/20">
-          
-          {/* Encabezado Desktop (Oculto en móviles) */}
           <div className="hidden lg:grid lg:grid-cols-12 gap-6 p-4 bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-b dark:border-slate-700 text-sm">
             <div className="lg:col-span-3 font-bold tracking-wide">Datos del Paquete</div>
             <div className="lg:col-span-5 font-bold tracking-wide">Dirección y Contenido</div>
             <div className="lg:col-span-4 font-bold tracking-wide">Gestión de Guía y Soportes</div>
           </div>
 
-          {/* Cuerpo (Cards apiladas en móvil, Filas Grid en Desktop) */}
           <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-700">
             {pedidosAMostrar.length === 0 ? (
               <div className="p-10 text-center text-slate-400 italic font-bold">No hay envíos en esta vista.</div>
             ) : pedidosAMostrar.map(p => {
-              
               const valorGuia = guiasInput[p.id]?.guia !== undefined ? guiasInput[p.id].guia : (p.guia || '');
               const valorLinkGuia = guiasInput[p.id]?.link !== undefined ? guiasInput[p.id].link : (p.linkGuia || '');
               const valorLinkFoto = guiasInput[p.id]?.fotoProductos !== undefined ? guiasInput[p.id].fotoProductos : (p.linkFotoProductos || '');
 
+              // Evaluamos si el pedido es para el día siguiente para resaltarlo
+              const esParaManana = p.fechaDespacho !== todayStr;
+              const cardClass = esParaManana && vistaDespacho === 'pendientes' 
+                  ? "bg-red-50/50 dark:bg-red-900/10 border-red-200 dark:border-red-800" 
+                  : "hover:bg-slate-50/50 dark:hover:bg-slate-800/50";
+
               return (
-                <div key={p.id} className="flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                <div key={p.id} className={`flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 transition-colors border-l-4 ${cardClass} ${esParaManana && vistaDespacho === 'pendientes' ? 'border-l-red-500' : 'border-l-transparent'}`}>
                   
-                  {/* Columna 1: Datos del Paquete */}
                   <div className="lg:col-span-3 flex flex-col justify-start">
                     <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">{p.clienteNombre}</div>
                     <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-2">{p.courier}</div>
                     <div className="text-xs font-semibold text-slate-500 mt-2">Tel: {p.clienteTelefono}</div>
-                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mt-3">Sale: {p.fechaDespacho}</div>
+                    
+                    <div className={`text-[11px] font-bold uppercase tracking-wider mt-3 p-2 rounded-lg ${esParaManana && vistaDespacho === 'pendientes' ? 'bg-red-100 text-red-700 border border-red-200' : 'text-slate-400'}`}>
+                      Sale: {p.fechaDespacho} {esParaManana && vistaDespacho === 'pendientes' && '(NO IMPRIMIR HOY)'}
+                    </div>
+
+                    {esParaManana && vistaDespacho === 'pendientes' && [ROLES.ADMIN].includes(perfil?.role) && (
+                      <button onClick={() => forzarEnvioHoy(p.id)} className="w-full mt-3 bg-red-100 hover:bg-red-200 text-red-700 dark:bg-red-900/40 dark:text-red-300 py-2 rounded-xl text-xs font-bold transition-colors">
+                        Autorizar Envío Hoy (Excepción)
+                      </button>
+                    )}
                   </div>
 
-                  {/* Columna 2: Dirección y Contenido */}
                   <div className="lg:col-span-5 flex flex-col justify-start mt-2 lg:mt-0">
                     {p.esMercadoLibre && vistaDespacho === 'pendientes' && (
                       <div className="mb-3 bg-yellow-400 text-slate-900 p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider animate-pulse">
@@ -258,7 +269,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                     </div>
                   </div>
 
-                  {/* Columna 3: Gestión y Soportes (El panel gris) */}
                   <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0 bg-slate-50/50 dark:bg-slate-900/30 p-4 lg:p-0 rounded-2xl lg:bg-transparent lg:rounded-none border border-slate-100 dark:border-slate-700 lg:border-none">
                     {p.status === 'Despachado' ? (
                       <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm w-full">
@@ -272,9 +282,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                       </div>
                     ) : (
                       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm flex flex-col gap-3 w-full">
-                        
                         <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
-                        
                         <div className="flex flex-col lg:flex-row gap-3">
                             <div className="flex-1 relative w-full">
                               <input type="text" placeholder="URL Recibo" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkGuia} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
@@ -283,7 +291,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                                 <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
                               </label>
                             </div>
-
                             <div className="flex-1 relative w-full">
                               <input type="text" placeholder="URL Foto Caja" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkFoto ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkFoto} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
                               <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkFoto ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto del Paquete">
@@ -292,7 +299,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                               </label>
                             </div>
                         </div>
-
                         <div className="flex flex-col lg:flex-row gap-2 mt-2">
                            <button onClick={() => guardarAvance(p)} className="flex-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
                              <Save size={16}/> Guardar Avance
@@ -312,14 +318,13 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       )}
 
       {/* --- LAS OTRAS VISTAS DE AUDITORÍA Y CIERRES SE MANTIENEN IGUAL... --- */}
-      {/* VISTA: AUDITORÍA DE INVENTARIO FÍSICO */}
       {vistaDespacho === 'inventario' && (
         <div className="animate-in fade-in">
           {!conteoActivo ? (
             <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700">
                <CheckSquare size={64} className="mx-auto text-sky-300 dark:text-sky-800 mb-6" />
                <h3 className="text-2xl font-black text-slate-700 dark:text-slate-200 mb-2">Auditoría Diaria de Despacho</h3>
-               <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara las cantidades físicas en los anaqueles contra las registradas en el sistema para detectar faltantes o sobrantes.</p>
+               <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara las cantidades físicas en los anaqueles contra las registradas en el sistema.</p>
                <button onClick={iniciarConteo} className="bg-sky-600 hover:bg-sky-700 text-white font-black py-4 px-8 rounded-xl shadow-lg transition-all hover:-translate-y-1">
                  Iniciar Conteo del Día
                </button>
@@ -329,7 +334,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
               <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-sky-50 dark:bg-sky-900/20 p-6 rounded-2xl border border-sky-100 dark:border-sky-800">
                  <div>
                    <h3 className="font-black text-sky-900 dark:text-sky-300 text-lg">Hoja de Trabajo Activa</h3>
-                   <p className="text-sm font-medium text-sky-700 dark:text-sky-400">Las casillas ya tienen la cantidad del sistema. Modifica solo donde haya diferencias.</p>
+                   <p className="text-sm font-medium text-sky-700 dark:text-sky-400">Modifica solo donde haya diferencias.</p>
                  </div>
                  <div className="flex gap-3 w-full md:w-auto">
                    <button onClick={()=>setConteoActivo(false)} className="flex-1 md:flex-none px-6 py-3 font-bold text-slate-600 bg-white dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Cancelar</button>
@@ -396,7 +401,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {/* VISTA: HISTORIAL DE CIERRES */}
       {vistaDespacho === 'historial_cierres' && (
         <div className="animate-in fade-in space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">

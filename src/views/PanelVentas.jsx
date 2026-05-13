@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck } from 'lucide-react';
+import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent } from 'lucide-react';
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
 import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
@@ -7,7 +7,6 @@ import { GEMINI_API_KEY } from '../config/firebase';
 import { ROLES } from '../config/constants';
 
 export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
-  // Solo Admin y Ventas pueden modificar o registrar
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
   
@@ -27,6 +26,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   const fechaHoy = new Date().toLocaleDateString('es-VE');
   const tasaActualizadaHoy = config.ultimaActualizacion === fechaHoy;
 
+  // --- COMPROBACIÓN DE DESCUENTO GLOBAL ---
+  const hoyTimestamp = new Date().getTime();
+  const isGlobalDiscountActive = config?.descuentoGlobalActivo &&
+     config?.descuentoGlobalPorcentaje > 0 &&
+     config?.descuentoGlobalInicio && config?.descuentoGlobalFin &&
+     hoyTimestamp >= new Date(config.descuentoGlobalInicio + 'T00:00:00').getTime() &&
+     hoyTimestamp <= new Date(config.descuentoGlobalFin + 'T23:59:59').getTime();
+
+  const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
+
   useEffect(() => {
     if (!formData.carritoObj) return;
     let sub = 0;
@@ -34,10 +43,15 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       const [n, p] = key.split('|');
       catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const i=prod.presentaciones.indexOf(p); if (i >= 0 && prod.precios) sub += (prod.precios[i]*qty); }}));
     });
-    const d = parseFloat(formData.descuentoPorcentaje) || 0;
-    const final = sub * (1 - d/100);
+    
+    // Aplicamos primero la campaña global al subtotal
+    const subConCampaña = sub * (1 - globalDiscountPercent / 100);
+    // Luego aplicamos el descuento extra del asesor si es que dio uno
+    const dExtra = parseFloat(formData.descuentoPorcentaje) || 0;
+    const final = subConCampaña * (1 - dExtra / 100);
+    
     setFormData(prev => ({ ...prev, montoPago: final.toFixed(2), tasa: prev.tasa || config.tasaDia }));
-  }, [formData.carritoObj, formData.descuentoPorcentaje, config.tasaDia, catalogo]);
+  }, [formData.carritoObj, formData.descuentoPorcentaje, config.tasaDia, catalogo, globalDiscountPercent]);
 
   const copiarLinkTienda = () => {
     const linkTienda = `${window.location.origin}${window.location.pathname}#tienda`;
@@ -123,7 +137,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!tasaActualizadaHoy && !editId) return dialogs.alert("NO puedes registrar ventas nuevas porque la Tasa del Día no ha sido actualizada hoy por Administración. Por favor, solicita la actualización para continuar.", "Tasa Desactualizada");
+    if (!tasaActualizadaHoy && !editId) return dialogs.alert("NO puedes registrar ventas nuevas porque la Tasa del Día no ha sido actualizada hoy por Administración.", "Tasa Desactualizada");
     if (!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) return dialogs.alert("Debes seleccionar productos del Catálogo Visual.", "Carrito Vacío");
     if (!formData.esRegalo && (!formData.tasa || parseFloat(formData.tasa) <= 0)) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
     
@@ -178,7 +192,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     }
 
     const targetDate = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    if (targetDate.getHours() > 12 || (targetDate.getHours() === 12 && targetDate.getMinutes() >= 20)) {
+    if (targetDate.getHours() > 12 || (targetDate.getHours() === 12 && targetDate.getMinutes() >= 30)) {
        targetDate.setDate(targetDate.getDate() + 1);
     }
     const fechaDespachoStr = targetDate.toLocaleDateString('es-VE');
@@ -188,6 +202,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         let updateData = {
           ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, motivoRechazo: '', faltanteUsd: 0, descuentoPorcentaje: descuento 
         };
+        // Si al momento de corregir hay campaña activa, guardamos el dato
+        if (globalDiscountPercent > 0) updateData.descuentoGlobalAplicado = globalDiscountPercent;
+
         if (formData.refAdicional) {
            updateData.referencia = `${formData.referencia} | EXTRA: ${formData.refAdicional}`;
            updateData.pagoAdicionalUsd = pagoExtUsd;
@@ -198,7 +215,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         dialogs.alert(`Actualizado con éxito.`, "Aviso");
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), {
-          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, auditado: false, fechaCreacion: Date.now(), fechaDespacho: fechaDespachoStr, esPublico: false, descuentoPorcentaje: descuento
+          ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, auditado: false, fechaCreacion: Date.now(), fechaDespacho: fechaDespachoStr, esPublico: false, descuentoPorcentaje: descuento,
+          descuentoGlobalAplicado: globalDiscountPercent // <-- Marcamos que fue impactado por la campaña
         });
         loggear('PEDIDO_CREADO', `Venta: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)})`);
         dialogs.alert(finalStatus === 'Pendiente' ? `Venta registrada. Despacho pautado: ${fechaDespachoStr}` : `Guardado en Lista de Espera.`, "Aviso");
@@ -230,8 +248,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       </div>
 
       {!tasaActualizadaHoy && vista === 'nuevo' && !editId && puedeCrear && (
-        <div className="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-r shadow-sm font-bold flex items-center gap-3">
-           <AlertTriangle size={24}/> ATENCIÓN: La tasa del día no ha sido actualizada. Solicite a Administración que la actualice para poder procesar nuevas ventas.
+        <div className="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-xl shadow-sm font-bold flex items-center gap-3">
+           <AlertTriangle size={24}/> ATENCIÓN: La tasa del día no ha sido actualizada. Solicite a Administración que la actualice.
+        </div>
+      )}
+
+      {/* AVISO DE CAMPAÑA GLOBAL EN VENTAS */}
+      {isGlobalDiscountActive && vista === 'nuevo' && puedeCrear && (
+        <div className="mb-6 bg-gradient-to-r from-emerald-500 to-teal-500 text-white p-4 rounded-xl shadow-md font-bold flex items-center justify-between gap-3 animate-pulse">
+           <div className="flex items-center gap-3">
+             <Percent size={24}/> 
+             <div>
+               <div>Campaña del {globalDiscountPercent}% activada por Administración.</div>
+               <div className="text-xs opacity-90 font-medium">Los precios del sistema ya incluyen esta rebaja automáticamente.</div>
+             </div>
+           </div>
         </div>
       )}
 
@@ -328,7 +359,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                <InputDark disabled={formData.esRegalo || (!tasaActualizadaHoy && !editId)} label="Referencia / Banco" value={formData.esRegalo ? 'MUESTRA / OBSEQUIO VIP' : formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required={!formData.esRegalo} placeholder="Ej. 1234 Banesco" />
                
                {!formData.esRegalo && (
-                 <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-6"><InputDark type="number" step="0.01" disabled={!tasaActualizadaHoy && !editId} label="Descuento Adicional Otorgado (%)" value={formData.descuentoPorcentaje} onChange={(e)=>setFormData({...formData, descuentoPorcentaje: e.target.value})} placeholder="Ej: 5" /></div>
+                 <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-6"><InputDark type="number" step="0.01" disabled={!tasaActualizadaHoy && !editId} label="Añadir Descuento Asesor (%)" value={formData.descuentoPorcentaje} onChange={(e)=>setFormData({...formData, descuentoPorcentaje: e.target.value})} placeholder="Ej: 5" /></div>
                )}
              </div>
              
@@ -373,6 +404,12 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                        <>
                         <div className="font-black text-slate-800 dark:text-slate-100 text-lg">${(p.montoUsd||0).toFixed(2)}</div>
                         <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
+                        {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
+                          <div className="flex flex-col gap-1 mt-2">
+                            {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded w-max">Campaña: {p.descuentoGlobalAplicado}%</span>}
+                            {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded w-max">Asesor: {p.descuentoPorcentaje}%</span>}
+                          </div>
+                        )}
                        </>
                     )}
                   </td>
