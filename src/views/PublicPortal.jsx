@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud, Search } from 'lucide-react';
 import { collection, addDoc } from 'firebase/firestore';
 import { BRAND_LOGO } from '../config/constants';
-import { URL_GOOGLE_SCRIPT } from '../config/firebase'; // Asegúrate de exportar esto en firebase.js
+import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
 import { Input, InputDark } from '../components/ui';
 
 export default function PublicPortal({ catalogo, stock, config, db, appId, dialogs, onBack, darkMode, setDarkMode }) {
@@ -11,10 +11,15 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   const [enviando, setEnviando] = useState(false);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
   
-  // Estado del formulario de checkout
+  // --- NUEVOS ESTADOS PARA BÚSQUEDA Y FILTROS ---
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('Todos');
+
   const [form, setForm] = useState({
     nombre: '',
+    cedula: '',
     telefono: '',
+    agencia: 'ZOOM',
     direccion: '',
     referencia: '',
     comprobanteUrl: ''
@@ -28,7 +33,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       const actual = prev[key] || 0;
       const nuevo = Math.max(0, actual + delta);
       
-      // Validar contra stock de envíos
       const maxDisp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
       if (delta > 0 && nuevo > maxDisp) {
         dialogs.alert(`Solo tenemos ${maxDisp} unidades disponibles de este producto.`, "Stock Límite");
@@ -43,6 +47,31 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       return { ...prev, [key]: nuevo };
     });
   };
+
+  // --- LÓGICA DE FILTRADO DINÁMICO DE CATÁLOGO ---
+  const catalogFiltered = useMemo(() => {
+    return catalogo
+      .filter(c => c.categoria !== 'Complementos Automáticos')
+      .map(cat => {
+         // 1. Filtrar los productos dentro de la categoría según la barra de búsqueda
+         const productosBusqueda = cat.productos.filter(prod => 
+           prod.nombre.toLowerCase().includes(searchTerm.toLowerCase())
+         );
+         return { ...cat, productos: productosBusqueda };
+      })
+      .filter(cat => {
+         // 2. Comprobar si la categoría coincide con el filtro seleccionado
+         const matchesCategory = selectedCategory === 'Todos' || cat.categoria === selectedCategory;
+         // 3. Ocultar la categoría si quedó vacía tras la búsqueda
+         const hasProducts = cat.productos.length > 0;
+         return matchesCategory && hasProducts;
+      });
+  }, [catalogo, searchTerm, selectedCategory]);
+
+  // Lista de categorías únicas para los botones de filtro
+  const categoriasDisponibles = useMemo(() => {
+    return ['Todos', ...catalogo.filter(c => c.categoria !== 'Complementos Automáticos').map(c => c.categoria)];
+  }, [catalogo]);
 
   // Calcular Totales
   const { totalItems, subtotalUsd } = useMemo(() => {
@@ -94,11 +123,16 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   const confirmarPedido = async (e) => {
     e.preventDefault();
     if (totalItems === 0) return dialogs.alert("Tu carrito está vacío.");
-    if (!form.nombre || !form.telefono || !form.direccion) return dialogs.alert("Llena los datos obligatorios.");
+    
+    if (!form.nombre || !form.cedula || !form.telefono || !form.agencia || !form.direccion) {
+      return dialogs.alert("Por favor, llena todos los datos obligatorios de envío.");
+    }
+    if (!form.referencia || !form.comprobanteUrl) {
+      return dialogs.alert("La referencia bancaria y la captura del comprobante son obligatorias para procesar el pedido.");
+    }
 
     setEnviando(true);
     try {
-      // Formatear productos para texto legible
       const lineas = [];
       Object.entries(carrito).forEach(([key, qty]) => {
         lineas.push(`- ${qty}x ${key.replace('|', ' ')}`);
@@ -107,23 +141,23 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
       const nuevoPedido = {
         clienteNombre: form.nombre,
+        clienteCedula: form.cedula,
         clienteTelefono: form.telefono,
         direccion: form.direccion,
-        clienteCedula: 'WEB', // Dato no pedido en MVP público, pero requerido por tu BD
-        courier: 'Por Definir',
+        courier: form.agencia,
         esMercadoLibre: false,
         esRegalo: false,
         asesora: 'Portal Web',
-        moneda: form.referencia ? 'VES' : 'USD',
+        moneda: 'VES', 
         monto: subtotalUsd,
         montoUsd: subtotalUsd,
         montoVes: totalVes,
         tasaAplicada: tasa,
-        referencia: form.referencia || 'Pendiente',
-        linkComprobantePago: form.comprobanteUrl || '',
+        referencia: form.referencia,
+        linkComprobantePago: form.comprobanteUrl,
         productos: productosString,
         carritoObj: carrito,
-        status: 'Por Pagar / Cotización', // Cae directo en pestaña Web de Ventas
+        status: 'Por Pagar / Cotización',
         esPublico: true,
         auditado: false,
         fechaCreacion: Date.now()
@@ -131,10 +165,10 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), nuevoPedido);
       
-      dialogs.alert("¡Tu pedido ha sido enviado con éxito! Nuestro equipo lo validará pronto.", "¡Gracias por tu compra!");
+      dialogs.alert("¡Tu pedido y pago han sido enviados con éxito! Nuestro equipo lo procesará en breve.", "¡Gracias por tu compra!");
       setCarrito({});
       setIsCartOpen(false);
-      setForm({ nombre: '', telefono: '', direccion: '', referencia: '', comprobanteUrl: '' });
+      setForm({ nombre: '', cedula: '', telefono: '', agencia: 'ZOOM', direccion: '', referencia: '', comprobanteUrl: '' });
       
     } catch (error) {
       console.error(error);
@@ -170,50 +204,92 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         <p className="text-sky-200 text-sm md:text-base font-medium max-w-lg mx-auto">Selecciona tus productos profesionales. Tasa de cálculo de hoy: <b>{tasa} Bs/$</b></p>
       </div>
 
-      {/* CATÁLOGO DE PRODUCTOS */}
-      <main className="max-w-6xl mx-auto p-4 mt-8">
-        {catalogo.filter(c => c.categoria !== 'Complementos Automáticos').map((cat) => (
-          <div key={cat.categoria} className="mb-12">
-            <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 mb-6 border-b-2 border-sky-100 dark:border-slate-800 pb-2 uppercase tracking-widest">{cat.categoria}</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {cat.productos.map(prod => (
-                <div key={prod.nombre} className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 hover:shadow-lg transition-all hover:-translate-y-1">
-                  {prod.imagen ? (
-                    <div className="aspect-square bg-slate-50 dark:bg-slate-900 rounded-2xl mb-4 overflow-hidden"><img src={prod.imagen} alt={prod.nombre} className="w-full h-full object-cover" /></div>
-                  ) : (
-                    <div className="aspect-square bg-sky-50 dark:bg-sky-900/10 rounded-2xl mb-4 flex items-center justify-center text-sky-200 dark:text-sky-800"><Package size={64} /></div>
-                  )}
-                  <h3 className="font-black text-lg mb-4 leading-tight">{prod.nombre}</h3>
-                  <div className="space-y-3">
-                    {prod.presentaciones.map((pres, i) => {
-                      const key = `${prod.nombre}|${pres}`;
-                      const qty = carrito[key] || 0;
-                      const disp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
-                      
-                      return (
-                        <div key={pres} className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl">
-                          <div>
-                            <div className="text-xs font-bold text-slate-500 uppercase">{pres}</div>
-                            <div className="font-black text-emerald-600 dark:text-emerald-400">${prod.precios[i]}</div>
-                          </div>
-                          {disp > 0 ? (
-                            <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-1">
-                              <button onClick={() => updateQty(key, -1)} className="w-8 h-8 flex items-center justify-center font-black text-slate-400 hover:text-slate-800 dark:hover:text-white">-</button>
-                              <span className="w-4 text-center font-black text-sm">{qty}</span>
-                              <button onClick={() => updateQty(key, 1)} className="w-8 h-8 flex items-center justify-center font-black text-sky-600 hover:text-sky-800 dark:hover:text-sky-300">+</button>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] font-black text-red-500 bg-red-50 px-2 py-1 rounded uppercase">Agotado</span>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
+      {/* SECCIÓN DE BÚSQUEDA Y FILTROS */}
+      <div className="max-w-6xl mx-auto px-4 mt-8">
+        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+          
+          {/* Barra de Búsqueda */}
+          <div className="relative mb-6">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
+              <Search size={20} />
             </div>
+            <input 
+              type="text" 
+              placeholder="¿Qué producto estás buscando hoy?" 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-12 pr-4 py-4 rounded-2xl bg-[#f0f4f8] dark:bg-slate-900 border-2 border-transparent focus:border-sky-500 outline-none text-slate-800 dark:text-white font-bold transition-all"
+            />
           </div>
-        ))}
+
+          {/* Botones de Categorías */}
+          <div className="flex flex-wrap gap-2">
+            {categoriasDisponibles.map(cat => (
+              <button 
+                key={cat} 
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 ${selectedCategory === cat ? 'bg-[#003366] dark:bg-sky-600 text-white shadow-md hover:-translate-y-0.5' : 'bg-[#f0f4f8] dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* CATÁLOGO DE PRODUCTOS */}
+      <main className="max-w-6xl mx-auto p-4 mt-4">
+        {catalogFiltered.length === 0 ? (
+          <div className="text-center py-20 px-4 bg-white dark:bg-slate-800 rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 mt-8">
+             <Search size={48} className="mx-auto mb-4 text-slate-300 dark:text-slate-600" />
+             <h3 className="text-xl font-black text-slate-700 dark:text-slate-300 mb-2">No encontramos resultados</h3>
+             <p className="text-slate-500 dark:text-slate-400">Intenta buscar con otras palabras o selecciona otra categoría.</p>
+             <button onClick={() => {setSearchTerm(''); setSelectedCategory('Todos');}} className="mt-6 text-sky-600 font-bold underline hover:text-sky-800">Limpiar búsqueda</button>
+          </div>
+        ) : (
+          catalogFiltered.map((cat) => (
+            <div key={cat.categoria} className="mb-12 animate-in fade-in">
+              <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 mb-6 border-b-2 border-sky-100 dark:border-slate-800 pb-2 uppercase tracking-widest">{cat.categoria}</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {cat.productos.map(prod => (
+                  <div key={prod.nombre} className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 hover:shadow-lg transition-all hover:-translate-y-1 flex flex-col">
+                    {prod.imagen ? (
+                      <div className="aspect-square bg-slate-50 dark:bg-slate-900 rounded-2xl mb-4 overflow-hidden"><img src={prod.imagen} alt={prod.nombre} className="w-full h-full object-cover" /></div>
+                    ) : (
+                      <div className="aspect-square bg-sky-50 dark:bg-sky-900/10 rounded-2xl mb-4 flex items-center justify-center text-sky-200 dark:text-sky-800"><Package size={64} /></div>
+                    )}
+                    <h3 className="font-black text-lg mb-4 leading-tight flex-1">{prod.nombre}</h3>
+                    <div className="space-y-3">
+                      {prod.presentaciones.map((pres, i) => {
+                        const key = `${prod.nombre}|${pres}`;
+                        const qty = carrito[key] || 0;
+                        const disp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+                        
+                        return (
+                          <div key={pres} className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl">
+                            <div>
+                              <div className="text-xs font-bold text-slate-500 uppercase">{pres}</div>
+                              <div className="font-black text-emerald-600 dark:text-emerald-400">${prod.precios[i]}</div>
+                            </div>
+                            {disp > 0 ? (
+                              <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-1">
+                                <button onClick={() => updateQty(key, -1)} className="w-8 h-8 flex items-center justify-center font-black text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors">-</button>
+                                <span className="w-4 text-center font-black text-sm">{qty}</span>
+                                <button onClick={() => updateQty(key, 1)} className="w-8 h-8 flex items-center justify-center font-black text-sky-600 hover:text-sky-800 dark:hover:text-sky-300 transition-colors">+</button>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] font-black text-red-500 bg-red-50 px-2 py-1 rounded uppercase tracking-wider">Agotado</span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
       </main>
 
       {/* SIDEBAR DEL CARRITO / CHECKOUT */}
@@ -231,10 +307,10 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                 <div className="text-center text-slate-400 mt-20 flex flex-col items-center">
                   <ShoppingCart size={48} className="mb-4 opacity-20" />
                   <p className="font-bold">Tu carrito está vacío.</p>
+                  <button onClick={() => setIsCartOpen(false)} className="mt-6 text-sky-600 font-bold underline">Volver a la tienda</button>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Lista de Items */}
                   <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
                     <h3 className="text-xs font-black uppercase text-slate-400 mb-3 border-b dark:border-slate-700 pb-2">Resumen de Productos</h3>
                     {Object.entries(carrito).map(([key, qty]) => (
@@ -242,39 +318,62 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                         <div className="text-sm font-bold text-slate-700 dark:text-slate-200">
                           <span className="text-sky-600 mr-2">{qty}x</span>{key.replace('|', ' - ')}
                         </div>
-                        <button onClick={() => updateQty(key, -qty)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16}/></button>
+                        <button onClick={() => updateQty(key, -qty)} className="text-red-400 hover:text-red-600 p-1 transition-colors"><Trash2 size={16}/></button>
                       </div>
                     ))}
                   </div>
 
-                  {/* Formulario de Cliente */}
                   <form id="checkout-form" onSubmit={confirmarPedido} className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 space-y-4">
                      <h3 className="text-xs font-black uppercase text-slate-400 mb-2 border-b dark:border-slate-700 pb-2">Tus Datos de Envío</h3>
                      {darkMode ? (
                        <>
                          <InputDark label="Nombre y Apellido" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} required/>
-                         <InputDark label="Teléfono (WhatsApp)" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
+                         <InputDark label="Cédula o RIF" value={form.cedula} onChange={e=>setForm({...form, cedula: e.target.value})} required placeholder="Ej: V-12345678"/>
+                         <InputDark label="Teléfono" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
+                         
                          <div className="flex flex-col">
-                           <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2">Dirección de Entrega</label>
-                           <textarea value={form.direccion} onChange={e=>setForm({...form, direccion: e.target.value})} required rows="2" className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all text-sm"></textarea>
+                           <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2">Agencia de Envío</label>
+                           <select value={form.agencia} onChange={e=>setForm({...form, agencia: e.target.value})} required className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all text-sm">
+                             <option value="ZOOM">ZOOM</option>
+                             <option value="MRW">MRW</option>
+                             <option value="Tealca">Tealca</option>
+                             <option value="Domesa">Domesa</option>
+                           </select>
+                         </div>
+
+                         <div className="flex flex-col">
+                           <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2">Dirección Agencia</label>
+                           <textarea value={form.direccion} onChange={e=>setForm({...form, direccion: e.target.value})} required rows="2" placeholder="Estado, Ciudad y nombre de la agencia" className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all text-sm"></textarea>
                          </div>
                        </>
                      ) : (
                        <>
                          <Input label="Nombre y Apellido" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} required/>
-                         <Input label="Teléfono (WhatsApp)" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
+                         <Input label="Cédula o RIF" value={form.cedula} onChange={e=>setForm({...form, cedula: e.target.value})} required placeholder="Ej: V-12345678"/>
+                         <Input label="Teléfono" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
+                         
                          <div className="flex flex-col">
-                           <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Dirección de Entrega</label>
-                           <textarea value={form.direccion} onChange={e=>setForm({...form, direccion: e.target.value})} required rows="2" className="p-3.5 border-2 border-slate-100 rounded-2xl focus:border-sky-500 outline-none font-bold transition-all text-sm bg-slate-50"></textarea>
+                           <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Agencia de Envío</label>
+                           <select value={form.agencia} onChange={e=>setForm({...form, agencia: e.target.value})} required className="p-3.5 border-2 border-slate-100 rounded-2xl focus:border-sky-500 outline-none font-bold transition-all text-sm bg-slate-50 text-slate-700">
+                             <option value="ZOOM">ZOOM</option>
+                             <option value="MRW">MRW</option>
+                             <option value="Tealca">Tealca</option>
+                             <option value="Domesa">Domesa</option>
+                           </select>
+                         </div>
+
+                         <div className="flex flex-col">
+                           <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Dirección Agencia</label>
+                           <textarea value={form.direccion} onChange={e=>setForm({...form, direccion: e.target.value})} required rows="2" placeholder="Estado, Ciudad y nombre de la agencia" className="p-3.5 border-2 border-slate-100 rounded-2xl focus:border-sky-500 outline-none font-bold transition-all text-sm bg-slate-50 text-slate-700"></textarea>
                          </div>
                        </>
                      )}
 
-                     <h3 className="text-xs font-black uppercase text-slate-400 mt-6 mb-2 border-b dark:border-slate-700 pb-2">Información de Pago (Opcional)</h3>
-                     <p className="text-[10px] text-slate-500 mb-3">Si ya realizaste el pago móvil o transferencia, adjunta la referencia.</p>
+                     <h3 className="text-xs font-black uppercase text-slate-400 mt-6 mb-2 border-b dark:border-slate-700 pb-2">Información de Pago (Obligatorio)</h3>
+                     <p className="text-[10px] text-slate-500 mb-3">Adjunta la referencia y captura del pago móvil o transferencia para procesar tu orden.</p>
                      
-                     {darkMode ? <InputDark label="Referencia o Banco" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} placeholder="Ej: 1234 Banesco"/> 
-                               : <Input label="Referencia o Banco" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} placeholder="Ej: 1234 Banesco"/>}
+                     {darkMode ? <InputDark label="Referencia Bancaria" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} required placeholder="Ej: 1234 Banesco"/> 
+                               : <Input label="Referencia Bancaria" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} required placeholder="Ej: 1234 Banesco"/>}
                      
                      <div className="mt-2">
                         <label className={`flex items-center justify-center gap-2 w-full p-4 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-sm ${form.comprobanteUrl ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-slate-300 dark:border-slate-600 text-slate-500 hover:border-sky-500 hover:text-sky-600'}`}>
