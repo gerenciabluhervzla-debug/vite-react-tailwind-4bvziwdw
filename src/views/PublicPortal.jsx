@@ -4,6 +4,7 @@ import { collection, addDoc } from 'firebase/firestore';
 import { BRAND_LOGO } from '../config/constants';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
 import { Input, InputDark } from '../components/ui';
+import { compressImage } from '../utils/image';
 
 export default function PublicPortal({ catalogo, stock, config, db, appId, dialogs, onBack, darkMode, setDarkMode }) {
   const [carrito, setCarrito] = useState({});
@@ -100,18 +101,16 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
     setSubiendoFoto(true);
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onloadend = async () => {
-        const base64Data = reader.result.split(',')[1];
-        const response = await fetch(URL_GOOGLE_SCRIPT, {
-          method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ fileName: `ComprobanteWeb_${Date.now()}.jpg`, mimeType: file.type, data: base64Data })
-        });
-        const result = await response.json();
-        if (result.url) setForm({ ...form, comprobanteUrl: result.url });
-        setSubiendoFoto(false);
-      };
+      // 800px es la calidad ideal para un voucher bancario
+      const base64Data = await compressImage(file, 800, 0.7);
+
+      const response = await fetch(URL_GOOGLE_SCRIPT, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ fileName: `ComprobanteWeb_${Date.now()}.jpg`, mimeType: 'image/jpeg', data: base64Data })
+      });
+      const result = await response.json();
+      if (result.url) setForm({ ...form, comprobanteUrl: result.url });
+      setSubiendoFoto(false);
     } catch (error) {
       console.error(error);
       dialogs.alert("Error subiendo el comprobante. Revisa tu conexión.", "Fallo de Red");

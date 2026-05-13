@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import { ArrowRightLeft, PlusCircle, X, Camera, Loader2 } from 'lucide-react';
 import { addDoc, collection, setDoc, doc } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../../config/firebase';
+import { compressImage } from '../../utils/image'; // <-- Importamos nuestro compresor (nota los ../../)
 
 export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId, loggear, perfil, dialogs, onClose }) {
   const [carrito, setCarrito] = useState({});
   const [fotoUrl, setFotoUrl] = useState('');
+  const [subiendoFoto, setSubiendoFoto] = useState(false); // <-- Añadimos estado de carga para el botón
   const isTransfer = tipo === 'TRANSFERENCIA';
 
   const updateQty = (key, delta) => {
@@ -23,41 +25,42 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
     });
   };
 
+  // --- LÓGICA DE SUBIDA DE FOTO CON COMPRESIÓN ---
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     if (!URL_GOOGLE_SCRIPT) {
-        dialogs.alert("⚠️ Falta configurar el puente de Google Drive. Por ahora, debes tomar la foto, subirla a drive y pegar el enlace manualmente.", "Configuración Faltante");
+        dialogs.alert("⚠️ Falta configurar el puente de Google Drive.", "Configuración Faltante");
         return;
     }
 
+    setSubiendoFoto(true); // Bloqueamos el input mientras procesa
     try {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onloadend = async () => {
-            const base64Data = reader.result.split(',')[1];
-            
-            const response = await fetch(URL_GOOGLE_SCRIPT, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({
-                    fileName: `Movimiento_${Date.now()}.jpg`,
-                    mimeType: file.type,
-                    data: base64Data
-                })
-            });
+        // COMPRESIÓN MÁGICA: Reducimos el peso de la evidencia de 5MB a ~150KB
+        const base64Data = await compressImage(file, 800, 0.7);
+        
+        const response = await fetch(URL_GOOGLE_SCRIPT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+                fileName: `Evidencia_Movimiento_${Date.now()}.jpg`,
+                mimeType: 'image/jpeg',
+                data: base64Data
+            })
+        });
 
-            const result = await response.json();
-            if (result.url) {
-                setFotoUrl(result.url);
-            } else {
-                throw new Error("No se recibió URL válida");
-            }
-        };
+        const result = await response.json();
+        if (result.url) {
+            setFotoUrl(result.url);
+        } else {
+            throw new Error("No se recibió URL válida");
+        }
     } catch (error) {
         console.error(error);
-        dialogs.alert("Error subiendo la foto a Drive. Revisa tu conexión.", "Fallo de Red");
+        dialogs.alert("Error subiendo la evidencia fotográfica a Drive. Revisa tu conexión.", "Fallo de Red");
+    } finally {
+        setSubiendoFoto(false);
     }
   };
 
@@ -135,8 +138,9 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
                 <label className="text-xs font-bold uppercase tracking-widest text-purple-800 dark:text-purple-400 block mb-2">Evidencia Fotográfica Obligatoria</label>
                 <div className="flex gap-3 relative">
                   <input type="text" placeholder="URL Foto de los productos empacados" className="w-full border-2 border-purple-200 dark:border-purple-800 p-3 rounded-xl text-sm outline-none focus:border-purple-500 bg-white dark:bg-slate-900 dark:text-white font-medium" value={fotoUrl} onChange={e=>setFotoUrl(e.target.value)} />
-                  <label className="bg-purple-600 text-white p-3 rounded-xl cursor-pointer hover:bg-purple-700 flex items-center justify-center w-12 shadow-md transition-colors">
-                    <Camera size={20}/> <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileUpload} />
+                  <label className={`text-white p-3 rounded-xl cursor-pointer flex items-center justify-center w-12 shadow-md transition-colors ${fotoUrl ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-purple-600 hover:bg-purple-700'}`}>
+                    {subiendoFoto ? <Loader2 size={20} className="animate-spin" /> : <Camera size={20}/>} 
+                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileUpload} disabled={subiendoFoto}/>
                   </label>
                 </div>
               </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays } from 'lucide-react';
 import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
+import { compressImage } from '../utils/image'; // <-- Importamos nuestro compresor
 
 export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs, perfil }) {
   const [vistaDespacho, setVistaDespacho] = useState('pendientes');
@@ -30,8 +31,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
   const handleGuiaChange = (id, field, value) => setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
 
-  // --- LÓGICA OPTIMIZADA DE SUBIDA DE FOTOS ---
-  // Ahora guarda directamente en la base de datos sin requerir archivar
+  // --- SUBIDA DE FOTOS CON COMPRESIÓN ---
   const handleFileUpload = async (e, id, field) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -39,40 +39,41 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     
     setSubiendo({ id, field });
     try {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onloadend = async () => {
-            const base64Data = reader.result.split(',')[1];
-            const response = await fetch(URL_GOOGLE_SCRIPT, {
-                method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ fileName: `Soporte_${id.substring(0,5)}_${field}.jpg`, mimeType: file.type, data: base64Data })
-            });
-            const result = await response.json();
-            if (result.url) { 
-               // GUARDADO AUTOMÁTICO EN BD
-               const dbField = field === 'link' ? 'linkGuia' : 'linkFotoProductos';
-               await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id), { [dbField]: result.url });
-               
-               handleGuiaChange(id, field, result.url); 
-               loggear('FOTO_SUBIDA', `Soporte logístico subido en pedido ${id}`); 
-            }
-            setSubiendo({ id: null, field: null });
-        };
+        // COMPRESIÓN MÁGICA: Reduce de 5MB a ~150KB sin perder legibilidad de lectura
+        const base64Data = await compressImage(file, 800, 0.7);
+
+        const response = await fetch(URL_GOOGLE_SCRIPT, {
+            method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ fileName: `Soporte_${id.substring(0,5)}_${field}.jpg`, mimeType: 'image/jpeg', data: base64Data })
+        });
+        const result = await response.json();
+        
+        if (result.url) { 
+           handleGuiaChange(id, field, result.url); 
+           loggear('FOTO_PROCESADA', `Soporte en caché para el pedido ${id}`); 
+        }
+        setSubiendo({ id: null, field: null });
     } catch (error) { console.error(error); dialogs.alert("Error subiendo la foto a Drive.", "Fallo de Red"); setSubiendo({ id: null, field: null }); }
   };
 
-  // --- GUARDADO PARCIAL DE NÚMERO DE GUÍA ---
-  const guardarNGuiaParcial = async (pedido) => {
-    const numGuia = guiasInput[pedido.id]?.guia;
-    if (!numGuia) return dialogs.alert("Escribe primero el número de guía para poder guardarlo.", "Campo vacío");
+  // --- BOTÓN EXPLÍCITO: GUARDAR AVANCE ---
+  const guardarAvance = async (pedido) => {
+    const inputData = guiasInput[pedido.id] || {};
+    const updateData = {};
     
+    if (inputData.guia !== undefined) updateData.guia = inputData.guia;
+    if (inputData.link !== undefined) updateData.linkGuia = inputData.link;
+    if (inputData.fotoProductos !== undefined) updateData.linkFotoProductos = inputData.fotoProductos;
+
+    if (Object.keys(updateData).length === 0) return dialogs.alert("No has agregado nueva información (N° de guía o fotos) para guardar.", "Sin Cambios");
+
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { guia: numGuia });
-      loggear('GUIA_ACTUALIZADA', `Guía parcial actualizada para ${pedido.clienteNombre}: ${numGuia}`);
-      dialogs.alert("Número de guía guardado. Puedes archivar el pedido cuando tengas todas las fotos.", "Progreso Guardado");
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), updateData);
+      loggear('AVANCE_DESPACHO', `Avance guardado para ${pedido.clienteNombre}`);
+      dialogs.alert("Se ha guardado tu avance (Fotos o N° Guía). El pedido seguirá en la lista de pendientes hasta que lo archives definitivamente.", "Progreso Guardado");
     } catch (error) {
       console.error(error);
-      dialogs.alert("Error al intentar guardar el número de guía.", "Error");
+      dialogs.alert("Error al intentar guardar el avance.", "Error");
     }
   };
 
@@ -80,13 +81,13 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const guardarGuia = async (pedido) => {
     const inputData = guiasInput[pedido.id] || {};
     
-    // Validamos contra lo que haya tecleado (inputData) o lo que ya esté guardado previamente en Firebase (pedido)
+    // Leemos lo que haya tecleado (inputData) o lo que guardó en un avance anterior (pedido)
     const guiaFinal = inputData.guia !== undefined ? inputData.guia : pedido.guia;
     const linkFinal = inputData.link !== undefined ? inputData.link : pedido.linkGuia;
     const fotoFinal = inputData.fotoProductos !== undefined ? inputData.fotoProductos : pedido.linkFotoProductos;
 
     if (!guiaFinal || !linkFinal || !fotoFinal) {
-      return dialogs.alert("⚠️ Faltan datos.\n\nPara archivar el pedido de forma definitiva debes tener listo:\n1. Número de Guía\n2. Foto del recibo de Guía\n3. Foto del paquete armado", "Información Incompleta");
+      return dialogs.alert("⚠️ Faltan datos.\n\nPara archivar el pedido debes tener:\n1. Número de Guía\n2. Foto del recibo de Guía\n3. Foto del paquete armado", "Información Incompleta");
     }
     
     try {
@@ -94,17 +95,16 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         guia: guiaFinal, linkGuia: linkFinal, linkFotoProductos: fotoFinal, status: 'Despachado'
       });
       loggear('PEDIDO_DESPACHADO', `Despacho completado ${pedido.clienteNombre} (Guía: ${guiaFinal})`);
-      dialogs.alert("Guía y soportes verificados. El pedido ahora pasó al historial de Despachos.", "Despacho Confirmado");
+      dialogs.alert("Soportes verificados. El pedido pasó al historial de Despachos.", "Despacho Finalizado");
     } catch(e) { console.error(e); dialogs.alert("Error al intentar archivar el pedido.", "Error"); }
   };
 
-  // --- LÓGICA DEL NUEVO CIERRE DE INVENTARIO ---
+  // --- LÓGICA DEL CIERRE DE INVENTARIO ---
   const iniciarConteo = () => {
     const inicial = {};
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
       const key = `${p.nombre}|${pres}`;
-      const dispSistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
-      inicial[key] = dispSistema; 
+      inicial[key] = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
     })));
     setConteoFisico(inicial);
     setNotasConteo({});
@@ -145,15 +145,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         
         if (diferencia !== 0) totalDiferencias++;
 
-        productosCierre.push({
-          categoria: c.categoria,
-          nombre: p.nombre,
-          presentacion: pres,
-          sistema,
-          fisico,
-          diferencia,
-          nota: notasConteo[key] || ''
-        });
+        productosCierre.push({ categoria: c.categoria, nombre: p.nombre, presentacion: pres, sistema, fisico, diferencia, nota: notasConteo[key] || '' });
       })));
 
       const nuevoCierre = {
@@ -374,7 +366,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
             <tbody>
               {pedidosAMostrar.length === 0 ? <tr><td colSpan="3" className="p-10 text-center text-slate-400 italic font-bold">No hay envíos en esta vista.</td></tr> : pedidosAMostrar.map(p => {
                 
-                // Leemos los datos desde el estado local (si está tipeando) o desde Firebase (si ya lo guardó)
+                // Prioridad de lectura: 1. Estado tipeado actualmente | 2. Guardado en DB
                 const valorGuia = guiasInput[p.id]?.guia !== undefined ? guiasInput[p.id].guia : (p.guia || '');
                 const valorLinkGuia = guiasInput[p.id]?.link !== undefined ? guiasInput[p.id].link : (p.linkGuia || '');
                 const valorLinkFoto = guiasInput[p.id]?.fotoProductos !== undefined ? guiasInput[p.id].fotoProductos : (p.linkFotoProductos || '');
@@ -408,32 +400,36 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                         <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors">Corregir Información</button>
                       </div>
                     ) : (
-                      <div className="space-y-4 bg-white dark:bg-slate-800 p-5 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm">
+                      <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm flex flex-col gap-3">
                         
-                        <div className="flex gap-2">
-                           <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
-                           <button onClick={() => guardarNGuiaParcial(p)} className="p-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-300 rounded-xl transition-colors" title="Guardar N° Guía sin archivar"><Save size={20}/></button>
-                        </div>
+                        <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
                         
-                        <div className="flex gap-2 relative">
-                          <input type="text" placeholder="URL Recibo Guía" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkGuia} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
-                          <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkGuia ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto de Galería">
-                            {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkGuia ? <CheckCircle size={16}/> : <UploadCloud size={16} />)}
-                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
-                          </label>
+                        <div className="flex flex-col lg:flex-row gap-3">
+                            <div className="flex-1 relative">
+                              <input type="text" placeholder="URL Recibo" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkGuia} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
+                              <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkGuia ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Recibo Agencia">
+                                {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkGuia ? <CheckCircle size={16}/> : <UploadCloud size={16} />)}
+                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
+                              </label>
+                            </div>
+
+                            <div className="flex-1 relative">
+                              <input type="text" placeholder="URL Foto Caja" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkFoto ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkFoto} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
+                              <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkFoto ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto del Paquete">
+                                {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkFoto ? <CheckCircle size={16}/> : <Camera size={16} />)}
+                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} />
+                              </label>
+                            </div>
                         </div>
 
-                        <div className="flex gap-2 relative">
-                          <input type="text" placeholder="URL Foto Empaque" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkFoto ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkFoto} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
-                          <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkFoto ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto de Galería">
-                            {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkFoto ? <CheckCircle size={16}/> : <Camera size={16} />)}
-                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} />
-                          </label>
+                        <div className="flex gap-2 mt-2">
+                           <button onClick={() => guardarAvance(p)} className="flex-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                             <Save size={16}/> Guardar Avance
+                           </button>
+                           <button onClick={() => guardarGuia(p)} className="flex-1 bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white text-xs font-bold py-3 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
+                             <Truck size={16}/> Archivar
+                           </button>
                         </div>
-
-                        <button onClick={() => guardarGuia(p)} className="w-full bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white text-sm font-bold py-3.5 rounded-xl mt-2 flex items-center justify-center gap-2 transition-all shadow-md hover:-translate-y-0.5">
-                          <Truck size={18}/> Archivar Despacho
-                        </button>
                       </div>
                     )}
                   </td>
