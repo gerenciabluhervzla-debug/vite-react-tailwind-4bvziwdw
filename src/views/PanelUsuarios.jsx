@@ -14,43 +14,64 @@ export default function PanelUsuarios({ usuarios, db, appId, loggear, dialogs })
       try {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid));
         loggear('USUARIO_ELIMINADO', `El administrador eliminó la cuenta del sistema: ${email}`);
-        dialogs.alert("La cuenta de usuario ha sido eliminada del sistema exitosamente.", "Usuario Eliminado");
+        
+        // Timeout agregado para evitar superposición de modales
+        setTimeout(() => {
+          dialogs.alert("La cuenta de usuario ha sido eliminada del sistema exitosamente.", "Usuario Eliminado");
+        }, 150);
       } catch(e) {
         console.error(e);
-        dialogs.alert("Ocurrió un error en la base de datos al intentar eliminar la cuenta.", "Error Interno");
+        setTimeout(() => {
+          dialogs.alert("Ocurrió un error en la base de datos al intentar eliminar la cuenta.", "Error Interno");
+        }, 150);
       }
     }, "Eliminar Usuario");
   };
 
   const formatearSistema = () => {
     dialogs.confirm("⚠️ PELIGRO CRÍTICO ⚠️\n\nEstás a punto de ELIMINAR TODOS los Pedidos, Movimientos de Inventario y Logs de Auditoría.\n\nEl Stock de los almacenes también se reiniciará a CERO. Las cuentas de usuario y el catálogo se mantendrán intactos.\n\n¿Estás absolutamente seguro de querer limpiar todo el entorno?", () => {
-      dialogs.prompt("Para confirmar esta acción irreversible, escribe la palabra exacta: BORRAR", async (val) => {
-        if (val !== "BORRAR") {
-           dialogs.alert("La palabra de seguridad es incorrecta. La operación ha sido cancelada por seguridad.", "Operación Cancelada");
-           return;
-        }
-        try {
-          const wipeCollection = async (collName) => {
-            const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', collName));
-            const promises = snap.docs.map(d => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', collName, d.id)));
-            await Promise.all(promises);
-          };
+      
+      // Añadimos un pequeño retraso para permitir que se cierre el primer modal antes de abrir el prompt
+      setTimeout(() => {
+        dialogs.prompt("Para confirmar esta acción irreversible, escribe la palabra exacta: BORRAR", async (val) => {
+          if (val !== "BORRAR") {
+             setTimeout(() => {
+               dialogs.alert("La palabra de seguridad es incorrecta. La operación ha sido cancelada por seguridad.", "Operación Cancelada");
+             }, 150);
+             return;
+          }
+          
+          try {
+            const wipeCollection = async (collName) => {
+              const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', collName));
+              const promises = snap.docs.map(d => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', collName, d.id)));
+              await Promise.all(promises);
+            };
 
-          await wipeCollection('pedidos');
-          await wipeCollection('movimientos');
-          await wipeCollection('logs');
+            await wipeCollection('pedidos');
+            await wipeCollection('movimientos');
+            await wipeCollection('logs');
 
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), {});
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), {});
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), {});
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), {});
 
-          loggear('SISTEMA_REINICIADO', 'El administrador formateó toda la data operativa del sistema.');
-          dialogs.alert("¡El entorno ha sido restablecido a CERO exitosamente! La página se recargará automáticamente.", "Formateo Completo");
-          setTimeout(() => window.location.reload(), 3000);
-        } catch(e) {
-          console.error(e);
-          dialogs.alert("Error de conexión al intentar formatear las bases de datos.", "Fallo Crítico");
-        }
-      }, "Confirmación de Seguridad");
+            loggear('SISTEMA_REINICIADO', 'El administrador formateó toda la data operativa del sistema.');
+            
+            // Retraso para que el alert final funcione correctamente
+            setTimeout(() => {
+              dialogs.alert("¡El entorno ha sido restablecido a CERO exitosamente! La página se recargará automáticamente.", "Formateo Completo");
+              setTimeout(() => window.location.reload(), 3000);
+            }, 150);
+            
+          } catch(e) {
+            console.error(e);
+            setTimeout(() => {
+              dialogs.alert("Error de conexión al intentar formatear las bases de datos.", "Fallo Crítico");
+            }, 150);
+          }
+        }, "Confirmación de Seguridad");
+      }, 150);
+      
     }, "Formatear Entorno");
   };
 
