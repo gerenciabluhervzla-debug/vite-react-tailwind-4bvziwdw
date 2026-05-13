@@ -6,8 +6,8 @@ import SubPanelMovimientos from './SubPanelMovimientos';
 import SubPanelCatalogo from './SubPanelCatalogo';
 
 export default function PanelInventario({ stock, notas, catalogo, movimientos, db, appId, loggear, perfil, dialogs }) {
-  const puedeEditar = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(perfil?.role);
-  const esRecepcion = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITOR_GENERAL].includes(perfil?.role);
+  const rol = perfil?.role;
+  const puedeEditar = [ROLES.ADMIN].includes(rol);
   
   const [subTab, setSubTab] = useState('stock'); 
   
@@ -30,7 +30,7 @@ export default function PanelInventario({ stock, notas, catalogo, movimientos, d
       </div>
 
       {subTab === 'stock' && <SubPanelStock lista={listaStock} notas={notas} stock={stock} db={db} appId={appId} puedeEditar={puedeEditar} loggear={loggear} dialogs={dialogs} />}
-      {subTab === 'movimientos' && <SubPanelMovimientos movimientos={movimientos} stock={stock} db={db} appId={appId} loggear={loggear} perfil={perfil} catalogo={catalogo} esRecepcion={esRecepcion} dialogs={dialogs} />}
+      {subTab === 'movimientos' && <SubPanelMovimientos movimientos={movimientos} stock={stock} db={db} appId={appId} loggear={loggear} perfil={perfil} catalogo={catalogo} dialogs={dialogs} />}
       {subTab === 'catalogo' && <SubPanelCatalogo catalogo={catalogo} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
     </div>
   );

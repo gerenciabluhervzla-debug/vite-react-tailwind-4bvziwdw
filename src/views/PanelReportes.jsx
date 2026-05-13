@@ -1,19 +1,21 @@
 import React, { useState, useMemo } from 'react';
 import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp } from 'lucide-react';
-import { InputDark, Input } from '../components/ui';
+import { ROLES } from '../config/constants';
 
-export default function PanelReportes({ pedidos, catalogo, stock }) {
-  // 1. Estados para el filtro de fechas
-  const [rangoRango, setRangoRango] = useState('hoy'); // 'hoy', 'mes', 'año', 'todo', 'custom'
+export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
+  const [rangoRango, setRangoRango] = useState('hoy');
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
 
-  // 2. Filtro general de pedidos válidos (ni rechazados ni carritos públicos abandonados)
+  const rol = perfil?.role;
+  const verTotalInventario = rol === ROLES.ADMIN;
+  // Despacho no puede ver dinero en absoluto
+  const verDinero = rol !== ROLES.DESPACHO;
+
   const validados = useMemo(() => {
     return pedidos.filter(p => p.status !== 'Rechazado' && !p.esPublico);
   }, [pedidos]);
 
-  // 3. Aplicar Filtro de Fechas
   const pedidosFiltrados = useMemo(() => {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -27,7 +29,6 @@ export default function PanelReportes({ pedidos, catalogo, stock }) {
       if (rangoRango === 'todo') return true;
       if (rangoRango === 'custom') {
         const start = fechaInicio ? new Date(fechaInicio).getTime() : 0;
-        // Se suma 86399999 ms para incluir hasta las 23:59:59 del día final
         const end = fechaFin ? new Date(fechaFin).getTime() + 86399999 : Infinity;
         return p.fechaCreacion >= start && p.fechaCreacion <= end;
       }
@@ -35,7 +36,6 @@ export default function PanelReportes({ pedidos, catalogo, stock }) {
     });
   }, [validados, rangoRango, fechaInicio, fechaFin]);
 
-  // 4. Calcular Métricas Dinámicas basadas en los pedidos filtrados
   const metricas = useMemo(() => {
     let ventasUSD = 0;
     let ventasVES = 0;
@@ -45,7 +45,6 @@ export default function PanelReportes({ pedidos, catalogo, stock }) {
     let descuentosUSD = 0;
 
     pedidosFiltrados.forEach(p => {
-      // Calcular el valor original real de los productos en catálogo (sin descuentos)
       let valorOriginalUsd = 0;
       if (p.carritoObj) {
         Object.entries(p.carritoObj).forEach(([key, qty]) => {
@@ -62,22 +61,17 @@ export default function PanelReportes({ pedidos, catalogo, stock }) {
       }
 
       if (p.esRegalo) {
-        // Si es obsequio, todo el valor original se considera costo de regalo
         regalosUSD += valorOriginalUsd;
       } else {
-        // Ventas Netas Reales
         ventasUSD += (p.montoUsd || 0);
         ventasVES += (p.montoVes || 0);
 
-        // Sub-métrica de MercadoLibre
         if (p.esMercadoLibre) {
           mlUSD += (p.montoUsd || 0);
           mlVES += (p.montoVes || 0);
         }
 
-        // Calcular pérdida por descuentos (Valor Real de la mercancía - Valor cobrado)
         const diferencia = valorOriginalUsd - (p.montoUsd || 0);
-        // Evitamos sumar si el cliente pagó de más por error (sobrantes)
         if (diferencia > 0) {
           descuentosUSD += diferencia;
         }
@@ -87,7 +81,6 @@ export default function PanelReportes({ pedidos, catalogo, stock }) {
     return { ventasUSD, ventasVES, mlUSD, mlVES, regalosUSD, descuentosUSD };
   }, [pedidosFiltrados, catalogo]);
 
-  // 5. Valorización del Inventario Actual (No depende del filtro de fechas, es global)
   const totalValInventario = useMemo(() => {
     let t = 0;
     Object.entries(stock).forEach(([key, val]) => {
@@ -105,7 +98,6 @@ export default function PanelReportes({ pedidos, catalogo, stock }) {
     return t;
   }, [stock, catalogo]);
 
-  // 6. Top 10 Productos Filtrados
   const topProductos = useMemo(() => {
     const map = {};
     pedidosFiltrados.forEach(p => {
@@ -133,8 +125,6 @@ export default function PanelReportes({ pedidos, catalogo, stock }) {
 
   return (
     <div className="space-y-8 animate-in fade-in">
-      
-      {/* SECCIÓN 1: Filtros de Fecha */}
       <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 transition-colors">
         <div>
           <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-2"><CalendarDays className="text-sky-600"/> Período del Reporte</h2>
@@ -158,71 +148,78 @@ export default function PanelReportes({ pedidos, catalogo, stock }) {
         )}
       </div>
 
-      {/* SECCIÓN 2: Métricas Principales (Ventas y Valor de Inventario) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-         <div className="bg-[#003366] text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-sky-600 relative overflow-hidden">
-            <div className="relative z-10">
-              <div className="text-[11px] uppercase font-black tracking-widest opacity-70 mb-2">Ventas Netas ($)</div>
-              <div className="text-4xl lg:text-5xl font-black">${metricas.ventasUSD.toFixed(2)}</div>
-            </div>
-            <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
-         </div>
-         
-         <div className="bg-emerald-600 text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-emerald-800 relative overflow-hidden">
-            <div className="relative z-10">
-              <div className="text-[11px] uppercase font-black tracking-widest opacity-70 mb-2">Ventas Netas (Bs)</div>
-              <div className="text-4xl lg:text-5xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
-            </div>
-            <TrendingUp size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
-         </div>
+      {(verDinero || verTotalInventario) && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+           {verDinero && (
+             <>
+               <div className="bg-[#003366] text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-sky-600 relative overflow-hidden">
+                  <div className="relative z-10">
+                    <div className="text-[11px] uppercase font-black tracking-widest opacity-70 mb-2">Ventas Netas ($)</div>
+                    <div className="text-4xl lg:text-5xl font-black">${metricas.ventasUSD.toFixed(2)}</div>
+                  </div>
+                  <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+               </div>
+               
+               <div className="bg-emerald-600 text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-emerald-800 relative overflow-hidden">
+                  <div className="relative z-10">
+                    <div className="text-[11px] uppercase font-black tracking-widest opacity-70 mb-2">Ventas Netas (Bs)</div>
+                    <div className="text-4xl lg:text-5xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                  </div>
+                  <TrendingUp size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+               </div>
+             </>
+           )}
 
-         <div className="bg-purple-700 text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-purple-900 relative overflow-hidden">
-            <div className="relative z-10">
-              <div className="text-[11px] uppercase font-black tracking-widest text-purple-200 mb-2">Inventario Físico ($)</div>
-              <div className="text-4xl lg:text-5xl font-black">${totalValInventario.toFixed(2)}</div>
-              <div className="text-[10px] font-bold text-purple-300 mt-2 bg-purple-800/50 w-max px-2 py-1 rounded">No se afecta por filtro de fecha</div>
-            </div>
-            <Archive size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
-         </div>
-      </div>
+           {verTotalInventario && (
+             <div className="bg-purple-700 text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-purple-900 relative overflow-hidden">
+                <div className="relative z-10">
+                  <div className="text-[11px] uppercase font-black tracking-widest text-purple-200 mb-2">Inventario Físico ($)</div>
+                  <div className="text-4xl lg:text-5xl font-black">${totalValInventario.toFixed(2)}</div>
+                  <div className="text-[10px] font-bold text-purple-300 mt-2 bg-purple-800/50 w-max px-2 py-1 rounded">No se afecta por filtro de fecha</div>
+                </div>
+                <Archive size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+             </div>
+           )}
+        </div>
+      )}
 
-      {/* SECCIÓN 3: Desglose de Fugas y Canales */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
-          <div className="w-14 h-14 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-500 rounded-2xl flex items-center justify-center shrink-0">
-            <Store size={28}/>
+      {verDinero && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
+            <div className="w-14 h-14 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-500 rounded-2xl flex items-center justify-center shrink-0">
+              <Store size={28}/>
+            </div>
+            <div>
+              <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">MercadoLibre</div>
+              <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.mlUSD.toFixed(2)}</div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Bs. {metricas.mlVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            </div>
           </div>
-          <div>
-            <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">MercadoLibre</div>
-            <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.mlUSD.toFixed(2)}</div>
-            <div className="text-[11px] font-bold text-slate-400 mt-0.5">Bs. {metricas.mlVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
+            <div className="w-14 h-14 bg-pink-100 dark:bg-pink-900/30 text-pink-600 dark:text-pink-500 rounded-2xl flex items-center justify-center shrink-0">
+              <Gift size={28}/>
+            </div>
+            <div>
+              <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Costo por Obsequios</div>
+              <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.regalosUSD.toFixed(2)}</div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Dinero no ingresado por VIPs</div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
+            <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-500 rounded-2xl flex items-center justify-center shrink-0">
+              <Percent size={28}/>
+            </div>
+            <div>
+              <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Impacto Descuentos</div>
+              <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.descuentosUSD.toFixed(2)}</div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Diferencia Vs precio catálogo</div>
+            </div>
           </div>
         </div>
+      )}
 
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
-          <div className="w-14 h-14 bg-pink-100 dark:bg-pink-900/30 text-pink-600 dark:text-pink-500 rounded-2xl flex items-center justify-center shrink-0">
-            <Gift size={28}/>
-          </div>
-          <div>
-            <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Costo por Obsequios</div>
-            <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.regalosUSD.toFixed(2)}</div>
-            <div className="text-[11px] font-bold text-slate-400 mt-0.5">Dinero no ingresado por VIPs</div>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
-          <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-500 rounded-2xl flex items-center justify-center shrink-0">
-            <Percent size={28}/>
-          </div>
-          <div>
-            <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Impacto Descuentos</div>
-            <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.descuentosUSD.toFixed(2)}</div>
-            <div className="text-[11px] font-bold text-slate-400 mt-0.5">Diferencia Vs precio de catálogo</div>
-          </div>
-        </div>
-      </div>
-
-      {/* SECCIÓN 4: Top Productos */}
       <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
          <div className="flex justify-between items-center mb-6">
            <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><Sparkles className="text-sky-600"/> Top 10 Productos Más Vendidos</h3>
@@ -234,11 +231,11 @@ export default function PanelReportes({ pedidos, catalogo, stock }) {
                <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
                  <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Producto y Presentación</th>
                  <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-center">Unidades Vendidas</th>
-                 <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Ingreso Bruto</th>
+                 {verDinero && <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Ingreso Bruto</th>}
                </tr>
              </thead>
              <tbody>
-               {topProductos.length === 0 ? <tr><td colSpan="3" className="p-8 text-center text-slate-400 font-bold italic">No hay ventas registradas en las fechas seleccionadas.</td></tr> : topProductos.map((prod, idx) => (
+               {topProductos.length === 0 ? <tr><td colSpan={verDinero ? 3 : 2} className="p-8 text-center text-slate-400 font-bold italic">No hay ventas registradas en las fechas seleccionadas.</td></tr> : topProductos.map((prod, idx) => (
                   <tr key={prod.key} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                      <td className="p-4">
                         <div className="flex items-center gap-3">
@@ -247,7 +244,7 @@ export default function PanelReportes({ pedidos, catalogo, stock }) {
                         </div>
                      </td>
                      <td className="p-4 text-center font-black text-sky-600 dark:text-sky-400 text-lg">{prod.cantidad}</td>
-                     <td className="p-4 text-right font-black text-emerald-600 dark:text-emerald-400 text-lg">${prod.valor.toFixed(2)}</td>
+                     {verDinero && <td className="p-4 text-right font-black text-emerald-600 dark:text-emerald-400 text-lg">${prod.valor.toFixed(2)}</td>}
                   </tr>
                ))}
              </tbody>

@@ -2,12 +2,10 @@ export const BRAND_LOGO = "logobluher.jpg";
 
 export const ROLES = {
   ADMIN: 'Administrador',
+  ADMINISTRACION: 'Administración',
   VENTAS: 'Ventas',
-  ADMINISTRACION: 'Administración', 
   DESPACHO: 'Despacho',
-  AUDITOR_VENTAS: 'Auditor Ventas y Admin',
-  AUDITOR_INVENTARIO: 'Auditor Inventario',
-  AUDITOR_GENERAL: 'Auditor General'
+  AUDITORIA: 'Auditoría'
 };
 
 export const DEFAULT_CATALOGO = [

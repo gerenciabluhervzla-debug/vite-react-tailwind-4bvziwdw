@@ -146,7 +146,6 @@ export default function App() {
     }, onError));
 
     if (userProfile && userProfile.isApproved) {
-      // OPTIMIZACIÓN: Límites de descargas para no agotar la capa gratuita
       const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(150));
       unsubs.push(onSnapshot(qPedidos, (snapshot) => {
         setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -161,7 +160,7 @@ export default function App() {
         setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }, onError));
 
-      const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(userProfile.role);
+      const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITORIA].includes(userProfile.role);
       if (esAdminOAuditor) {
         unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
           setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -258,14 +257,23 @@ export default function App() {
       </div>
     );
   } else {
+    // --- LÓGICA DE CONTROL DE ACCESO BASADO EN ROLES ---
     const r = userProfile?.role;
-    const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(r);
-    const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL].includes(r);
-    const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO, ROLES.AUDITOR_GENERAL].includes(r);
-    const showReportes = [ROLES.ADMIN, ROLES.AUDITOR_VENTAS, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r);
-    const showInventario = [ROLES.ADMIN, ROLES.AUDITOR_INVENTARIO, ROLES.AUDITOR_GENERAL, ROLES.ADMINISTRACION].includes(r); 
+    
+    // Ventas: Visible para Admin, Ventas, Adm, Despacho
+    const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
+    // Admin Pagos: Visible para Admin, Administración
+    const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(r);
+    // Despacho: Visible para Admin, Despacho
+    const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO].includes(r);
+    // Reportes: Visible para Admin, Administración, Auditoría, Despacho
+    const showReportes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r);
+    // Inventario: Todos pueden visualizar, las modificaciones internas se controlan dentro del panel
+    const showInventario = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r); 
+    // Gestión de Usuarios: Solo Admin
     const showUsuarios = [ROLES.ADMIN].includes(r);
-    const showLogs = [ROLES.ADMIN, ROLES.AUDITOR_GENERAL].includes(r);
+    // Auditoría: Admin y Auditoría
+    const showLogs = [ROLES.ADMIN, ROLES.AUDITORIA].includes(r);
 
     content = (
       <div className="flex flex-col md:flex-row min-h-screen bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors selection:bg-sky-200 dark:selection:bg-sky-900">
@@ -315,7 +323,7 @@ export default function App() {
               {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} />}
               {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} config={configGral} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
               {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} perfil={userProfile} />}
-              {activeTab === 'reportes' && showReportes && <PanelReportes pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
+              {activeTab === 'reportes' && showReportes && <PanelReportes perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
               {activeTab === 'inventario' && showInventario && <PanelInventario stock={stockInventario} notas={notasInventario} catalogo={catalogo} movimientos={movimientos} db={db} appId={appId} loggear={loggear} perfil={userProfile} dialogs={dialogs} />}
               {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
               {activeTab === 'logs' && showLogs && <PanelLogs logs={logs} />}

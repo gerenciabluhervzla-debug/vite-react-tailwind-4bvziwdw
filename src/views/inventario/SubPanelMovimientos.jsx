@@ -1,10 +1,19 @@
 import React, { useState } from 'react';
-import { PlusCircle, ArrowRightLeft, FileText, CheckCircle } from 'lucide-react';
+import { PlusCircle, ArrowRightLeft, FileText, CheckCircle, AlertTriangle } from 'lucide-react';
 import { setDoc, doc, updateDoc } from 'firebase/firestore';
 import ModalCrearMovimiento from './ModalCrearMovimiento';
+import { ROLES } from '../../config/constants';
 
-export default function SubPanelMovimientos({ movimientos, stock, db, appId, loggear, perfil, catalogo, esRecepcion, dialogs }) {
+export default function SubPanelMovimientos({ movimientos, stock, db, appId, loggear, perfil, catalogo, dialogs }) {
   const [modalType, setModalType] = useState(null); 
+  
+  const rol = perfil?.role;
+  // Despacho y Admin pueden dar ingreso de mercancía de proveedores
+  const puedeHacerIngreso = [ROLES.ADMIN, ROLES.DESPACHO].includes(rol);
+  // Despacho y Admin pueden iniciar una transferencia hacia recepción
+  const puedeTransferir = [ROLES.ADMIN, ROLES.DESPACHO].includes(rol);
+  // Administración y Admin son quienes reciben y aprueban la llegada de la transferencia
+  const esRecepcion = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(rol);
   
   const aprobarTransferencia = async (mov) => {
     dialogs.confirm("¿Confirmas que recibiste físicamente estas cantidades exactas en el Almacén de Recepción?", async () => {
@@ -27,8 +36,8 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
   return (
     <div>
       <div className="flex flex-wrap gap-4 mb-8">
-        <button onClick={()=>setModalType('INGRESO')} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl shadow-md flex items-center gap-2 transition-all hover:-translate-y-0.5"><PlusCircle size={18}/> Cargar Ingreso (Proveedor)</button>
-        <button onClick={()=>setModalType('TRANSFERENCIA')} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-md flex items-center gap-2 transition-all hover:-translate-y-0.5"><ArrowRightLeft size={18}/> Enviar a Recepción</button>
+        {puedeHacerIngreso && <button onClick={()=>setModalType('INGRESO')} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl shadow-md flex items-center gap-2 transition-all hover:-translate-y-0.5"><PlusCircle size={18}/> Cargar Ingreso (Proveedor)</button>}
+        {puedeTransferir && <button onClick={()=>setModalType('TRANSFERENCIA')} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-md flex items-center gap-2 transition-all hover:-translate-y-0.5"><ArrowRightLeft size={18}/> Enviar a Recepción</button>}
       </div>
 
       <h3 className="font-black text-slate-800 dark:text-slate-100 mb-4 text-lg">Historial de Operaciones</h3>

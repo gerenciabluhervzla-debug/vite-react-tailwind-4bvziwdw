@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle } from 'lucide-react';
+import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck } from 'lucide-react';
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
 import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
@@ -7,8 +7,10 @@ import { GEMINI_API_KEY } from '../config/firebase';
 import { ROLES } from '../config/constants';
 
 export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
+  // Solo Admin y Ventas pueden modificar o registrar
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
+  
   const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: 'USD', montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, esRegalo: false, descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' };
   
   const [formData, setFormData] = useState(defaultForm);
@@ -125,7 +127,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     if (!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) return dialogs.alert("Debes seleccionar productos del Catálogo Visual.", "Carrito Vacío");
     if (!formData.esRegalo && (!formData.tasa || parseFloat(formData.tasa) <= 0)) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
     
-    // VALIDACIÓN DE STOCK
     let sinStock = false;
     let itemsFaltantes = [];
     Object.entries(formData.carritoObj).forEach(([key, qty]) => {
@@ -153,7 +154,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     let descuento = parseFloat(formData.descuentoPorcentaje) || 0;
     let pagoExtUsd = 0;
 
-    // Faltante + pago extra
     if (editId && pedidoDevuelto?.faltanteUsd > 0 && formData.pagoAdicional) {
       let extra = parseFloat(formData.pagoAdicional) || 0;
       pagoExtUsd = formData.moneda === 'VES' ? extra / tasa : extra;
@@ -165,7 +165,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
        calculo = formData.moneda === 'USD' ? { usd: montoNum, ves: montoNum * tasa } : { ves: montoNum, usd: tasa > 0 ? montoNum / tasa : 0 };
     }
 
-    // --- LÓGICA AUTOMÁTICA DE CONCENTRADO ---
     let finalCarrito = { ...formData.carritoObj };
     let finalProductosText = formData.productos || '';
     let countBoosters = 0;
@@ -178,7 +177,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       if (!finalProductosText.includes("Concentrado (Unidad)")) finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Auto]`;
     }
 
-    // --- LÓGICA DE HORARIO DE CORTE (12:20 PM) ---
     const targetDate = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     if (targetDate.getHours() > 12 || (targetDate.getHours() === 12 && targetDate.getMinutes() >= 20)) {
        targetDate.setDate(targetDate.getDate() + 1);
@@ -222,13 +220,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl border dark:border-slate-700 transition-colors shadow-sm">
       <div className="flex flex-wrap gap-4 mb-8 border-b dark:border-slate-700 pb-2 overflow-x-auto">
         {puedeCrear && <button onClick={() => { setVista('nuevo'); if(editId) cancelarEdicion(); }} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'nuevo' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ShoppingCart size={18} className="inline mr-1" /> {editId ? 'Corrigiendo' : 'Registrar'}</button>}
+        
         <button onClick={() => setVista('historial')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'historial' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ClipboardList size={18} className="inline mr-1" /> Historial</button>
-        <button onClick={() => setVista('espera')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'espera' ? 'text-amber-500 border-b-2 border-amber-500' : 'text-slate-400 hover:text-amber-500'}`}><Clock size={18} className="inline mr-1" /> Espera ({enEspera.length})</button>
-        <button onClick={() => setVista('web')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'web' ? 'text-emerald-500 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-emerald-500'}`}><Store size={18} className="inline mr-1" /> Web ({pedidosWeb.length})</button>
+        
+        {puedeCrear && <button onClick={() => setVista('espera')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'espera' ? 'text-amber-500 border-b-2 border-amber-500' : 'text-slate-400 hover:text-amber-500'}`}><Clock size={18} className="inline mr-1" /> Espera ({enEspera.length})</button>}
+        {puedeCrear && <button onClick={() => setVista('web')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'web' ? 'text-emerald-500 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-emerald-500'}`}><Store size={18} className="inline mr-1" /> Web ({pedidosWeb.length})</button>}
+        
         <button onClick={copiarLinkTienda} className="pb-3 font-black text-xs uppercase tracking-widest transition-colors text-slate-400 hover:text-sky-600 ml-auto"><Link size={18} className="inline mr-1" /> Link Tienda</button>
       </div>
 
-      {!tasaActualizadaHoy && vista === 'nuevo' && !editId && (
+      {!tasaActualizadaHoy && vista === 'nuevo' && !editId && puedeCrear && (
         <div className="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-r shadow-sm font-bold flex items-center gap-3">
            <AlertTriangle size={24}/> ATENCIÓN: La tasa del día no ha sido actualizada. Solicite a Administración que la actualice para poder procesar nuevas ventas.
         </div>
@@ -348,11 +349,11 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                 <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Cliente y Fecha</th>
                 <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Pago</th>
                 <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Estatus</th>
-                <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Acciones</th>
+                {puedeCrear && <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Acciones</th>}
               </tr>
             </thead>
             <tbody>
-              {pedidos.filter(p => !p.esPublico).length === 0 ? <tr><td colSpan="4" className="p-8 text-center text-slate-400 italic font-bold">No hay ventas registradas aún.</td></tr> : 
+              {pedidos.filter(p => !p.esPublico).length === 0 ? <tr><td colSpan={puedeCrear ? 4 : 3} className="p-8 text-center text-slate-400 italic font-bold">No hay ventas registradas aún.</td></tr> : 
                 pedidos.filter(p => !p.esPublico).map(p => (
                 <tr key={p.id} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                   <td className="p-4 align-top w-1/3">
@@ -379,23 +380,25 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                     <StatusBadge status={p.status} />
                     {p.status === 'Rechazado' && <div className="text-[10px] text-red-600 mt-1.5 font-bold bg-red-50 dark:bg-red-900/30 p-2 rounded-lg border border-red-100 dark:border-red-800 max-w-[200px] line-clamp-2 leading-relaxed" title={p.motivoRechazo}>Motivo: {p.motivoRechazo}</div>}
                   </td>
-                  <td className="p-4 align-top text-right">
-                    <div className="flex flex-col items-end gap-2">
-                      {p.status === 'Rechazado' && (
-                        <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 hover:bg-amber-200 text-xs font-bold py-1.5 px-3 rounded-lg transition-colors shadow-sm">Corregir Orden</button>
-                      )}
-                      {(p.status === 'Pendiente' || p.status === 'Rechazado') && (
-                        <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="text-xs text-slate-400 hover:text-amber-500 font-semibold underline transition-colors">Mover a Espera</button>
-                      )}
-                      {p.status === 'Despachado' && (
-                        <>
-                          <div className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">Guía: {p.guia}</div>
-                          <button onClick={() => enviarWhatsApp(p)} className="bg-[#25D366]/10 text-[#128C7E] dark:text-[#25D366] hover:bg-[#25D366]/20 text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-colors"><MessageCircle size={14} /> Notificar</button>
-                        </>
-                      )}
-                      {p.auditado && <span className="text-emerald-600 font-bold text-[10px] flex items-center justify-end gap-1 mt-1 uppercase tracking-widest"><ShieldCheck size={12}/> Auditado</span>}
-                    </div>
-                  </td>
+                  {puedeCrear && (
+                    <td className="p-4 align-top text-right">
+                      <div className="flex flex-col items-end gap-2">
+                        {p.status === 'Rechazado' && (
+                          <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 hover:bg-amber-200 text-xs font-bold py-1.5 px-3 rounded-lg transition-colors shadow-sm">Corregir Orden</button>
+                        )}
+                        {(p.status === 'Pendiente' || p.status === 'Rechazado') && (
+                          <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="text-xs text-slate-400 hover:text-amber-500 font-semibold underline transition-colors">Mover a Espera</button>
+                        )}
+                        {p.status === 'Despachado' && (
+                          <>
+                            <div className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">Guía: {p.guia}</div>
+                            <button onClick={() => enviarWhatsApp(p)} className="bg-[#25D366]/10 text-[#128C7E] dark:text-[#25D366] hover:bg-[#25D366]/20 text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-colors"><MessageCircle size={14} /> Notificar</button>
+                          </>
+                        )}
+                        {p.auditado && <span className="text-emerald-600 font-bold text-[10px] flex items-center justify-end gap-1 mt-1 uppercase tracking-widest"><ShieldCheck size={12}/> Auditado</span>}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -403,7 +406,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         </div>
       )}
 
-      {vista === 'espera' && (
+      {vista === 'espera' && puedeCrear && (
         <div className="animate-in fade-in bg-amber-50 dark:bg-amber-900/10 p-6 rounded-xl border border-amber-200 dark:border-amber-800">
            <h3 className="font-bold text-amber-800 dark:text-amber-500 mb-4 flex items-center gap-2"><Clock/> Clientes en Espera (Sin Stock)</h3>
            {enEspera.length === 0 ? <p className="text-sm text-amber-600 dark:text-amber-400">No hay pedidos en lista de espera.</p> : (
@@ -422,7 +425,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         </div>
       )}
 
-      {vista === 'web' && (
+      {vista === 'web' && puedeCrear && (
         <div className="animate-in fade-in bg-emerald-50 dark:bg-emerald-900/10 p-6 rounded-xl border border-emerald-200 dark:border-emerald-800">
            <h3 className="font-bold text-emerald-800 dark:text-emerald-500 mb-4 flex items-center gap-2"><Store/> Pedidos Recibidos del Portal Web</h3>
            {pedidosWeb.length === 0 ? <p className="text-sm text-emerald-600 dark:text-emerald-400">No hay nuevos pedidos de clientes web.</p> : (
