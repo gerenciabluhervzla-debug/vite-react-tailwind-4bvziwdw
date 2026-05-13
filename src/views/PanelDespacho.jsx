@@ -80,11 +80,13 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const guardarGuia = async (pedido) => {
     const inputData = guiasInput[pedido.id] || {};
     const guiaFinal = inputData.guia !== undefined ? inputData.guia : pedido.guia;
-    const linkFinal = inputData.link !== undefined ? inputData.link : pedido.linkGuia;
+    
+    // Si es ML, la URL del recibo siempre será la guía de ML. Si no, usamos el input.
+    const linkFinal = (pedido.esMercadoLibre && pedido.linkGuiaML) ? pedido.linkGuiaML : (inputData.link !== undefined ? inputData.link : pedido.linkGuia);
     const fotoFinal = inputData.fotoProductos !== undefined ? inputData.fotoProductos : pedido.linkFotoProductos;
 
     if (!guiaFinal || !linkFinal || !fotoFinal) {
-      return dialogs.alert("⚠️ Faltan datos.\n\nPara archivar el pedido debes tener:\n1. Número de Guía\n2. Foto del recibo de Guía\n3. Foto del paquete armado", "Información Incompleta");
+      return dialogs.alert("⚠️ Faltan datos.\n\nPara archivar el pedido debes tener:\n1. Número de Guía (o de seguimiento)\n2. Foto del recibo de Guía (Ya cubierta si es ML)\n3. Foto del paquete armado", "Información Incompleta");
     }
     
     try {
@@ -96,7 +98,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     } catch(e) { console.error(e); dialogs.alert("Error al intentar archivar el pedido.", "Error"); }
   };
 
-  // --- AUTORIZAR ENVÍO FUERA DE HORARIO (SOLO ADMIN) ---
   const forzarEnvioHoy = async (id) => {
     dialogs.confirm("¿Autorizar que este pedido se imprima y se envíe HOY de forma excepcional?", async () => {
       try {
@@ -106,6 +107,20 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         setTimeout(() => dialogs.alert("Envío autorizado exitosamente.", "Actualizado"), 150);
       } catch (error) { console.error(error); }
     }, "Autorizar Excepción");
+  };
+
+  // --- LÓGICA BOTÓN MERCADOLIBRE ---
+  const marcarGuiaMLImpresa = async (pedido) => {
+    if (pedido.linkGuiaML) {
+      window.open(pedido.linkGuiaML, '_blank');
+      if (!pedido.guiaMLImpresa) {
+         try {
+           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { guiaMLImpresa: true });
+         } catch(e) { console.error(e); }
+      }
+    } else {
+      dialogs.alert("El asesor de ventas no adjuntó la guía de MercadoLibre para este pedido.", "Guía Faltante");
+    }
   };
 
   const iniciarConteo = () => {
@@ -225,11 +240,15 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
             {pedidosAMostrar.length === 0 ? (
               <div className="p-10 text-center text-slate-400 italic font-bold">No hay envíos en esta vista.</div>
             ) : pedidosAMostrar.map(p => {
+              
+              // Validación cruzada para inputs
               const valorGuia = guiasInput[p.id]?.guia !== undefined ? guiasInput[p.id].guia : (p.guia || '');
-              const valorLinkGuia = guiasInput[p.id]?.link !== undefined ? guiasInput[p.id].link : (p.linkGuia || '');
               const valorLinkFoto = guiasInput[p.id]?.fotoProductos !== undefined ? guiasInput[p.id].fotoProductos : (p.linkFotoProductos || '');
 
-              // Evaluamos si el pedido es para el día siguiente para resaltarlo
+              // Lógica de ML para input URL Recibo
+              const isLinkML = p.esMercadoLibre && !!p.linkGuiaML;
+              const valorLinkGuia = isLinkML ? p.linkGuiaML : (guiasInput[p.id]?.link !== undefined ? guiasInput[p.id].link : (p.linkGuia || ''));
+
               const esParaManana = p.fechaDespacho !== todayStr;
               const cardClass = esParaManana && vistaDespacho === 'pendientes' 
                   ? "bg-red-50/50 dark:bg-red-900/10 border-red-200 dark:border-red-800" 
@@ -255,11 +274,18 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                   </div>
 
                   <div className="lg:col-span-5 flex flex-col justify-start mt-2 lg:mt-0">
+                    
+                    {/* BOTÓN INTERACTIVO MERCADOLIBRE */}
                     {p.esMercadoLibre && vistaDespacho === 'pendientes' && (
-                      <div className="mb-3 bg-yellow-400 text-slate-900 p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider animate-pulse">
-                        <AlertTriangle size={18} className="text-slate-900 shrink-0" /> ¡MERCADOLIBRE! IMPRIMIR GUÍA
-                      </div>
+                      <button 
+                        onClick={() => marcarGuiaMLImpresa(p)}
+                        className={`mb-3 w-full text-left p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider transition-colors ${p.guiaMLImpresa ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-yellow-400 text-slate-900 animate-pulse'}`}
+                      >
+                        {p.guiaMLImpresa ? <CheckCircle size={18} className="shrink-0" /> : <AlertTriangle size={18} className="shrink-0" />}
+                        {p.guiaMLImpresa ? 'RECUERDA PEGAR LA GUÍA DE MERCADOLIBRE' : '¡MERCADOLIBRE! ABRIR E IMPRIMIR GUÍA'}
+                      </button>
                     )}
+
                     <div className="font-medium bg-[#f0f4f8] dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-3 whitespace-pre-wrap shadow-sm text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">
                       {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
                     </div>
@@ -282,23 +308,27 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                       </div>
                     ) : (
                       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm flex flex-col gap-3 w-full">
-                        <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                        
+                        <input type="text" placeholder="N° de Guía Tracking" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                        
                         <div className="flex flex-col lg:flex-row gap-3">
                             <div className="flex-1 relative w-full">
-                              <input type="text" placeholder="URL Recibo" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkGuia} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
-                              <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkGuia ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Recibo Agencia">
+                              <input type="text" placeholder="URL Recibo" readOnly={isLinkML} className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'} ${isLinkML ? 'opacity-70 cursor-not-allowed' : ''}`} value={valorLinkGuia} onChange={(e) => !isLinkML && handleGuiaChange(p.id, 'link', e.target.value)} />
+                              <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg transition-colors shadow-sm ${isLinkML ? 'cursor-not-allowed bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'cursor-pointer'} ${valorLinkGuia && !isLinkML ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title={isLinkML ? "Guía provista por Ventas" : "Subir Recibo Agencia"}>
                                 {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkGuia ? <CheckCircle size={16}/> : <UploadCloud size={16} />)}
-                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
+                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => !isLinkML && handleFileUpload(e, p.id, 'link')} disabled={isLinkML || subiendo.field !== null} />
                               </label>
                             </div>
+
                             <div className="flex-1 relative w-full">
                               <input type="text" placeholder="URL Foto Caja" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkFoto ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkFoto} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
                               <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkFoto ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto del Paquete">
                                 {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkFoto ? <CheckCircle size={16}/> : <Camera size={16} />)}
-                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} />
+                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} disabled={subiendo.field !== null} />
                               </label>
                             </div>
                         </div>
+
                         <div className="flex flex-col lg:flex-row gap-2 mt-2">
                            <button onClick={() => guardarAvance(p)} className="flex-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
                              <Save size={16}/> Guardar Avance
@@ -324,7 +354,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
             <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700">
                <CheckSquare size={64} className="mx-auto text-sky-300 dark:text-sky-800 mb-6" />
                <h3 className="text-2xl font-black text-slate-700 dark:text-slate-200 mb-2">Auditoría Diaria de Despacho</h3>
-               <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara las cantidades físicas en los anaqueles contra las registradas en el sistema.</p>
+               <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara las cantidades físicas en los anaqueles contra las registradas en el sistema para detectar faltantes o sobrantes.</p>
                <button onClick={iniciarConteo} className="bg-sky-600 hover:bg-sky-700 text-white font-black py-4 px-8 rounded-xl shadow-lg transition-all hover:-translate-y-1">
                  Iniciar Conteo del Día
                </button>
@@ -334,7 +364,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
               <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-sky-50 dark:bg-sky-900/20 p-6 rounded-2xl border border-sky-100 dark:border-sky-800">
                  <div>
                    <h3 className="font-black text-sky-900 dark:text-sky-300 text-lg">Hoja de Trabajo Activa</h3>
-                   <p className="text-sm font-medium text-sky-700 dark:text-sky-400">Modifica solo donde haya diferencias.</p>
+                   <p className="text-sm font-medium text-sky-700 dark:text-sky-400">Las casillas ya tienen la cantidad del sistema. Modifica solo donde haya diferencias.</p>
                  </div>
                  <div className="flex gap-3 w-full md:w-auto">
                    <button onClick={()=>setConteoActivo(false)} className="flex-1 md:flex-none px-6 py-3 font-bold text-slate-600 bg-white dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Cancelar</button>

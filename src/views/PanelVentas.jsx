@@ -1,21 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent } from 'lucide-react';
+import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, UploadCloud } from 'lucide-react';
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
 import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
-import { GEMINI_API_KEY } from '../config/firebase';
+import { GEMINI_API_KEY, URL_GOOGLE_SCRIPT } from '../config/firebase';
+import { compressImage } from '../utils/image';
 import { ROLES } from '../config/constants';
 
 export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
   
-  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: 'USD', montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, esRegalo: false, descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' };
+  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: 'USD', montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false, descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' };
   
   const [formData, setFormData] = useState(defaultForm);
   const [editId, setEditId] = useState(null); 
   const [pedidoDevuelto, setPedidoDevuelto] = useState(null); 
   const [enviando, setEnviando] = useState(false);
+  const [subiendoML, setSubiendoML] = useState(false);
   const [textoCrudo, setTextoCrudo] = useState('');
   const [analizando, setAnalizando] = useState(false);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
@@ -26,7 +28,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   const fechaHoy = new Date().toLocaleDateString('es-VE');
   const tasaActualizadaHoy = config.ultimaActualizacion === fechaHoy;
 
-  // --- COMPROBACIÓN DE DESCUENTO GLOBAL ---
   const hoyTimestamp = new Date().getTime();
   const isGlobalDiscountActive = config?.descuentoGlobalActivo &&
      config?.descuentoGlobalPorcentaje > 0 &&
@@ -44,9 +45,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const i=prod.presentaciones.indexOf(p); if (i >= 0 && prod.precios) sub += (prod.precios[i]*qty); }}));
     });
     
-    // Aplicamos primero la campaña global al subtotal
     const subConCampaña = sub * (1 - globalDiscountPercent / 100);
-    // Luego aplicamos el descuento extra del asesor si es que dio uno
     const dExtra = parseFloat(formData.descuentoPorcentaje) || 0;
     const final = subConCampaña * (1 - dExtra / 100);
     
@@ -122,7 +121,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     setFormData({
       clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, direccion: pedido.direccion,
       productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda, 
-      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: ''
+      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: ''
     });
     setEditId(pedido.id);
     setPedidoDevuelto(pedido);
@@ -135,11 +134,34 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     setPedidoDevuelto(null);
   };
 
+  const handleFileUploadML = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!URL_GOOGLE_SCRIPT) return dialogs.alert("El sistema de subida no está configurado.");
+
+    setSubiendoML(true);
+    try {
+      const base64Data = await compressImage(file, 800, 0.7);
+      const response = await fetch(URL_GOOGLE_SCRIPT, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ fileName: `GuiaML_${Date.now()}.jpg`, mimeType: 'image/jpeg', data: base64Data })
+      });
+      const result = await response.json();
+      if (result.url) setFormData({ ...formData, linkGuiaML: result.url });
+      setSubiendoML(false);
+    } catch (error) {
+      console.error(error);
+      dialogs.alert("Error subiendo la guía de MercadoLibre. Revisa tu conexión.", "Fallo de Red");
+      setSubiendoML(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!tasaActualizadaHoy && !editId) return dialogs.alert("NO puedes registrar ventas nuevas porque la Tasa del Día no ha sido actualizada hoy por Administración.", "Tasa Desactualizada");
     if (!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) return dialogs.alert("Debes seleccionar productos del Catálogo Visual.", "Carrito Vacío");
     if (!formData.esRegalo && (!formData.tasa || parseFloat(formData.tasa) <= 0)) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
+    if (formData.esMercadoLibre && !formData.linkGuiaML) return dialogs.alert("Si es un envío de MercadoLibre, debes adjuntar la imagen de la guía antes de procesar la orden.", "Falta Guía ML");
     
     let sinStock = false;
     let itemsFaltantes = [];
@@ -202,7 +224,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         let updateData = {
           ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, motivoRechazo: '', faltanteUsd: 0, descuentoPorcentaje: descuento 
         };
-        // Si al momento de corregir hay campaña activa, guardamos el dato
         if (globalDiscountPercent > 0) updateData.descuentoGlobalAplicado = globalDiscountPercent;
 
         if (formData.refAdicional) {
@@ -216,7 +237,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), {
           ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, auditado: false, fechaCreacion: Date.now(), fechaDespacho: fechaDespachoStr, esPublico: false, descuentoPorcentaje: descuento,
-          descuentoGlobalAplicado: globalDiscountPercent // <-- Marcamos que fue impactado por la campaña
+          descuentoGlobalAplicado: globalDiscountPercent 
         });
         loggear('PEDIDO_CREADO', `Venta: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)})`);
         dialogs.alert(finalStatus === 'Pendiente' ? `Venta registrada. Despacho pautado: ${fechaDespachoStr}` : `Guardado en Lista de Espera.`, "Aviso");
@@ -253,7 +274,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         </div>
       )}
 
-      {/* AVISO DE CAMPAÑA GLOBAL EN VENTAS */}
       {isGlobalDiscountActive && vista === 'nuevo' && puedeCrear && (
         <div className="mb-6 bg-gradient-to-r from-emerald-500 to-teal-500 text-white p-4 rounded-xl shadow-md font-bold flex items-center justify-between gap-3 animate-pulse">
            <div className="flex items-center gap-3">
@@ -321,6 +341,18 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                  <input type="checkbox" id="ml-check" checked={formData.esMercadoLibre} onChange={(e) => setFormData({...formData, esMercadoLibre: e.target.checked})} disabled={!tasaActualizadaHoy && !editId} className="w-5 h-5 accent-sky-600 cursor-pointer rounded disabled:opacity-50" />
                  <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Es envío de MercadoLibre</label>
                </div>
+               
+               {/* --- NUEVO CAMPO OCULTO PARA GUÍA ML --- */}
+               {formData.esMercadoLibre && (
+                 <div className="animate-in fade-in slide-in-from-top-2 ml-8 mb-2">
+                    <label className={`flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-xs ${formData.linkGuiaML ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-sky-300 dark:border-sky-700 text-sky-600 hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/20'}`}>
+                       {subiendoML ? <Loader2 size={16} className="animate-spin"/> : (formData.linkGuiaML ? <CheckCircle size={16}/> : <UploadCloud size={16}/>)}
+                       {formData.linkGuiaML ? 'Guía ML Cargada y Lista' : 'Adjuntar Imagen de Guía ML'}
+                       <input type="file" accept="image/*" className="hidden" onChange={handleFileUploadML} disabled={subiendoML || (!tasaActualizadaHoy && !editId)}/>
+                    </label>
+                 </div>
+               )}
+
                <div className="flex items-center gap-3">
                  <input type="checkbox" id="regalo-check" checked={formData.esRegalo} onChange={(e) => setFormData({...formData, esRegalo: e.target.checked})} disabled={!tasaActualizadaHoy && !editId} className="w-5 h-5 accent-purple-600 cursor-pointer rounded disabled:opacity-50" />
                  <label htmlFor="regalo-check" className="text-sm font-bold text-purple-700 dark:text-purple-400 cursor-pointer uppercase tracking-wider flex items-center gap-1"><Gift size={16}/> Es Regalo / Obsequio VIP</label>
