@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
-import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud } from 'lucide-react';
-import { updateDoc, doc } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays } from 'lucide-react';
+import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 
-export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs }) {
+export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs, perfil }) {
   const [vistaDespacho, setVistaDespacho] = useState('pendientes');
 
   const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
@@ -12,14 +12,30 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
   const [guiasInput, setGuiasInput] = useState({});
   const [subiendo, setSubiendo] = useState({ id: null, field: null });
-  const [inventarioChecked, setInventarioChecked] = useState({}); 
+
+  // Estados de Auditoría
+  const [cierres, setCierres] = useState([]);
+  const [conteoActivo, setConteoActivo] = useState(false);
+  const [conteoFisico, setConteoFisico] = useState({});
+  const [notasConteo, setNotasConteo] = useState({});
+  const [filtroFechaCierre, setFiltroFechaCierre] = useState('');
+
+  useEffect(() => {
+    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario'), orderBy('timestamp', 'desc'));
+    const unsub = onSnapshot(q, (snap) => {
+      setCierres(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => console.warn("Error cargando cierres:", error.message));
+    return () => unsub();
+  }, [db, appId]);
 
   const handleGuiaChange = (id, field, value) => setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
 
+  // --- LÓGICA OPTIMIZADA DE SUBIDA DE FOTOS ---
+  // Ahora guarda directamente en la base de datos sin requerir archivar
   const handleFileUpload = async (e, id, field) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (!URL_GOOGLE_SCRIPT) return dialogs.alert("⚠️ Falta configurar el puente de Google Drive. Por ahora, debes tomar la foto, subirla a drive y pegar el enlace manualmente.", "Configuración Faltante");
+    if (!URL_GOOGLE_SCRIPT) return dialogs.alert("⚠️ Falta configurar el puente de Google Drive.", "Configuración Faltante");
     
     setSubiendo({ id, field });
     try {
@@ -32,46 +48,159 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                 body: JSON.stringify({ fileName: `Soporte_${id.substring(0,5)}_${field}.jpg`, mimeType: file.type, data: base64Data })
             });
             const result = await response.json();
-            if (result.url) { handleGuiaChange(id, field, result.url); loggear('FOTO_SUBIDA', `Foto ${field} en ${id}`); }
+            if (result.url) { 
+               // GUARDADO AUTOMÁTICO EN BD
+               const dbField = field === 'link' ? 'linkGuia' : 'linkFotoProductos';
+               await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id), { [dbField]: result.url });
+               
+               handleGuiaChange(id, field, result.url); 
+               loggear('FOTO_SUBIDA', `Soporte logístico subido en pedido ${id}`); 
+            }
             setSubiendo({ id: null, field: null });
         };
-    } catch (error) { console.error(error); dialogs.alert("Error subiendo la foto a Drive. Revisa tu conexión.", "Fallo de Red"); setSubiendo({ id: null, field: null }); }
+    } catch (error) { console.error(error); dialogs.alert("Error subiendo la foto a Drive.", "Fallo de Red"); setSubiendo({ id: null, field: null }); }
   };
 
+  // --- GUARDADO PARCIAL DE NÚMERO DE GUÍA ---
+  const guardarNGuiaParcial = async (pedido) => {
+    const numGuia = guiasInput[pedido.id]?.guia;
+    if (!numGuia) return dialogs.alert("Escribe primero el número de guía para poder guardarlo.", "Campo vacío");
+    
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { guia: numGuia });
+      loggear('GUIA_ACTUALIZADA', `Guía parcial actualizada para ${pedido.clienteNombre}: ${numGuia}`);
+      dialogs.alert("Número de guía guardado. Puedes archivar el pedido cuando tengas todas las fotos.", "Progreso Guardado");
+    } catch (error) {
+      console.error(error);
+      dialogs.alert("Error al intentar guardar el número de guía.", "Error");
+    }
+  };
+
+  // --- ARCHIVAR PEDIDO FINAL ---
   const guardarGuia = async (pedido) => {
-    const inputData = guiasInput[pedido.id];
-    if (!inputData || !inputData.guia || !inputData.link || !inputData.fotoProductos) {
-      return dialogs.alert("⚠️ ALERTA: Todos los campos son obligatorios.\n\nDebes ingresar:\n1. Número de Guía\n2. Link/Foto del recibo de Guía\n3. Link/Foto de los productos armados", "Información Incompleta");
+    const inputData = guiasInput[pedido.id] || {};
+    
+    // Validamos contra lo que haya tecleado (inputData) o lo que ya esté guardado previamente en Firebase (pedido)
+    const guiaFinal = inputData.guia !== undefined ? inputData.guia : pedido.guia;
+    const linkFinal = inputData.link !== undefined ? inputData.link : pedido.linkGuia;
+    const fotoFinal = inputData.fotoProductos !== undefined ? inputData.fotoProductos : pedido.linkFotoProductos;
+
+    if (!guiaFinal || !linkFinal || !fotoFinal) {
+      return dialogs.alert("⚠️ Faltan datos.\n\nPara archivar el pedido de forma definitiva debes tener listo:\n1. Número de Guía\n2. Foto del recibo de Guía\n3. Foto del paquete armado", "Información Incompleta");
     }
     
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { 
-        guia: inputData.guia, linkGuia: inputData.link, linkFotoProductos: inputData.fotoProductos, status: 'Despachado'
+        guia: guiaFinal, linkGuia: linkFinal, linkFotoProductos: fotoFinal, status: 'Despachado'
       });
-      loggear('PEDIDO_DESPACHADO', `Despacho ${pedido.clienteNombre} (Guía: ${inputData.guia})`);
-      dialogs.alert("Guía y soportes guardados correctamente. El pedido ahora pasará al historial de Despachos.", "Despacho Confirmado");
-    } catch(e) { console.error(e); dialogs.alert("Error al intentar guardar la información.", "Error"); }
+      loggear('PEDIDO_DESPACHADO', `Despacho completado ${pedido.clienteNombre} (Guía: ${guiaFinal})`);
+      dialogs.alert("Guía y soportes verificados. El pedido ahora pasó al historial de Despachos.", "Despacho Confirmado");
+    } catch(e) { console.error(e); dialogs.alert("Error al intentar archivar el pedido.", "Error"); }
   };
+
+  // --- LÓGICA DEL NUEVO CIERRE DE INVENTARIO ---
+  const iniciarConteo = () => {
+    const inicial = {};
+    catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
+      const key = `${p.nombre}|${pres}`;
+      const dispSistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+      inicial[key] = dispSistema; 
+    })));
+    setConteoFisico(inicial);
+    setNotasConteo({});
+    setConteoActivo(true);
+  };
+
+  const handleConteoChange = (key, val) => {
+    const num = parseInt(val, 10);
+    setConteoFisico(prev => ({ ...prev, [key]: isNaN(num) ? 0 : num }));
+  };
+
+  const generarCSV = (cierre) => {
+    let csv = 'Categoria,Producto,Presentacion,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
+    cierre.productos.forEach(p => {
+      const estatus = p.diferencia === 0 ? 'OK' : (p.diferencia > 0 ? 'SOBRANTE' : 'FALTANTE');
+      csv += `"${p.categoria}","${p.nombre}","${p.presentacion}",${p.sistema},${p.fisico},${p.diferencia},"${estatus}","${p.nota}"\n`;
+    });
+    const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' }); 
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Cierre_Inventario_${cierre.fecha.replace(/\//g, '-')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const guardarCierre = async () => {
+    dialogs.confirm("¿Estás seguro de registrar el cierre de inventario de hoy? Esta acción guardará el historial y descargará tu reporte.", async () => {
+      const productosCierre = [];
+      let totalDiferencias = 0;
+
+      catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
+        const key = `${p.nombre}|${pres}`;
+        const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+        const fisico = conteoFisico[key] || 0;
+        const diferencia = fisico - sistema; 
+        
+        if (diferencia !== 0) totalDiferencias++;
+
+        productosCierre.push({
+          categoria: c.categoria,
+          nombre: p.nombre,
+          presentacion: pres,
+          sistema,
+          fisico,
+          diferencia,
+          nota: notasConteo[key] || ''
+        });
+      })));
+
+      const nuevoCierre = {
+        fecha: new Date().toLocaleDateString('es-VE'),
+        timestamp: Date.now(),
+        creadoPor: perfil?.nombre || 'Despachador',
+        totalItemsAuditados: productosCierre.length,
+        anomaliasDetectadas: totalDiferencias,
+        productos: productosCierre
+      };
+
+      try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario'), nuevoCierre);
+        loggear('CIERRE_INVENTARIO', `Cierre registrado con ${totalDiferencias} diferencias.`);
+        setConteoActivo(false);
+        generarCSV(nuevoCierre);
+        dialogs.alert("El cierre fue guardado en el historial y el reporte CSV se ha descargado.", "Cierre Completado");
+      } catch (error) {
+        console.error(error);
+        dialogs.alert("Ocurrió un error al guardar el historial de cierre.", "Error");
+      }
+    }, "Confirmar Cierre de Inventario");
+  };
+
+  const cierresFiltrados = cierres.filter(c => {
+    if (!filtroFechaCierre) return true;
+    const fechaFiltro = new Date(filtroFechaCierre);
+    const fechaCierre = new Date(c.timestamp);
+    return fechaFiltro.toLocaleDateString('es-VE') === fechaCierre.toLocaleDateString('es-VE');
+  });
 
   const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
-
-  const toggleCheck = (key) => {
-    setInventarioChecked(prev => ({...prev, [key]: !prev[key]}));
-  };
 
   return (
     <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
       
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end mb-8 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><Truck className="text-sky-600"/> Logística de Envíos</h2>
           <div className="flex flex-wrap gap-2 mt-4 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-max">
             <button onClick={() => setVistaDespacho('pendientes')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Por Empacar ({pedidosValidados.length})</button>
             <button onClick={() => setVistaDespacho('historial')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Enviados</button>
-            <button onClick={() => setVistaDespacho('inventario')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'inventario' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Validar Inventario</button>
+            <button onClick={() => setVistaDespacho('inventario')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'inventario' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Cierre Físico</button>
+            <button onClick={() => setVistaDespacho('historial_cierres')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'historial_cierres' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial de Cierres</button>
           </div>
         </div>
-        {vistaDespacho !== 'inventario' && (
+        {['pendientes', 'historial'].includes(vistaDespacho) && (
           <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm">
             <Printer size={18} /> Imprimir Etiquetas
           </button>
@@ -79,40 +208,160 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       </div>
 
       {pedidosPendientes > 0 && vistaDespacho === 'pendientes' && (
-        <div className="mb-8 bg-sky-50/50 dark:bg-sky-900/20 border border-sky-100 dark:border-sky-800 p-5 rounded-xl flex items-start gap-4 shadow-sm">
+        <div className="mb-8 bg-sky-50/50 dark:bg-sky-900/20 border border-sky-100 dark:border-sky-800 p-5 rounded-xl flex items-start gap-4 shadow-sm animate-in fade-in">
           <div className="p-2 bg-sky-100 dark:bg-sky-900/50 rounded-full text-sky-600 dark:text-sky-400 shrink-0"><Clock size={20} /></div>
           <div>
             <h3 className="text-sky-900 dark:text-sky-300 font-bold text-lg">Órdenes en proceso</h3>
-            <p className="text-sky-800/80 dark:text-sky-200/80 text-sm mt-1 font-medium">Hay <strong>{pedidosPendientes} pedido(s)</strong> siendo verificados por administración. Te sugerimos esperar a que los validen todos antes de imprimir para que las etiquetas salgan en la misma página.</p>
+            <p className="text-sky-800/80 dark:text-sky-200/80 text-sm mt-1 font-medium">Hay <strong>{pedidosPendientes} pedido(s)</strong> en revisión por administración. Imprime cuando estén validados para usar menos papel.</p>
           </div>
         </div>
       )}
 
-      {vistaDespacho === 'inventario' ? (
+      {/* --- VISTA: AUDITORÍA DE INVENTARIO FÍSICO --- */}
+      {vistaDespacho === 'inventario' && (
         <div className="animate-in fade-in">
-          <div className="mb-6 bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-            <p className="text-sm font-medium text-slate-600 dark:text-slate-400 flex items-center gap-2"><CheckSquare className="text-sky-500"/> Esta vista es exclusiva para validar las cantidades físicas en el almacén de despacho. Las marcas no se guardan.</p>
+          {!conteoActivo ? (
+            <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700">
+               <CheckSquare size={64} className="mx-auto text-sky-300 dark:text-sky-800 mb-6" />
+               <h3 className="text-2xl font-black text-slate-700 dark:text-slate-200 mb-2">Auditoría Diaria de Despacho</h3>
+               <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara las cantidades físicas en los anaqueles contra las registradas en el sistema para detectar faltantes o sobrantes.</p>
+               <button onClick={iniciarConteo} className="bg-sky-600 hover:bg-sky-700 text-white font-black py-4 px-8 rounded-xl shadow-lg transition-all hover:-translate-y-1">
+                 Iniciar Conteo del Día
+               </button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-sky-50 dark:bg-sky-900/20 p-6 rounded-2xl border border-sky-100 dark:border-sky-800">
+                 <div>
+                   <h3 className="font-black text-sky-900 dark:text-sky-300 text-lg">Hoja de Trabajo Activa</h3>
+                   <p className="text-sm font-medium text-sky-700 dark:text-sky-400">Las casillas ya tienen la cantidad del sistema. Modifica solo donde haya diferencias.</p>
+                 </div>
+                 <div className="flex gap-3 w-full md:w-auto">
+                   <button onClick={()=>setConteoActivo(false)} className="flex-1 md:flex-none px-6 py-3 font-bold text-slate-600 bg-white dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Cancelar</button>
+                   <button onClick={guardarCierre} className="flex-1 md:flex-none px-6 py-3 font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 shadow-md flex items-center justify-center gap-2 transition-transform hover:-translate-y-0.5"><Save size={18}/> Finalizar y Guardar</button>
+                 </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                 <table className="w-full text-left text-sm border-collapse min-w-[800px]">
+                   <thead>
+                     <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                       <th className="p-4 font-black">Producto</th>
+                       <th className="p-4 font-black text-center w-24">Sistema</th>
+                       <th className="p-4 font-black text-center bg-sky-100 dark:bg-sky-900/40 w-32">Conteo Real</th>
+                       <th className="p-4 font-black text-center w-28">Diferencia</th>
+                       <th className="p-4 font-black">Notas / Justificación</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
+                        const key = `${p.nombre}|${pres}`;
+                        const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+                        const fisico = conteoFisico[key] ?? sistema;
+                        const diferencia = fisico - sistema;
+                        
+                        let badgeDif = <span className="text-slate-400 font-bold">OK</span>;
+                        if (diferencia > 0) badgeDif = <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-black text-xs uppercase tracking-widest">+ {diferencia} (Sob)</span>;
+                        if (diferencia < 0) badgeDif = <span className="bg-red-100 text-red-700 px-2 py-1 rounded font-black text-xs uppercase tracking-widest">{diferencia} (Falt)</span>;
+
+                        return (
+                          <tr key={key} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                             <td className="p-4">
+                               <div className="font-bold text-slate-800 dark:text-slate-100">{p.nombre}</div>
+                               <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{pres}</div>
+                             </td>
+                             <td className="p-4 text-center font-black text-lg text-slate-500">{sistema}</td>
+                             <td className="p-4 text-center bg-sky-50 dark:bg-sky-900/20">
+                                <input 
+                                  type="number" 
+                                  min="0"
+                                  className="w-full text-center p-2 rounded-lg font-black text-lg border-2 border-slate-200 dark:border-slate-600 focus:border-sky-500 outline-none bg-white dark:bg-slate-800 dark:text-white"
+                                  value={fisico}
+                                  onChange={(e) => handleConteoChange(key, e.target.value)}
+                                />
+                             </td>
+                             <td className="p-4 text-center">{badgeDif}</td>
+                             <td className="p-4">
+                                <input 
+                                  type="text" 
+                                  placeholder={diferencia !== 0 ? "Requerido: ¿Por qué la diferencia?" : "Opcional..."}
+                                  className={`w-full p-2 rounded-lg border-2 outline-none text-sm dark:bg-slate-800 dark:text-white ${diferencia !== 0 && !(notasConteo[key]||'') ? 'border-red-300 focus:border-red-500 bg-red-50' : 'border-slate-200 dark:border-slate-600 focus:border-sky-500'}`}
+                                  value={notasConteo[key] || ''}
+                                  onChange={(e) => setNotasConteo(prev => ({...prev, [key]: e.target.value}))}
+                                />
+                             </td>
+                          </tr>
+                        );
+                     })))}
+                   </tbody>
+                 </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* --- VISTA: HISTORIAL DE CIERRES --- */}
+      {vistaDespacho === 'historial_cierres' && (
+        <div className="animate-in fade-in space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
+             <div>
+               <h3 className="font-black text-slate-700 dark:text-slate-200 text-lg flex items-center gap-2"><FileSpreadsheet className="text-emerald-600"/> Reportes Guardados</h3>
+               <p className="text-sm text-slate-500">Consulta o descarga cierres anteriores.</p>
+             </div>
+             <div className="flex items-center gap-3 mt-4 sm:mt-0 w-full sm:w-auto">
+               <CalendarDays className="text-slate-400 shrink-0"/>
+               <input 
+                 type="date" 
+                 value={filtroFechaCierre} 
+                 onChange={e => setFiltroFechaCierre(e.target.value)}
+                 className="p-3 w-full rounded-xl border-2 border-slate-200 dark:border-slate-700 dark:bg-slate-800 font-bold outline-none focus:border-sky-500"
+               />
+               {filtroFechaCierre && <button onClick={()=>setFiltroFechaCierre('')} className="text-xs font-bold text-red-500 hover:text-red-700 underline">Limpiar</button>}
+             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-             {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
-                const key = `${p.nombre}|${pres}`;
-                const disp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key]||0);
-                if (disp === 0) return null; 
-                return (
-                  <div key={key} onClick={()=>toggleCheck(key)} className={`p-4 rounded-xl border-2 cursor-pointer transition-colors flex items-center justify-between ${inventarioChecked[key] ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800' : 'bg-white border-slate-100 dark:bg-slate-800 dark:border-slate-700 hover:border-sky-300'}`}>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {cierresFiltrados.length === 0 ? (
+               <div className="col-span-full py-10 text-center text-slate-400 font-bold italic border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl">
+                 No se encontraron cierres de inventario en la fecha seleccionada.
+               </div>
+            ) : (
+               cierresFiltrados.map(cierre => (
+                 <div key={cierre.id} className="bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
                     <div>
-                      <div className={`font-bold text-sm ${inventarioChecked[key] ? 'text-emerald-800 dark:text-emerald-400 line-through opacity-70' : 'text-slate-800 dark:text-slate-100'}`}>{p.nombre}</div>
-                      <div className={`text-xs font-semibold mt-1 ${inventarioChecked[key] ? 'text-emerald-600 dark:text-emerald-500 opacity-70' : 'text-slate-500'}`}>{pres}</div>
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-400 px-3 py-1 rounded-lg font-black text-sm tracking-widest">{cierre.fecha}</div>
+                        <div className="text-[10px] text-slate-400 font-bold uppercase text-right">Por: {cierre.creadoPor}</div>
+                      </div>
+                      
+                      <div className="space-y-2 mb-6">
+                        <div className="flex justify-between text-sm">
+                          <span className="font-medium text-slate-500">Items Auditados:</span>
+                          <span className="font-black text-slate-700 dark:text-slate-200">{cierre.totalItemsAuditados}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="font-medium text-slate-500">Estado de la Auditoría:</span>
+                          {cierre.anomaliasDetectadas === 0 
+                            ? <span className="font-black text-emerald-600 flex items-center gap-1"><CheckCircle size={14}/> Perfecto</span>
+                            : <span className="font-black text-red-500 flex items-center gap-1"><AlertTriangle size={14}/> {cierre.anomaliasDetectadas} Diferencias</span>
+                          }
+                        </div>
+                      </div>
                     </div>
-                    <div className={`text-2xl font-black ${inventarioChecked[key] ? 'text-emerald-600 dark:text-emerald-500 opacity-70' : 'text-sky-600 dark:text-sky-400'}`}>
-                      {disp}
-                    </div>
-                  </div>
-                )
-             })))}
+                    
+                    <button onClick={() => generarCSV(cierre)} className="w-full py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors">
+                       <Download size={18}/> Descargar CSV
+                    </button>
+                 </div>
+               ))
+            )}
           </div>
         </div>
-      ) : (
+      )}
+
+      {/* --- VISTA NORMAL DE LOGÍSTICA (PENDIENTES/HISTORIAL) --- */}
+      {['pendientes', 'historial'].includes(vistaDespacho) && (
         <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
           <table className="w-full text-left border-collapse min-w-[800px] text-sm">
             <thead>
@@ -123,12 +372,17 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
               </tr>
             </thead>
             <tbody>
-              {pedidosAMostrar.length === 0 ? <tr><td colSpan="3" className="p-10 text-center text-slate-400 italic font-bold">No hay envíos pendientes en esta vista.</td></tr> : pedidosAMostrar.map(p => (
+              {pedidosAMostrar.length === 0 ? <tr><td colSpan="3" className="p-10 text-center text-slate-400 italic font-bold">No hay envíos en esta vista.</td></tr> : pedidosAMostrar.map(p => {
+                
+                // Leemos los datos desde el estado local (si está tipeando) o desde Firebase (si ya lo guardó)
+                const valorGuia = guiasInput[p.id]?.guia !== undefined ? guiasInput[p.id].guia : (p.guia || '');
+                const valorLinkGuia = guiasInput[p.id]?.link !== undefined ? guiasInput[p.id].link : (p.linkGuia || '');
+                const valorLinkFoto = guiasInput[p.id]?.fotoProductos !== undefined ? guiasInput[p.id].fotoProductos : (p.linkFotoProductos || '');
+
+                return (
                 <tr key={p.id} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                   <td className="p-4 align-top">
-                    <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">
-                       {p.clienteNombre}
-                    </div>
+                    <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">{p.clienteNombre}</div>
                     <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-2">{p.courier}</div>
                     <div className="text-xs font-semibold text-slate-500 mt-2">Tel: {p.clienteTelefono}</div>
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mt-3">Sale: {p.fechaDespacho}</div>
@@ -136,7 +390,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                   <td className="p-4 align-top">
                     {p.esMercadoLibre && vistaDespacho === 'pendientes' && (
                       <div className="mb-3 bg-yellow-400 text-slate-900 p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider animate-pulse">
-                        <AlertTriangle size={18} className="text-slate-900 shrink-0" /> ¡MERCADOLIBRE! IMPRIMIR GUÍA DE ML
+                        <AlertTriangle size={18} className="text-slate-900 shrink-0" /> ¡MERCADOLIBRE! IMPRIMIR GUÍA
                       </div>
                     )}
                     <div className="font-medium bg-[#f0f4f8] dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-3 whitespace-pre-wrap shadow-sm text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
@@ -151,36 +405,40 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                           {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors"><Camera size={16}/> Ver Foto del Paquete</a>}
                         </div>
                         <div className="text-xs text-emerald-600 dark:text-emerald-400 font-black mb-3 uppercase tracking-widest flex items-center gap-1"><CheckCircle size={14}/> Despachado OK</div>
-                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors">Corregir Información de Envío</button>
+                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors">Corregir Información</button>
                       </div>
                     ) : (
                       <div className="space-y-4 bg-white dark:bg-slate-800 p-5 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm">
-                        <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={guiasInput[p.id]?.guia || ''} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                        
+                        <div className="flex gap-2">
+                           <input type="text" placeholder="Número de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                           <button onClick={() => guardarNGuiaParcial(p)} className="p-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-300 rounded-xl transition-colors" title="Guardar N° Guía sin archivar"><Save size={20}/></button>
+                        </div>
                         
                         <div className="flex gap-2 relative">
-                          <input type="text" placeholder="URL Recibo Guía" className="w-full text-xs p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl pr-12 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white font-semibold transition-colors" value={guiasInput[p.id]?.link || ''} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
-                          <label className="absolute right-1.5 top-1.5 p-2 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-lg cursor-pointer transition-colors shadow-sm" title="Subir Foto de Galería">
-                            {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+                          <input type="text" placeholder="URL Recibo Guía" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkGuia} onChange={(e) => handleGuiaChange(p.id, 'link', e.target.value)} />
+                          <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkGuia ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto de Galería">
+                            {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkGuia ? <CheckCircle size={16}/> : <UploadCloud size={16} />)}
                             <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'link')} />
                           </label>
                         </div>
 
                         <div className="flex gap-2 relative">
-                          <input type="text" placeholder="URL Foto Empaque" className="w-full text-xs p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl pr-12 outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white font-semibold transition-colors" value={guiasInput[p.id]?.fotoProductos || ''} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
-                          <label className="absolute right-1.5 top-1.5 p-2 bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white rounded-lg cursor-pointer transition-colors shadow-sm" title="Subir Foto de Galería">
-                            {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+                          <input type="text" placeholder="URL Foto Empaque" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkFoto ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkFoto} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
+                          <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkFoto ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto de Galería">
+                            {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkFoto ? <CheckCircle size={16}/> : <Camera size={16} />)}
                             <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} />
                           </label>
                         </div>
 
-                        <button onClick={() => guardarGuia(p)} className="w-full bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold py-3.5 rounded-xl mt-2 flex items-center justify-center gap-2 transition-all shadow-md hover:-translate-y-0.5">
-                          <Truck size={18}/> Confirmar y Archivar
+                        <button onClick={() => guardarGuia(p)} className="w-full bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white text-sm font-bold py-3.5 rounded-xl mt-2 flex items-center justify-center gap-2 transition-all shadow-md hover:-translate-y-0.5">
+                          <Truck size={18}/> Archivar Despacho
                         </button>
                       </div>
                     )}
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>

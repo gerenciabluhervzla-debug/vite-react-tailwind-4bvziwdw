@@ -10,27 +10,27 @@ export default function VistaImpresion({ pedidos }) {
   }
 
   return (
-    <div className="hidden print:block w-full bg-white text-black p-4">
-      <h1 className="text-3xl font-black text-center mb-8 tracking-tight border-b-4 border-black pb-4">
-        HOJA DE DESPACHO BLUHER <br/><span className="text-xl font-medium">FECHA DE CORTE: {new Date().toLocaleDateString('es-VE')}</span>
+    <div className="hidden print:block w-full bg-white text-black p-2">
+      <h1 className="text-xl font-black text-center mb-4 tracking-tight border-b-2 border-black pb-2">
+        HOJA DE DESPACHO BLUHER - <span className="text-base font-medium">FECHA DE CORTE: {new Date().toLocaleDateString('es-VE')}</span>
       </h1>
       
-      <div className="grid grid-cols-2 gap-6 print:overflow-visible">
+      <div className="grid grid-cols-2 gap-4 print:overflow-visible">
         {pedidos.map((p) => (
-          <div key={p.id} className="border-4 border-slate-900 p-6 rounded-2xl break-inside-avoid shadow-sm relative mb-6 page-break-inside-avoid">
-            {p.esMercadoLibre && <div className="absolute top-0 right-0 bg-black text-white font-black px-4 py-1 rounded-bl-xl text-sm uppercase tracking-widest border-b-2 border-l-2 border-slate-900">MERCADOLIBRE</div>}
-            <div className="flex justify-between border-b-2 border-slate-300 pb-3 mb-4 mt-2">
-              <span className="font-black text-2xl uppercase tracking-widest">{p.courier || 'ENVÍO'}</span>
-              <span className="text-sm font-bold bg-slate-100 px-3 py-1 rounded-lg border border-slate-300">Salida: {p.fechaDespacho}</span>
+          <div key={p.id} className="border-2 border-slate-900 p-3 rounded-xl break-inside-avoid shadow-none relative mb-2 page-break-inside-avoid">
+            {p.esMercadoLibre && <div className="absolute top-0 right-0 bg-black text-white font-bold px-2 py-0.5 rounded-bl-lg text-[10px] uppercase tracking-widest">MERCADOLIBRE</div>}
+            <div className="flex justify-between border-b border-slate-300 pb-2 mb-2 mt-1">
+              <span className="font-black text-lg uppercase tracking-widest">{p.courier || 'ENVÍO'}</span>
+              <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-300">Salida: {p.fechaDespacho}</span>
             </div>
-            <div className="space-y-2 text-base">
-              <p><span className="font-black text-slate-600">DESTINATARIO:</span> <span className="font-bold text-xl ml-2">{p.clienteNombre?.toUpperCase()}</span></p>
-              <p><span className="font-black text-slate-600">CI / RIF:</span> <span className="font-bold ml-2">{p.clienteCedula}</span></p>
-              <p><span className="font-black text-slate-600">TLF:</span> <span className="font-bold ml-2">{p.clienteTelefono}</span></p>
-              <div className="mt-4"><span className="font-black text-slate-600 block mb-1">DIRECCIÓN:</span></div>
-              <p className="pl-4 border-l-4 border-slate-300 leading-relaxed font-bold bg-slate-50 p-2 rounded-r-lg">{p.direccion}</p>
-              <div className="mt-4 border-t-2 border-dashed border-slate-300 pt-4"><span className="font-black text-slate-600 block mb-2">PRODUCTOS:</span> 
-                 <div className="font-bold whitespace-pre-wrap leading-relaxed">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
+            <div className="space-y-1 text-xs">
+              <p><span className="font-bold text-slate-600">DESTINATARIO:</span> <span className="font-black text-sm ml-1">{p.clienteNombre?.toUpperCase()}</span></p>
+              <p><span className="font-bold text-slate-600">C.I / RIF:</span> <span className="font-bold ml-1">{p.clienteCedula}</span></p>
+              <p><span className="font-bold text-slate-600">TELÉFONO:</span> <span className="font-bold ml-1">{p.clienteTelefono}</span></p>
+              <div className="mt-2"><span className="font-bold text-slate-600 block mb-0.5">DIRECCIÓN DE ENTREGA:</span></div>
+              <p className="pl-2 border-l-2 border-slate-300 leading-tight font-bold bg-slate-50 p-1 rounded-r">{p.direccion}</p>
+              <div className="mt-2 border-t border-dashed border-slate-300 pt-2"><span className="font-bold text-slate-600 block mb-1">CONTENIDO DEL PAQUETE:</span> 
+                 <div className="font-bold whitespace-pre-wrap leading-tight text-[11px]">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
               </div>
             </div>
           </div>
