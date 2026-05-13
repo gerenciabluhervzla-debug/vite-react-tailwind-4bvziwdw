@@ -15,7 +15,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const actualizarTasa = async () => {
     dialogs.prompt("Ingresa la nueva tasa del día en Bolívares (Bs/$):", async (nuevaTasa) => {
       const tasaNum = parseFloat(nuevaTasa);
-      if (isNaN(tasaNum) || tasaNum <= 0) return dialogs.alert("Ingresa un número válido.");
+      if (isNaN(tasaNum) || tasaNum <= 0) {
+        setTimeout(() => dialogs.alert("Ingresa un número válido."), 150);
+        return;
+      }
       
       try {
         const hoy = new Date().toLocaleDateString('es-VE');
@@ -29,8 +32,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         }, { merge: true });
         
         loggear('ACTUALIZACION_TASA', `Se cambió la tasa del día a: ${tasaNum} Bs/$`);
-        dialogs.alert("Tasa actualizada correctamente para todo el sistema.");
-      } catch(e) { dialogs.alert("Error actualizando tasa."); }
+        setTimeout(() => dialogs.alert("Tasa actualizada correctamente para todo el sistema.", "Éxito"), 150);
+      } catch(e) { 
+        setTimeout(() => dialogs.alert("Error actualizando tasa.", "Error"), 150); 
+      }
     }, "Ajustar Tasa del Día");
   };
 
@@ -49,7 +54,13 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         await setDoc(stockRef, currentStock);
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Validado', sobranteUsd });
         loggear('PAGO_VALIDADO', `Aprobación y descuento de stock: ${pedido.clienteNombre} ${sobranteUsd > 0 ? `(Sobrante registrado: $${sobranteUsd})` : ''}`);
-      } catch(e) { console.error(e); dialogs.alert("Ocurrió un error al validar el pago.", "Error"); }
+        
+        // Retraso para evitar superposición con el prompt
+        setTimeout(() => dialogs.alert("El pago fue aprobado y el inventario descontado exitosamente.", "Pago Validado"), 150);
+      } catch(e) { 
+        console.error(e); 
+        setTimeout(() => dialogs.alert("Ocurrió un error al validar el pago.", "Error"), 150); 
+      }
     }, "Validar Pago");
   };
 
@@ -57,13 +68,18 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     dialogs.prompt(`Escribe el motivo de devolución a Ventas para el pedido de ${pedido.clienteNombre}:\n(Ej: Faltan dinero en la transferencia, Producto sin stock)`, async (motivo) => {
       if (!motivo) return;
       
-      dialogs.prompt("¿Cuánto dinero FALTÓ en el pago?\n\nIngresa el monto faltante en dólares ($). Deja 0 si lo devuelves por otra razón que no sea dinero.", async (valFaltante) => {
-        let faltanteUsd = parseFloat(valFaltante) || 0;
-        try {
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Rechazado', motivoRechazo: motivo, faltanteUsd });
-          loggear('PAGO_RECHAZADO', `Devolución: ${pedido.clienteNombre} - ${motivo} (Faltante: $${faltanteUsd})`);
-        } catch(e) { console.error(e); }
-      }, "Monto Faltante");
+      // Envolvemos el segundo prompt en un setTimeout para evitar el colapso del estado
+      setTimeout(() => {
+        dialogs.prompt("¿Cuánto dinero FALTÓ en el pago?\n\nIngresa el monto faltante en dólares ($). Deja 0 si lo devuelves por otra razón que no sea dinero.", async (valFaltante) => {
+          let faltanteUsd = parseFloat(valFaltante) || 0;
+          try {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Rechazado', motivoRechazo: motivo, faltanteUsd });
+            loggear('PAGO_RECHAZADO', `Devolución: ${pedido.clienteNombre} - ${motivo} (Faltante: $${faltanteUsd})`);
+            
+            setTimeout(() => dialogs.alert("El pedido ha sido devuelto a ventas para su corrección.", "Pedido Devuelto"), 150);
+          } catch(e) { console.error(e); }
+        }, "Monto Faltante");
+      }, 150);
 
     }, "Devolver Pedido");
   };

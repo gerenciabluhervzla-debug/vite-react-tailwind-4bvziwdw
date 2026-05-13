@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud } from 'lucide-react';
 import { collection, addDoc } from 'firebase/firestore';
 import { BRAND_LOGO } from '../config/constants';
-import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
+import { URL_GOOGLE_SCRIPT } from '../config/firebase'; // Asegúrate de exportar esto en firebase.js
 import { Input, InputDark } from '../components/ui';
 
 export default function PublicPortal({ catalogo, stock, config, db, appId, dialogs, onBack, darkMode, setDarkMode }) {
@@ -11,12 +11,10 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   const [enviando, setEnviando] = useState(false);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
   
-  // 1, 2, 3, 4: Estado del formulario actualizado con Cédula y Agencia
+  // Estado del formulario de checkout
   const [form, setForm] = useState({
     nombre: '',
-    cedula: '',
     telefono: '',
-    agencia: 'ZOOM',
     direccion: '',
     referencia: '',
     comprobanteUrl: ''
@@ -30,6 +28,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       const actual = prev[key] || 0;
       const nuevo = Math.max(0, actual + delta);
       
+      // Validar contra stock de envíos
       const maxDisp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
       if (delta > 0 && nuevo > maxDisp) {
         dialogs.alert(`Solo tenemos ${maxDisp} unidades disponibles de este producto.`, "Stock Límite");
@@ -95,43 +94,36 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   const confirmarPedido = async (e) => {
     e.preventDefault();
     if (totalItems === 0) return dialogs.alert("Tu carrito está vacío.");
-    
-    // 5. Validación Obligatoria de todos los campos, incluyendo pago
-    if (!form.nombre || !form.cedula || !form.telefono || !form.agencia || !form.direccion) {
-      return dialogs.alert("Por favor, llena todos los datos obligatorios de envío.");
-    }
-    if (!form.referencia || !form.comprobanteUrl) {
-      return dialogs.alert("La referencia bancaria y la captura del comprobante son obligatorias para procesar el pedido.");
-    }
+    if (!form.nombre || !form.telefono || !form.direccion) return dialogs.alert("Llena los datos obligatorios.");
 
     setEnviando(true);
     try {
+      // Formatear productos para texto legible
       const lineas = [];
       Object.entries(carrito).forEach(([key, qty]) => {
         lineas.push(`- ${qty}x ${key.replace('|', ' ')}`);
       });
       const productosString = lineas.join('\n');
 
-      // 6. Formateo exacto de las variables para que hagan "Match" en PanelVentas
       const nuevoPedido = {
         clienteNombre: form.nombre,
-        clienteCedula: form.cedula,
         clienteTelefono: form.telefono,
         direccion: form.direccion,
-        courier: form.agencia,
+        clienteCedula: 'WEB', // Dato no pedido en MVP público, pero requerido por tu BD
+        courier: 'Por Definir',
         esMercadoLibre: false,
         esRegalo: false,
         asesora: 'Portal Web',
-        moneda: 'VES', // Siempre será Bolívares por la transferencia/pago móvil
+        moneda: form.referencia ? 'VES' : 'USD',
         monto: subtotalUsd,
         montoUsd: subtotalUsd,
         montoVes: totalVes,
         tasaAplicada: tasa,
-        referencia: form.referencia,
-        linkComprobantePago: form.comprobanteUrl,
+        referencia: form.referencia || 'Pendiente',
+        linkComprobantePago: form.comprobanteUrl || '',
         productos: productosString,
         carritoObj: carrito,
-        status: 'Por Pagar / Cotización',
+        status: 'Por Pagar / Cotización', // Cae directo en pestaña Web de Ventas
         esPublico: true,
         auditado: false,
         fechaCreacion: Date.now()
@@ -139,10 +131,10 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), nuevoPedido);
       
-      dialogs.alert("¡Tu pedido y pago han sido enviados con éxito! Nuestro equipo lo procesará en breve.", "¡Gracias por tu compra!");
+      dialogs.alert("¡Tu pedido ha sido enviado con éxito! Nuestro equipo lo validará pronto.", "¡Gracias por tu compra!");
       setCarrito({});
       setIsCartOpen(false);
-      setForm({ nombre: '', cedula: '', telefono: '', agencia: 'ZOOM', direccion: '', referencia: '', comprobanteUrl: '' });
+      setForm({ nombre: '', telefono: '', direccion: '', referencia: '', comprobanteUrl: '' });
       
     } catch (error) {
       console.error(error);
@@ -242,6 +234,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {/* Lista de Items */}
                   <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
                     <h3 className="text-xs font-black uppercase text-slate-400 mb-3 border-b dark:border-slate-700 pb-2">Resumen de Productos</h3>
                     {Object.entries(carrito).map(([key, qty]) => (
@@ -254,59 +247,34 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                     ))}
                   </div>
 
-                  {/* Formulario de Cliente Actualizado */}
+                  {/* Formulario de Cliente */}
                   <form id="checkout-form" onSubmit={confirmarPedido} className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 space-y-4">
                      <h3 className="text-xs font-black uppercase text-slate-400 mb-2 border-b dark:border-slate-700 pb-2">Tus Datos de Envío</h3>
                      {darkMode ? (
                        <>
                          <InputDark label="Nombre y Apellido" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} required/>
-                         <InputDark label="Cédula o RIF" value={form.cedula} onChange={e=>setForm({...form, cedula: e.target.value})} required placeholder="Ej: V-12345678"/>
-                         <InputDark label="Teléfono" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
-                         
+                         <InputDark label="Teléfono (WhatsApp)" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
                          <div className="flex flex-col">
-                           <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2">Agencia de Envío</label>
-                           <select value={form.agencia} onChange={e=>setForm({...form, agencia: e.target.value})} required className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all text-sm">
-                             <option value="ZOOM">ZOOM</option>
-                             <option value="MRW">MRW</option>
-                             <option value="Tealca">Tealca</option>
-                             <option value="Domesa">Domesa</option>
-                           </select>
-                         </div>
-
-                         <div className="flex flex-col">
-                           <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2">Dirección Agencia</label>
-                           <textarea value={form.direccion} onChange={e=>setForm({...form, direccion: e.target.value})} required rows="2" placeholder="Estado, Ciudad y nombre de la agencia" className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all text-sm"></textarea>
+                           <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2">Dirección de Entrega</label>
+                           <textarea value={form.direccion} onChange={e=>setForm({...form, direccion: e.target.value})} required rows="2" className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all text-sm"></textarea>
                          </div>
                        </>
                      ) : (
                        <>
                          <Input label="Nombre y Apellido" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} required/>
-                         <Input label="Cédula o RIF" value={form.cedula} onChange={e=>setForm({...form, cedula: e.target.value})} required placeholder="Ej: V-12345678"/>
-                         <Input label="Teléfono" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
-                         
+                         <Input label="Teléfono (WhatsApp)" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
                          <div className="flex flex-col">
-                           <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Agencia de Envío</label>
-                           <select value={form.agencia} onChange={e=>setForm({...form, agencia: e.target.value})} required className="p-3.5 border-2 border-slate-100 rounded-2xl focus:border-sky-500 outline-none font-bold transition-all text-sm bg-slate-50 text-slate-700">
-                             <option value="ZOOM">ZOOM</option>
-                             <option value="MRW">MRW</option>
-                             <option value="Tealca">Tealca</option>
-                             <option value="Domesa">Domesa</option>
-                           </select>
-                         </div>
-
-                         <div className="flex flex-col">
-                           <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Dirección Agencia</label>
-                           <textarea value={form.direccion} onChange={e=>setForm({...form, direccion: e.target.value})} required rows="2" placeholder="Estado, Ciudad y nombre de la agencia" className="p-3.5 border-2 border-slate-100 rounded-2xl focus:border-sky-500 outline-none font-bold transition-all text-sm bg-slate-50 text-slate-700"></textarea>
+                           <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Dirección de Entrega</label>
+                           <textarea value={form.direccion} onChange={e=>setForm({...form, direccion: e.target.value})} required rows="2" className="p-3.5 border-2 border-slate-100 rounded-2xl focus:border-sky-500 outline-none font-bold transition-all text-sm bg-slate-50"></textarea>
                          </div>
                        </>
                      )}
 
-                     {/* 5. Referencia y captura obligatorias */}
-                     <h3 className="text-xs font-black uppercase text-slate-400 mt-6 mb-2 border-b dark:border-slate-700 pb-2">Información de Pago (Obligatorio)</h3>
-                     <p className="text-[10px] text-slate-500 mb-3">Adjunta la referencia y captura del pago móvil o transferencia para procesar tu orden.</p>
+                     <h3 className="text-xs font-black uppercase text-slate-400 mt-6 mb-2 border-b dark:border-slate-700 pb-2">Información de Pago (Opcional)</h3>
+                     <p className="text-[10px] text-slate-500 mb-3">Si ya realizaste el pago móvil o transferencia, adjunta la referencia.</p>
                      
-                     {darkMode ? <InputDark label="Referencia Bancaria" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} required placeholder="Ej: 1234 Banesco"/> 
-                               : <Input label="Referencia Bancaria" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} required placeholder="Ej: 1234 Banesco"/>}
+                     {darkMode ? <InputDark label="Referencia o Banco" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} placeholder="Ej: 1234 Banesco"/> 
+                               : <Input label="Referencia o Banco" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} placeholder="Ej: 1234 Banesco"/>}
                      
                      <div className="mt-2">
                         <label className={`flex items-center justify-center gap-2 w-full p-4 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-sm ${form.comprobanteUrl ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-slate-300 dark:border-slate-600 text-slate-500 hover:border-sky-500 hover:text-sky-600'}`}>
