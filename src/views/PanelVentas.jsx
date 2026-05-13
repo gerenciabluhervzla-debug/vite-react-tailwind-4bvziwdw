@@ -342,7 +342,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                  <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Es envío de MercadoLibre</label>
                </div>
                
-               {/* --- NUEVO CAMPO OCULTO PARA GUÍA ML --- */}
                {formData.esMercadoLibre && (
                  <div className="animate-in fade-in slide-in-from-top-2 ml-8 mb-2">
                     <label className={`flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-xs ${formData.linkGuiaML ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-sky-300 dark:border-sky-700 text-sky-600 hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/20'}`}>
@@ -481,12 +480,15 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
            {enEspera.length === 0 ? <p className="text-sm text-amber-600 dark:text-amber-400">No hay pedidos en lista de espera.</p> : (
              <div className="space-y-4">
                {enEspera.map(p => (
-                 <div key={p.id} className="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-amber-100 dark:border-slate-700 flex justify-between items-center transition-colors">
-                   <div>
+                 <div key={p.id} className="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-amber-100 dark:border-slate-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-colors">
+                   <div className="flex-1 w-full">
                      <div className="font-bold text-lg">{p.clienteNombre}</div>
-                     <div className="text-xs opacity-60">Desde {new Date(p.fechaCreacion).toLocaleDateString()}</div>
+                     <div className="text-xs opacity-60 mb-2">Desde {new Date(p.fechaCreacion).toLocaleDateString()}</div>
+                     <div className="text-[12px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300 font-medium">
+                       {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
+                     </div>
                    </div>
-                   <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-sky-600 text-white px-6 py-2 rounded-xl font-black text-xs shadow hover:bg-sky-700 transition-colors">Retomar Pedido</button>
+                   <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-sky-600 text-white px-6 py-3 rounded-xl font-black text-xs shadow hover:bg-sky-700 transition-colors shrink-0 w-full sm:w-auto">Retomar Pedido</button>
                  </div>
                ))}
              </div>

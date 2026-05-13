@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays } from 'lucide-react';
+import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, MessageSquare } from 'lucide-react';
 import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image'; 
@@ -81,7 +81,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     const inputData = guiasInput[pedido.id] || {};
     const guiaFinal = inputData.guia !== undefined ? inputData.guia : pedido.guia;
     
-    // Si es ML, la URL del recibo siempre será la guía de ML. Si no, usamos el input.
     const linkFinal = (pedido.esMercadoLibre && pedido.linkGuiaML) ? pedido.linkGuiaML : (inputData.link !== undefined ? inputData.link : pedido.linkGuia);
     const fotoFinal = inputData.fotoProductos !== undefined ? inputData.fotoProductos : pedido.linkFotoProductos;
 
@@ -109,7 +108,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     }, "Autorizar Excepción");
   };
 
-  // --- LÓGICA BOTÓN MERCADOLIBRE ---
   const marcarGuiaMLImpresa = async (pedido) => {
     if (pedido.linkGuiaML) {
       window.open(pedido.linkGuiaML, '_blank');
@@ -241,11 +239,9 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
               <div className="p-10 text-center text-slate-400 italic font-bold">No hay envíos en esta vista.</div>
             ) : pedidosAMostrar.map(p => {
               
-              // Validación cruzada para inputs
               const valorGuia = guiasInput[p.id]?.guia !== undefined ? guiasInput[p.id].guia : (p.guia || '');
               const valorLinkFoto = guiasInput[p.id]?.fotoProductos !== undefined ? guiasInput[p.id].fotoProductos : (p.linkFotoProductos || '');
 
-              // Lógica de ML para input URL Recibo
               const isLinkML = p.esMercadoLibre && !!p.linkGuiaML;
               const valorLinkGuia = isLinkML ? p.linkGuiaML : (guiasInput[p.id]?.link !== undefined ? guiasInput[p.id].link : (p.linkGuia || ''));
 
@@ -275,7 +271,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
                   <div className="lg:col-span-5 flex flex-col justify-start mt-2 lg:mt-0">
                     
-                    {/* BOTÓN INTERACTIVO MERCADOLIBRE */}
                     {p.esMercadoLibre && vistaDespacho === 'pendientes' && (
                       <button 
                         onClick={() => marcarGuiaMLImpresa(p)}
@@ -308,9 +303,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                       </div>
                     ) : (
                       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm flex flex-col gap-3 w-full">
-                        
                         <input type="text" placeholder="N° de Guía Tracking" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
-                        
                         <div className="flex flex-col lg:flex-row gap-3">
                             <div className="flex-1 relative w-full">
                               <input type="text" placeholder="URL Recibo" readOnly={isLinkML} className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'} ${isLinkML ? 'opacity-70 cursor-not-allowed' : ''}`} value={valorLinkGuia} onChange={(e) => !isLinkML && handleGuiaChange(p.id, 'link', e.target.value)} />
@@ -347,7 +340,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {/* --- LAS OTRAS VISTAS DE AUDITORÍA Y CIERRES SE MANTIENEN IGUAL... --- */}
+      {/* VISTA: AUDITORÍA DE INVENTARIO FÍSICO */}
       {vistaDespacho === 'inventario' && (
         <div className="animate-in fade-in">
           {!conteoActivo ? (
@@ -431,6 +424,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
+      {/* VISTA: HISTORIAL DE CIERRES */}
       {vistaDespacho === 'historial_cierres' && (
         <div className="animate-in fade-in space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
@@ -477,6 +471,21 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                           }
                         </div>
                       </div>
+                      
+                      {/* MOSTRAR NOTAS DE AUDITORÍA SI EXISTEN */}
+                      {cierre.notasAuditoria && cierre.notasAuditoria.length > 0 && (
+                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
+                          <div className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-1.5 flex items-center gap-1">
+                            <MessageSquare size={12}/> Observaciones de Auditoría:
+                          </div>
+                          {cierre.notasAuditoria.map((n, i) => (
+                             <div key={i} className="text-xs text-amber-800 dark:text-amber-300 italic mb-1 last:mb-0">
+                                "{n.texto}" <span className="font-bold opacity-70">- {n.autor}</span>
+                             </div>
+                          ))}
+                        </div>
+                      )}
+
                     </div>
                     
                     <button onClick={() => generarCSV(cierre)} className="w-full py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors">
