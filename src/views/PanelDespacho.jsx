@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, FileOutput, MessageSquare } from 'lucide-react';
+import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, FileOutput, MessageSquare, ShieldCheck, Eye } from 'lucide-react';
 import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image'; 
@@ -7,6 +7,9 @@ import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs, perfil }) {
   const [vistaDespacho, setVistaDespacho] = useState('pendientes');
+
+  // --- PERMISOS ---
+  const esAuditor = [ROLES.AUDITORIA, ROLES.ADMIN].includes(perfil?.role);
 
   const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
   const pedidosDespachados = pedidos.filter(p => p.status === 'Despachado');
@@ -141,6 +144,32 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     setConteoFisico(prev => ({ ...prev, [key]: isNaN(num) ? 0 : num }));
   };
 
+  // --- FUNCIONES DE AUDITORÍA DE CIERRES ---
+  const auditarCierreRapido = async (cierre) => {
+    if(!esAuditor) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
+        auditado: true, auditadoPor: perfil?.nombre || 'Auditor', fechaAuditoria: Date.now() 
+      });
+      loggear('AUDITORIA_CIERRE_RAPIDA', `Cierre de inventario del ${cierre.fecha} validado.`);
+    } catch(e) { console.error(e); dialogs.alert("Error de conexión al validar el cierre."); }
+  };
+
+  const auditarCierreConNota = (cierre) => {
+    if(!esAuditor) return;
+    dialogs.prompt("Escribe una observación de auditoría para este cierre:", async (nota) => {
+       if(!nota) return;
+       try {
+          const notasExistentes = cierre.notasAuditoria || [];
+          const nuevasNotas = [...notasExistentes, { fecha: Date.now(), texto: nota, autor: perfil?.nombre || 'Auditor' }];
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
+             auditado: true, auditadoPor: perfil?.nombre || 'Auditor', notasAuditoria: nuevasNotas, fechaAuditoria: Date.now() 
+          });
+          loggear('AUDITORIA_CIERRE_NOTA', `Cierre de inventario del ${cierre.fecha} auditado con nota.`);
+       } catch(e) { console.error(e); }
+    }, "Añadir Nota de Auditoría");
+  };
+
   const generarCSV = (cierre) => {
     let csv = 'Categoria,Producto,Presentacion,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
     cierre.productos.forEach(p => {
@@ -169,15 +198,16 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
           body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 900px; margin: 0 auto; }
-          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0ea5e9; padding-bottom: 20px; margin-bottom: 30px; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0ea5e9; padding-bottom: 20px; margin-bottom: 20px; }
           .logo { height: 60px; object-fit: contain; }
           h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; }
-          .meta-info { margin-bottom: 30px; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between;}
+          .meta-info { margin-bottom: 20px; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between;}
           .meta-box p { margin: 5px 0; font-size: 14px; }
           .badge { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; text-transform: uppercase; }
           .badge-ok { background: #dcfce7; color: #166534; }
           .badge-warn { background: #fee2e2; color: #991b1b; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
+          .status-box { padding: 15px; border-radius: 8px; font-weight: 900; text-align: center; border: 1px solid currentColor; margin-bottom: 30px; font-size: 13px; letter-spacing: 1px; }
+          table { width: 100%; border-collapse: collapse; font-size: 13px; }
           th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 8px; text-align: left; }
           th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
           .ok { color: #166534; font-weight: bold; }
@@ -209,12 +239,16 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
            </div>
            <div class="meta-box" style="text-align: right;">
               <p><strong>Items Auditados:</strong> ${cierre.totalItemsAuditados}</p>
-              <p><strong>Estado:</strong> 
+              <p><strong>Anomalías:</strong> 
                  <span class="badge ${cierre.anomaliasDetectadas === 0 ? 'badge-ok' : 'badge-warn'}">
                     ${cierre.anomaliasDetectadas === 0 ? 'Sin Anomalías' : cierre.anomaliasDetectadas + ' Diferencias detectadas'}
                  </span>
               </p>
            </div>
+        </div>
+
+        <div class="status-box" style="background: ${cierre.auditado ? '#dcfce7' : '#fffbeb'}; color: ${cierre.auditado ? '#166534' : '#b45309'};">
+           ${cierre.auditado ? 'AUDITORÍA VALIDADA POR: ' + cierre.auditadoPor.toUpperCase() : 'CIERRE PENDIENTE DE AUDITORÍA OFICIAL'}
         </div>
 
         <table>
@@ -268,7 +302,8 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         creadoPor: perfil?.nombre || 'Despachador',
         totalItemsAuditados: productosCierre.length,
         anomaliasDetectadas: totalDiferencias,
-        productos: productosCierre
+        productos: productosCierre,
+        auditado: false
       };
 
       try {
@@ -547,7 +582,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
              <div>
                <h3 className="font-black text-slate-700 dark:text-slate-200 text-lg flex items-center gap-2"><FileSpreadsheet className="text-emerald-600"/> Reportes Guardados</h3>
-               <p className="text-sm text-slate-500">Consulta o descarga cierres anteriores.</p>
+               <p className="text-sm text-slate-500">Consulta, descarga o audita cierres de inventario.</p>
              </div>
              <div className="flex items-center gap-3 mt-4 sm:mt-0 w-full sm:w-auto">
                <CalendarDays className="text-slate-400 shrink-0"/>
@@ -568,7 +603,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                </div>
             ) : (
                cierresFiltrados.map(cierre => (
-                 <div key={cierre.id} className="bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
+                 <div key={cierre.id} className={`bg-white dark:bg-slate-800 border-2 p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between ${cierre.auditado ? 'border-emerald-200 dark:border-emerald-800/50' : 'border-slate-100 dark:border-slate-700'}`}>
                     <div>
                       <div className="flex justify-between items-start mb-4">
                         <div className="bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-400 px-3 py-1 rounded-lg font-black text-sm tracking-widest">{cierre.fecha}</div>
@@ -601,16 +636,32 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                           ))}
                         </div>
                       )}
-
                     </div>
                     
                     <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
-                       <button onClick={() => imprimirPDF(cierre)} className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-400 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
-                          <FileOutput size={16}/> Guardar como PDF
-                       </button>
-                       <button onClick={() => generarCSV(cierre)} className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
-                          <Download size={16}/> Exportar a CSV (Excel)
-                       </button>
+                       <div className="flex gap-2">
+                         <button onClick={() => imprimirPDF(cierre)} className="flex-1 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-400 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
+                            <FileOutput size={16}/> PDF
+                         </button>
+                         <button onClick={() => generarCSV(cierre)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
+                            <Download size={16}/> Excel
+                         </button>
+                       </div>
+
+                       {/* BOTONES DE AUDITORÍA */}
+                       {esAuditor && !cierre.auditado && (
+                          <div className="flex gap-2 mt-2">
+                             <button onClick={()=>auditarCierreRapido(cierre)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl flex items-center justify-center shadow-md transition-colors font-bold text-xs"><CheckCircle size={16} className="mr-1.5"/> Aprobar Rápido</button>
+                             <button onClick={()=>auditarCierreConNota(cierre)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 py-2.5 rounded-xl flex items-center justify-center transition-colors font-bold text-xs"><Eye size={16} className="mr-1.5"/> Con Nota</button>
+                          </div>
+                       )}
+
+                       {/* SELLO DE AUDITORÍA */}
+                       {cierre.auditado && (
+                          <div className="text-center font-black text-emerald-700 dark:text-emerald-400 uppercase text-[10px] tracking-widest mt-2 bg-emerald-50 dark:bg-emerald-900/20 py-2.5 rounded-lg border border-emerald-200 dark:border-emerald-800 flex items-center justify-center gap-1.5">
+                             <ShieldCheck size={14}/> Cierre Validado por {cierre.auditadoPor}
+                          </div>
+                       )}
                     </div>
                  </div>
                ))

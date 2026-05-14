@@ -19,10 +19,17 @@ export default function VistaImpresion({ pedidos }) {
         {pedidos.map((p) => (
           <div key={p.id} className="border-2 border-slate-900 p-3 rounded-xl break-inside-avoid shadow-none relative mb-2 page-break-inside-avoid">
             {p.esMercadoLibre && <div className="absolute top-0 right-0 bg-black text-white font-bold px-2 py-0.5 rounded-bl-lg text-[10px] uppercase tracking-widest">MERCADOLIBRE</div>}
-            <div className="flex justify-between border-b border-slate-300 pb-2 mb-2 mt-1">
-              <span className="font-black text-lg uppercase tracking-widest">{p.courier || 'ENVÍO'}</span>
+            
+            <div className="flex justify-between items-center border-b border-slate-300 pb-2 mb-2 mt-1">
+              <div className="flex items-center gap-2">
+                 <span className="font-black text-lg uppercase tracking-widest">{p.courier || 'ENVÍO'}</span>
+                 <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-white text-black border-black'}`}>
+                   {p.pagoEnvio === 'PAGADO' ? 'PAGADO' : 'COBRO EN DESTINO'}
+                 </span>
+              </div>
               <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-300">Salida: {p.fechaDespacho}</span>
             </div>
+
             <div className="space-y-1 text-xs">
               <p><span className="font-bold text-slate-600">DESTINATARIO:</span> <span className="font-black text-sm ml-1">{p.clienteNombre?.toUpperCase()}</span></p>
               <p><span className="font-bold text-slate-600">C.I / RIF:</span> <span className="font-bold ml-1">{p.clienteCedula}</span></p>

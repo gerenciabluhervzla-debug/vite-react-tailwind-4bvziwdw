@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp } from 'lucide-react';
-import { ROLES } from '../config/constants';
+import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput } from 'lucide-react';
+import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const [rangoRango, setRangoRango] = useState('hoy');
@@ -17,7 +17,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   }, [pedidos]);
 
   const pedidosFiltrados = useMemo(() => {
-    const now = new Date();
+    const now = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
     const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
@@ -28,13 +28,22 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       if (rangoRango === 'año') return p.fechaCreacion >= startOfYear;
       if (rangoRango === 'todo') return true;
       if (rangoRango === 'custom') {
-        const start = fechaInicio ? new Date(fechaInicio).getTime() : 0;
-        const end = fechaFin ? new Date(fechaFin).getTime() + 86399999 : Infinity;
+        const start = fechaInicio ? new Date(fechaInicio + 'T00:00:00').getTime() : 0;
+        const end = fechaFin ? new Date(fechaFin + 'T23:59:59').getTime() : Infinity;
         return p.fechaCreacion >= start && p.fechaCreacion <= end;
       }
       return true;
     });
   }, [validados, rangoRango, fechaInicio, fechaFin]);
+
+  // CÁLCULO ESPECÍFICO PARA EL PDF (ACUMULADO DEL MES EN CURSO)
+  const ventasMesUsdPDF = useMemo(() => {
+    const now = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    return validados
+      .filter(p => p.fechaCreacion >= startOfMonth)
+      .reduce((sum, p) => sum + (p.montoUsd || 0), 0);
+  }, [validados]);
 
   const metricas = useMemo(() => {
     let ventasUSD = 0;
@@ -123,6 +132,111 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       .slice(0, 10);
   }, [pedidosFiltrados, catalogo]);
 
+  // --- FUNCIÓN DE EXPORTACIÓN A PDF EXACTAMENTE COMO PEDISTE ---
+  const imprimirPDFVentas = () => {
+    const printWindow = window.open('', '_blank');
+    if(!printWindow) return alert("Por favor permite las ventanas emergentes (Pop-ups) para generar el PDF.");
+
+    let periodoEtiqueta = rangoRango.toUpperCase();
+    if(rangoRango === 'custom') periodoEtiqueta = `${fechaInicio} al ${fechaFin}`;
+
+    let html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Reporte de Ventas Bluher</title>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+          body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 900px; margin: 0 auto; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0ea5e9; padding-bottom: 20px; margin-bottom: 30px; }
+          .logo { height: 60px; object-fit: contain; }
+          h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; text-transform: uppercase; }
+          
+          .kpi-container { display: flex; gap: 20px; margin-bottom: 30px; }
+          .kpi-box { flex: 1; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; }
+          .kpi-box.main { background: #0f172a; color: white; border: none; }
+          .kpi-box h3 { margin: 0 0 10px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
+          .kpi-box.main h3 { color: #38bdf8; }
+          .kpi-box p { margin: 0; font-size: 24px; font-weight: 900; }
+          .kpi-box.main p { font-size: 32px; }
+          
+          h2 { font-size: 16px; font-weight: 900; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-top: 40px;}
+          table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
+          th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 8px; text-align: left; vertical-align: top; }
+          th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+          .products-list { color: #475569; line-height: 1.5; }
+          
+          @media print { body { padding: 0; } .no-print { display: none; } }
+        </style>
+      </head>
+      <body>
+        <div class="no-print" style="margin-bottom: 20px; background: #fffbeb; color: #b45309; padding: 15px; border-radius: 8px; border: 1px solid #fde68a; font-weight: bold; text-align: center;">
+           Elige "Guardar como PDF" (Save as PDF) en el menú de impresión que acaba de aparecer.
+        </div>
+
+        <div class="header">
+          <div>
+            <h1>Reporte de Ventas</h1>
+            <p style="color: #64748b; margin-top: 5px; font-size: 14px;">Periodo Seleccionado: ${periodoEtiqueta}</p>
+          </div>
+          <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
+        </div>
+
+        <div class="kpi-container">
+           <div class="kpi-box">
+              <h3>Ventas del Período (Bs)</h3>
+              <p>Bs. ${metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
+           </div>
+           <div class="kpi-box main">
+              <h3>Ventas del Período (USD)</h3>
+              <p>$${metricas.ventasUSD.toFixed(2)}</p>
+           </div>
+           <div class="kpi-box" style="border-color: #c084fc; background: #faf5ff;">
+              <h3 style="color: #9333ea;">Acumulado del Mes ($)</h3>
+              <p style="color: #7e22ce;">$${ventasMesUsdPDF.toFixed(2)}</p>
+           </div>
+        </div>
+
+        <h2>Detalle de Clientes</h2>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 25%;">Cliente</th>
+              <th style="width: 20%;">Ref. Bancaria</th>
+              <th style="width: 35%;">Productos Facturados</th>
+              <th style="text-align:right; width: 10%;">Bs</th>
+              <th style="text-align:right; width: 10%;">USD</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    pedidosFiltrados.forEach(p => {
+       const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
+       html += `<tr>
+         <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${new Date(p.fechaCreacion).toLocaleDateString('es-VE')}</span></td>
+         <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia || 'N/A'}</span></td>
+         <td class="products-list">${prodsFormat}</td>
+         <td style="text-align:right; font-weight:bold; color:#059669;">${(p.montoVes || 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+         <td style="text-align:right; font-weight:900; font-size:13px;">$${(p.montoUsd || 0).toFixed(2)}</td>
+       </tr>`;
+    });
+
+    if (pedidosFiltrados.length === 0) {
+      html += `<tr><td colspan="5" style="text-align:center; padding: 30px; font-style: italic; color: #94a3b8;">No se registraron ventas válidas en este periodo.</td></tr>`;
+    }
+
+    html += `</tbody></table>
+      <div style="margin-top: 50px; border-top: 1px dashed #cbd5e1; padding-top: 20px; color: #94a3b8; font-size: 11px; text-align: center;">
+         Documento generado automáticamente por el Sistema de Gestión Bluher el ${new Date().toLocaleString('es-VE')}
+      </div>
+    </body></html>`;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+    setTimeout(() => { printWindow.print(); }, 1000);
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in">
       <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 transition-colors">
@@ -131,12 +245,20 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           <p className="text-xs font-medium text-slate-500">Las métricas se recalcularán basadas en las fechas seleccionadas.</p>
         </div>
         
-        <div className="flex flex-wrap gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full xl:w-auto">
-          <button onClick={()=>setRangoRango('hoy')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'hoy' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Hoy</button>
-          <button onClick={()=>setRangoRango('mes')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'mes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Mes Actual</button>
-          <button onClick={()=>setRangoRango('año')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'año' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Este Año</button>
-          <button onClick={()=>setRangoRango('todo')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'todo' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Histórico Total</button>
-          <button onClick={()=>setRangoRango('custom')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'custom' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Personalizado</button>
+        <div className="flex flex-col md:flex-row flex-wrap gap-4 w-full xl:w-auto items-start md:items-center">
+          <div className="flex flex-wrap gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full md:w-auto">
+            <button onClick={()=>setRangoRango('hoy')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'hoy' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Hoy</button>
+            <button onClick={()=>setRangoRango('mes')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'mes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Mes Actual</button>
+            <button onClick={()=>setRangoRango('año')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'año' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Este Año</button>
+            <button onClick={()=>setRangoRango('todo')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'todo' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Histórico Total</button>
+            <button onClick={()=>setRangoRango('custom')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'custom' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Personalizado</button>
+          </div>
+          
+          {verDinero && (
+            <button onClick={imprimirPDFVentas} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 text-xs shadow-md transition-colors w-full md:w-auto">
+               <FileOutput size={16}/> Exportar PDF
+            </button>
+          )}
         </div>
 
         {rangoRango === 'custom' && (
@@ -220,7 +342,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
-<div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+      <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
            <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><Sparkles className="text-sky-600"/> Top 10 Productos Más Vendidos</h3>
            <span className="text-xs font-bold text-sky-600 bg-sky-50 dark:bg-sky-900/30 px-3 py-1 rounded-lg uppercase tracking-wider">En periodo seleccionado</span>

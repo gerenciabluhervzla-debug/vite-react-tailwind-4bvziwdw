@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, UploadCloud } from 'lucide-react';
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
-import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
+import { updateDoc, doc, addDoc, collection, deleteDoc } from 'firebase/firestore';
 import { WORKER_GEMINI_URL, URL_GOOGLE_SCRIPT } from '../config/firebase'; 
 import { compressImage } from '../utils/image';
 import { ROLES } from '../config/constants';
@@ -11,7 +11,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
   
-  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '', montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false, descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' };
+  // AÑADIDO: pagoEnvio por defecto a 'COD'
+  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', pagoEnvio: 'COD', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '', montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false, descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' };
   
   const [formData, setFormData] = useState(defaultForm);
   const [editId, setEditId] = useState(null); 
@@ -37,7 +38,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
   const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
 
-  // EFECTO QUE RECALCULA EL CARRITO AUTOMÁTICAMENTE
   useEffect(() => {
     if (!formData.carritoObj) return;
     let sub = 0;
@@ -50,7 +50,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     const dExtra = parseFloat(formData.descuentoPorcentaje) || 0;
     const final = subConCampaña * (1 - dExtra / 100);
     
-    // CORRECCIÓN QA: Forzar siempre a USD cuando se auto-calcula desde el catálogo
     setFormData(prev => ({ 
       ...prev, 
       montoPago: final.toFixed(2), 
@@ -79,9 +78,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     try {
       const llavesCatalogo = catalogo.flatMap(c => c.productos.flatMap(p => p.presentaciones.map(pres => `${p.nombre}|${pres}`))).join(', ');
       
-      // CORRECCIÓN QA: Instrucciones estrictas de formato de moneda
       const prompt = `Analiza este WhatsApp y extrae JSON: Nombre, Teléfono, Cédula, courier (ZOOM, MRW, Tealca, Domesa), Dirección, Productos, montoPago, Tipo de envío (si dice "MercadoLibre", esMercadoLibre=true), asesora. 
       La variable "moneda" DEBE ser estrictamente "USD" o "VES". Si habla de dólares o $ es "USD", si habla de bolívares o Bs es "VES".
+      La variable "pagoEnvio" DEBE ser "COD" (cobro en destino) o "PAGADO" (envío pagado). Por defecto usa "COD".
       productosCrudos: texto exacto.
       carrito: mapea cantidades a estas llaves: [${llavesCatalogo}].
       Texto: ${textoCrudo}`;
@@ -97,7 +96,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
               type: "OBJECT",
               properties: {
                 clienteNombre: { type: "STRING" }, clienteCedula: { type: "STRING" }, clienteTelefono: { type: "STRING" },
-                courier: { type: "STRING" }, direccion: { type: "STRING" }, montoPago: { type: "STRING" }, moneda: { type: "STRING" }, referencia: { type: "STRING" }, asesora: { type: "STRING" }, productosCrudos: { type: "STRING" }, tasa: { type: "STRING" }, esMercadoLibre: { type: "BOOLEAN" },
+                courier: { type: "STRING" }, pagoEnvio: { type: "STRING" }, direccion: { type: "STRING" }, montoPago: { type: "STRING" }, moneda: { type: "STRING" }, referencia: { type: "STRING" }, asesora: { type: "STRING" }, productosCrudos: { type: "STRING" }, tasa: { type: "STRING" }, esMercadoLibre: { type: "BOOLEAN" },
                 carrito: { type: "ARRAY", items: { type: "OBJECT", properties: { llave: { type: "STRING" }, cantidad: { type: "INTEGER" } } } }
               }
             }
@@ -118,7 +117,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
            if (lineas.length > 0) txtFormat = lineas.join('\n');
          }
 
-         // Sanitización de moneda por si la IA se equivoca
          let monedaSanitizada = result.moneda;
          if (typeof monedaSanitizada === 'string') {
             const m = monedaSanitizada.toUpperCase();
@@ -134,6 +132,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
            tasa: result.tasa || prev.tasa,
            moneda: Object.keys(nuevoCarritoObj).length > 0 ? 'USD' : monedaSanitizada,
            esMercadoLibre: result.esMercadoLibre || false,
+           pagoEnvio: result.pagoEnvio || 'COD',
            productos: txtFormat || prev.productos, 
            carritoObj: Object.keys(nuevoCarritoObj).length > 0 ? nuevoCarritoObj : prev.carritoObj 
          }));
@@ -141,9 +140,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     } catch(e) { console.error(e); dialogs.alert("Error comunicando con la IA. Ingresa manual.", "Error"); } finally { setAnalizando(false); }
   };
 
+  const eliminarDelCarrito = (itemKey) => {
+    setFormData(prev => {
+      const nuevoCarrito = { ...prev.carritoObj };
+      delete nuevoCarrito[itemKey];
+      let nuevoTexto = "";
+      Object.entries(nuevoCarrito).forEach(([key, qty]) => {
+         nuevoTexto += `- ${qty}x ${key.replace('|', ' ')}\n`;
+      });
+      return { ...prev, carritoObj: nuevoCarrito, productos: nuevoTexto.trim() };
+    });
+  };
+
   const cargarPedidoParaEditar = (pedido) => {
     setFormData({
-      clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, direccion: pedido.direccion,
+      clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, pagoEnvio: pedido.pagoEnvio || 'COD', direccion: pedido.direccion,
       productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD', 
       montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: ''
     });
@@ -382,8 +393,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                  <option value="" disabled>Seleccionar...</option> <option value="ZOOM">ZOOM</option> <option value="MRW">MRW</option> <option value="Tealca">Tealca</option> <option value="Domesa">Domesa</option>
                </select>
              </div>
+
+             <div className="flex flex-col">
+               <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Modalidad de Envío</label>
+               <select name="pagoEnvio" value={formData.pagoEnvio} onChange={(e)=>setFormData({...formData, pagoEnvio: e.target.value})} className="p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold cursor-pointer shadow-sm border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+                 <option value="COD">Cobro en Destino (COD)</option>
+                 <option value="PAGADO">Envío Pagado</option>
+               </select>
+             </div>
              
-             <div className="flex flex-col justify-center gap-3 mt-6">
+             <div className="md:col-span-2 flex flex-wrap items-center gap-6 mt-2 mb-2">
                <div className="flex items-center gap-3">
                  <input type="checkbox" id="ml-check" checked={formData.esMercadoLibre} onChange={(e) => setFormData({...formData, esMercadoLibre: e.target.checked})} className="w-5 h-5 accent-sky-600 cursor-pointer rounded" />
                  <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Es envío de MercadoLibre</label>
@@ -410,15 +429,25 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                <textarea name="direccion" value={formData.direccion} onChange={(e)=>setFormData({...formData, direccion: e.target.value})} required rows={2} className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm"></textarea>
              </div>
              
-             <div className="md:col-span-2 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl border border-slate-100 dark:border-slate-700">
+             <div className="md:col-span-2 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl border-2 border-slate-100 dark:border-slate-700">
                <div className="flex justify-between items-center mb-4">
-                 <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"><Package size={20} className="text-sky-600"/> Inventario a Despachar</label>
-                 <button type="button" onClick={() => setIsCatalogOpen(true)} className="text-sm font-bold text-sky-700 dark:text-sky-400 bg-sky-100/50 dark:bg-sky-900/30 hover:bg-sky-100 dark:hover:bg-sky-900 py-2.5 px-6 rounded-xl transition-colors flex items-center gap-2 shadow-sm"><Search size={16} /> Catálogo Visual</button>
+                  <label className="font-black text-slate-800 dark:text-white flex items-center gap-2 uppercase tracking-tighter text-sm"><Package className="text-sky-600"/> Carrito de la Orden</label>
+                  <button type="button" onClick={() => setIsCatalogOpen(true)} className="text-xs font-black bg-sky-600 text-white px-4 py-2 rounded-xl flex items-center gap-1 shadow-md"><Search size={14}/> Catálogo</button>
                </div>
-               {formData.productos ? (
-                 <div className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm font-medium leading-relaxed">{typeof formData.productos === 'string' ? formData.productos : JSON.stringify(formData.productos)}</div>
+
+               {formData.carritoObj && Object.keys(formData.carritoObj).length > 0 ? (
+                 <div className="space-y-2">
+                    {Object.entries(formData.carritoObj).map(([key, qty]) => (
+                      <div key={key} className="flex justify-between items-center bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                         <div className="text-sm font-bold dark:text-slate-200">
+                            <span className="text-sky-600 dark:text-sky-400 mr-2">{qty}x</span> {key.replace('|', ' ')}
+                         </div>
+                         <button type="button" onClick={() => eliminarDelCarrito(key)} className="text-red-400 hover:text-red-600"><XCircle size={18}/></button>
+                      </div>
+                    ))}
+                 </div>
                ) : (
-                 <div className="text-sm text-slate-400 italic font-bold text-center p-8 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl bg-white/50 dark:bg-slate-800/50">El carrito está vacío. Haz clic en "Catálogo Visual" para agregar productos.</div>
+                 <div className="text-center p-8 text-slate-400 font-bold border-2 border-dashed dark:border-slate-700 rounded-xl">El carrito está vacío. Haz clic en "Catálogo" para agregar productos.</div>
                )}
              </div>
 
@@ -433,7 +462,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                <div className="flex flex-col relative">
                   <InputDark disabled={formData.esRegalo} type="number" step="0.01" label="Monto Final a Pagar" value={formData.esRegalo ? '0' : formData.montoPago} onChange={(e)=>setFormData({...formData, montoPago: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 30.50" />
                   
-                  {/* CORRECCIÓN QA: Helper de conversión robusto basado en selección explícita */}
                   {!formData.esRegalo && formData.tasa && formData.montoPago && formData.moneda && (
                     <span className="text-xs text-sky-400 font-bold absolute -bottom-5 left-2">
                        {formData.moneda === 'USD' 
@@ -479,6 +507,15 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                      {p.clienteNombre}
                      {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
                   </div>
+                  
+                  {/* CORRECCIÓN QA: MOSTRAR COURIER Y SI ES PAGO/COD */}
+                  <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1.5 flex items-center gap-2">
+                     {p.courier} 
+                     <span className={`px-1.5 py-0.5 rounded text-[9px] border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/50 dark:text-orange-400'}`}>
+                        {p.pagoEnvio === 'PAGADO' ? 'PAGADO' : 'COD'}
+                     </span>
+                  </div>
+
                   <div className="text-xs font-semibold text-slate-400 mt-1">{new Date(p.fechaCreacion).toLocaleDateString()}</div>
                   <div className="mt-3 text-[12px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300 font-medium">
                      {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
@@ -596,7 +633,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
             ...prev, 
             productos: prev.productos ? `${prev.productos}\n${txt}` : txt, 
             carritoObj: { ...(prev.carritoObj || {}), ...obj },
-            moneda: 'USD' // Garantizar USD al usar catálogo manual
+            moneda: 'USD' 
           })); 
           setIsCatalogOpen(false);
         }}

@@ -245,7 +245,7 @@ export default function App() {
   } else {
     const r = userProfile?.role;
     const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
-    const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(r);
+    const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA].includes(r);
     const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO].includes(r);
     const showReportes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r);
     const showInventario = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r); 
