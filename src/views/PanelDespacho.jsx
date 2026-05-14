@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays } from 'lucide-react';
+import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, FileOutput } from 'lucide-react';
 import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image'; 
-import { ROLES } from '../config/constants';
+import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs, perfil }) {
   const [vistaDespacho, setVistaDespacho] = useState('pendientes');
@@ -65,27 +65,21 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const guardarAvance = async (pedido) => {
     const inputData = guiasInput[pedido.id] || {};
     const updateData = {};
-    
     if (inputData.guia !== undefined) updateData.guia = inputData.guia;
     if (inputData.link !== undefined) updateData.linkGuia = inputData.link;
     if (inputData.fotoProductos !== undefined) updateData.linkFotoProductos = inputData.fotoProductos;
 
     if (Object.keys(updateData).length === 0) return dialogs.alert("No has agregado nueva información para guardar.", "Sin Cambios");
-
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), updateData);
       loggear('AVANCE_DESPACHO', `Avance guardado para ${pedido.clienteNombre}`);
       dialogs.alert("Se ha guardado tu avance (Fotos o N° Guía).", "Progreso Guardado");
-    } catch (error) {
-      console.error(error);
-      dialogs.alert("Error al intentar guardar el avance.", "Error");
-    }
+    } catch (error) { console.error(error); dialogs.alert("Error al intentar guardar el avance.", "Error"); }
   };
 
   const guardarGuia = async (pedido) => {
     const inputData = guiasInput[pedido.id] || {};
     const guiaFinal = inputData.guia !== undefined ? inputData.guia : pedido.guia;
-    
     const linkFinal = (pedido.esMercadoLibre && pedido.linkGuiaML) ? pedido.linkGuiaML : (inputData.link !== undefined ? inputData.link : pedido.linkGuia);
     const fotoFinal = inputData.fotoProductos !== undefined ? inputData.fotoProductos : pedido.linkFotoProductos;
 
@@ -117,9 +111,8 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     if (pedido.linkGuiaML) {
       window.open(pedido.linkGuiaML, '_blank');
       if (!pedido.guiaMLImpresa) {
-         try {
-           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { guiaMLImpresa: true });
-         } catch(e) { console.error(e); }
+         try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { guiaMLImpresa: true }); } 
+         catch(e) { console.error(e); }
       }
     } else {
       dialogs.alert("El asesor de ventas no adjuntó la guía de MercadoLibre para este pedido.", "Guía Faltante");
@@ -158,6 +151,99 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     document.body.removeChild(link);
   };
 
+  // --- NUEVA FUNCIÓN: GENERAR Y GUARDAR COMO PDF ---
+  const imprimirPDF = (cierre) => {
+    const printWindow = window.open('', '_blank');
+    if(!printWindow) return dialogs.alert("Por favor permite las ventanas emergentes (Pop-ups) para generar el PDF.");
+    
+    let html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Reporte de Cierre - ${cierre.fecha}</title>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+          body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 900px; margin: 0 auto; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0ea5e9; padding-bottom: 20px; margin-bottom: 30px; }
+          .logo { height: 60px; object-fit: contain; }
+          h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; }
+          .meta-info { margin-bottom: 30px; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between;}
+          .meta-box p { margin: 5px 0; font-size: 14px; }
+          .badge { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; text-transform: uppercase; }
+          .badge-ok { background: #dcfce7; color: #166534; }
+          .badge-warn { background: #fee2e2; color: #991b1b; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
+          th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 8px; text-align: left; }
+          th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+          .ok { color: #166534; font-weight: bold; }
+          .faltante { color: #dc2626; font-weight: bold; }
+          .sobrante { color: #ea580c; font-weight: bold; }
+          @media print {
+            body { padding: 0; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="no-print" style="margin-bottom: 20px; background: #fffbeb; color: #b45309; padding: 15px; border-radius: 8px; border: 1px solid #fde68a; font-weight: bold; text-align: center;">
+           Para guardarlo en tu computadora, elige "Guardar como PDF" (Save as PDF) en el menú de impresión que acaba de aparecer.
+        </div>
+
+        <div class="header">
+          <div>
+            <h1>Reporte de Cierre de Inventario</h1>
+            <p style="color: #64748b; margin-top: 5px; font-size: 14px;">Departamento de Despacho & Logística</p>
+          </div>
+          <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
+        </div>
+        
+        <div class="meta-info">
+           <div class="meta-box">
+              <p><strong>Fecha del Cierre:</strong> ${cierre.fecha}</p>
+              <p><strong>Realizado por:</strong> ${cierre.creadoPor}</p>
+           </div>
+           <div class="meta-box" style="text-align: right;">
+              <p><strong>Items Auditados:</strong> ${cierre.totalItemsAuditados}</p>
+              <p><strong>Estado:</strong> 
+                 <span class="badge ${cierre.anomaliasDetectadas === 0 ? 'badge-ok' : 'badge-warn'}">
+                    ${cierre.anomaliasDetectadas === 0 ? 'Sin Anomalías' : cierre.anomaliasDetectadas + ' Diferencias detectadas'}
+                 </span>
+              </p>
+           </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr><th>Categoría</th><th>Producto</th><th>Sistema</th><th>Físico</th><th>Diferencia</th><th>Notas Relevantes</th></tr>
+          </thead>
+          <tbody>
+    `;
+
+    cierre.productos.forEach(p => {
+       const claseDif = p.diferencia === 0 ? 'ok' : (p.diferencia < 0 ? 'faltante' : 'sobrante');
+       const textDif = p.diferencia === 0 ? 'OK' : (p.diferencia > 0 ? '+'+p.diferencia : p.diferencia);
+       html += `<tr>
+         <td>${p.categoria}</td>
+         <td><strong>${p.nombre}</strong><br><span style="color:#64748b; font-size:11px;">${p.presentacion}</span></td>
+         <td style="text-align:center;">${p.sistema}</td>
+         <td style="text-align:center; font-weight:bold;">${p.fisico}</td>
+         <td class="${claseDif}" style="text-align:center;">${textDif}</td>
+         <td><i>${p.nota || '-'}</i></td>
+       </tr>`;
+    });
+
+    html += `</tbody></table>
+      <div style="margin-top: 50px; border-top: 1px dashed #cbd5e1; padding-top: 20px; color: #94a3b8; font-size: 11px; text-align: center;">
+         Documento generado automáticamente por el Sistema de Gestión Bluher el ${new Date().toLocaleString('es-VE')}
+      </div>
+    </body></html>`;
+    
+    printWindow.document.write(html);
+    printWindow.document.close();
+    // Esperamos un segundo para que carguen las fuentes/logo y abrimos la ventana de impresión
+    setTimeout(() => { printWindow.print(); }, 1000);
+  };
+
   const guardarCierre = async () => {
     dialogs.confirm("¿Estás seguro de registrar el cierre de inventario de hoy?", async () => {
       const productosCierre = [];
@@ -185,8 +271,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario'), nuevoCierre);
         loggear('CIERRE_INVENTARIO', `Cierre registrado con ${totalDiferencias} diferencias.`);
         setConteoActivo(false);
-        generarCSV(nuevoCierre);
-        setTimeout(() => dialogs.alert("Cierre guardado en historial y reporte CSV descargado.", "Completado"), 150);
+        // Al finalizar el conteo, le preguntamos si quiere el reporte
+        dialogs.confirm("Cierre guardado con éxito. ¿Deseas descargar el reporte ahora?", () => {
+           imprimirPDF(nuevoCierre);
+        }, "Reporte Listo");
       } catch (error) { console.error(error); }
     }, "Confirmar Cierre");
   };
@@ -325,7 +413,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                     </div>
                   ) : (
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm flex flex-col gap-3 w-full h-full justify-between">
-                      <input type="text" placeholder="N° de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                      <input type="text" placeholder="N° de Guía Tracking" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
                       <div className="flex flex-col lg:flex-row gap-3">
                           <div className="flex-1 relative w-full">
                             <input type="text" placeholder="URL Recibo" readOnly={isLinkML} className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'} ${isLinkML ? 'opacity-70 cursor-not-allowed' : ''}`} value={valorLinkGuia} onChange={(e) => !isLinkML && handleGuiaChange(p.id, 'link', e.target.value)} />
@@ -360,6 +448,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
+      {/* VISTA: AUDITORÍA DE INVENTARIO FÍSICO */}
       {vistaDespacho === 'inventario' && (
         <div className="animate-in fade-in">
           {!conteoActivo ? (
@@ -443,12 +532,13 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
+      {/* VISTA: HISTORIAL DE CIERRES */}
       {vistaDespacho === 'historial_cierres' && (
         <div className="animate-in fade-in space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
              <div>
                <h3 className="font-black text-slate-700 dark:text-slate-200 text-lg flex items-center gap-2"><FileSpreadsheet className="text-emerald-600"/> Reportes Guardados</h3>
-               <p className="text-sm text-slate-500">Consulta o descarga cierres anteriores.</p>
+               <p className="text-sm text-slate-500">Consulta o descarga cierres anteriores en PDF/CSV.</p>
              </div>
              <div className="flex items-center gap-3 mt-4 sm:mt-0 w-full sm:w-auto">
                <CalendarDays className="text-slate-400 shrink-0"/>
@@ -489,31 +579,23 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                           }
                         </div>
                       </div>
-                      
-                      {cierre.notasAuditoria && cierre.notasAuditoria.length > 0 && (
-                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
-                          <div className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-1.5 flex items-center gap-1">
-                            <MessageSquare size={12}/> Observaciones de Auditoría:
-                          </div>
-                          {cierre.notasAuditoria.map((n, i) => (
-                             <div key={i} className="text-xs text-amber-800 dark:text-amber-300 italic mb-1 last:mb-0">
-                                "{n.texto}" <span className="font-bold opacity-70">- {n.autor}</span>
-                             </div>
-                          ))}
-                        </div>
-                      )}
-
                     </div>
                     
-                    <button onClick={() => generarCSV(cierre)} className="w-full py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors">
-                       <Download size={18}/> Descargar CSV
-                    </button>
+                    <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+                       <button onClick={() => imprimirPDF(cierre)} className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-400 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
+                          <FileOutput size={16}/> Guardar como PDF
+                       </button>
+                       <button onClick={() => generarCSV(cierre)} className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
+                          <Download size={16}/> Exportar a CSV (Excel)
+                       </button>
+                    </div>
                  </div>
                ))
             )}
           </div>
         </div>
       )}
+
     </div>
   );
 }
