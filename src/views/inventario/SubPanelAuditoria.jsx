@@ -25,7 +25,7 @@ export default function SubPanelAuditoria({ db, appId, dialogs, loggear, perfil 
 
   const auditarCierreConNota = (cierre) => {
     if(!esAuditor) return;
-    dialogs.prompt("Escribe una observación de auditoría para este cierre:", async (nota) => {
+    dialogs.prompt("Escribe un comentario u observación para este cierre:", async (nota) => {
        if(!nota) return;
        try {
           const notasExistentes = cierre.notasAuditoria || [];
@@ -33,9 +33,9 @@ export default function SubPanelAuditoria({ db, appId, dialogs, loggear, perfil 
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
              auditado: true, auditadoPor: perfil?.nombre || 'Auditor', notasAuditoria: nuevasNotas, fechaAuditoria: Date.now() 
           });
-          loggear('AUDITORIA_CIERRE_NOTA', `Cierre de ${cierre.fecha} auditado con nota.`);
+          loggear('AUDITORIA_CIERRE_NOTA', `Añadió nota al cierre de ${cierre.fecha}`);
        } catch(e) { console.error(e); }
-    }, "Añadir Nota de Auditoría");
+    }, "Añadir Comentario");
   };
 
   const generarCSV = (cierre) => {
@@ -176,16 +176,20 @@ export default function SubPanelAuditoria({ db, appId, dialogs, loggear, perfil 
                    </div>
                  </div>
                  
+                 {/* HILO DE COMENTARIOS COLABORATIVO */}
                  {cierre.notasAuditoria && cierre.notasAuditoria.length > 0 && (
-                   <div className="mb-4 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
-                     <div className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-1.5 flex items-center gap-1">
-                       <MessageSquare size={12}/> Observaciones de Auditoría:
+                   <div className="mb-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
+                     <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-2 flex items-center gap-1">
+                       <MessageSquare size={12}/> Hilo de Comentarios:
+                     </span>
+                     <div className="space-y-2">
+                       {cierre.notasAuditoria.map((n, i) => (
+                          <div key={i} className="text-[11px] text-amber-900 dark:text-amber-200 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-amber-100 dark:border-amber-800/50">
+                             <div className="font-bold mb-0.5 opacity-80">{n.autor} <span className="font-normal text-[9px]">({new Date(n.fecha).toLocaleDateString()})</span>:</div>
+                             <div className="italic leading-snug">"{n.texto}"</div>
+                          </div>
+                       ))}
                      </div>
-                     {cierre.notasAuditoria.map((n, i) => (
-                        <div key={i} className="text-xs text-amber-800 dark:text-amber-300 italic mb-1 last:mb-0">
-                           "{n.texto}" <span className="font-bold opacity-70">- {n.autor}</span>
-                        </div>
-                     ))}
                    </div>
                  )}
                </div>
@@ -200,11 +204,14 @@ export default function SubPanelAuditoria({ db, appId, dialogs, loggear, perfil 
                     </button>
                   </div>
 
-                  {/* BOTONES DE AUDITORÍA */}
-                  {esAuditor && !cierre.auditado && (
+                  {esAuditor && (
                      <div className="flex gap-2 mt-2">
-                        <button onClick={()=>auditarCierreRapido(cierre)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl flex items-center justify-center shadow-md transition-colors font-bold text-xs"><CheckCircle size={16} className="mr-1.5"/> Aprobar Rápido</button>
-                        <button onClick={()=>auditarCierreConNota(cierre)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 py-2.5 rounded-xl flex items-center justify-center transition-colors font-bold text-xs"><Eye size={16} className="mr-1.5"/> Con Nota</button>
+                        {!cierre.auditado && (
+                           <button onClick={()=>auditarCierreRapido(cierre)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl flex items-center justify-center shadow-md transition-colors font-bold text-xs"><CheckCircle size={16} className="mr-1.5"/> Aprobar Rápido</button>
+                        )}
+                        <button onClick={()=>auditarCierreConNota(cierre)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 py-2.5 rounded-xl flex items-center justify-center transition-colors font-bold text-xs">
+                           <MessageSquare size={16} className="mr-1.5"/> {cierre.notasAuditoria?.length > 0 ? 'Responder' : 'Añadir Nota'}
+                        </button>
                      </div>
                   )}
 
