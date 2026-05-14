@@ -263,80 +263,101 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         </div>
 
         {['pendientes', 'historial'].includes(vistaAdmin) && (
-          <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm animate-in fade-in">
-            <table className="w-full text-left border-collapse text-sm">
-              <thead><tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400"><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide w-2/5">Datos del Pedido</th><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Información de Pago</th><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Acción Requerida</th></tr></thead>
-              <tbody>
-                {listado.length === 0 ? <tr><td colSpan="3" className="p-10 text-center text-slate-400 italic font-bold">Lista limpia. Buen trabajo.</td></tr> : listado.map(p => (
-                  <tr key={p.id} className={`border-b dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${vistaAdmin === 'historial' && !p.auditado ? 'bg-amber-50/30 border-amber-100 dark:bg-amber-900/5' : 'border-slate-50'}`}>
-                     <td className="p-4 align-top">
-                       <div className="font-bold text-base text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                         {p.clienteNombre}
-                         {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
-                       </div>
-                       <div className="text-xs font-semibold text-slate-400 mt-1">Asesora: {p.asesora}</div>
-                       <div className="text-xs font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3 mt-3 rounded-xl shadow-sm">
-                         <span className="font-bold text-sky-700 dark:text-sky-400 flex items-center gap-1.5 mb-2 uppercase tracking-wider"><Package size={14}/> Productos a descontar:</span>
-                         {p.productos ? (
-                            <div className="whitespace-pre-wrap leading-relaxed">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
-                         ) : (
-                            p.carritoObj ? Object.entries(p.carritoObj).map(([key, qty]) => <div key={key} className="flex gap-2 mb-1"><span className="font-bold text-slate-800 dark:text-slate-100">{qty}x</span> <span>{key.replace('|', ' ')}</span></div>) : 'Sin detalle.'
-                         )}
-                       </div>
-                     </td>
-                     <td className="p-4 align-top">
-                       {p.esRegalo ? (
-                          <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 mb-2"><Gift size={20}/> REGALO VIP</div>
+          <div className="rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden bg-white dark:bg-slate-800/20 animate-in fade-in">
+            
+            <div className="hidden lg:grid lg:grid-cols-12 gap-6 p-4 bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-b dark:border-slate-700 text-sm">
+              <div className="lg:col-span-5 font-bold tracking-wide">Datos del Pedido</div>
+              <div className="lg:col-span-4 font-bold tracking-wide">Información de Pago</div>
+              <div className="lg:col-span-3 font-bold tracking-wide text-right">Acción Requerida</div>
+            </div>
+
+            <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-700">
+              {listado.length === 0 ? (
+                <div className="p-10 text-center text-slate-400 italic font-bold">Lista limpia. Buen trabajo.</div>
+              ) : listado.map(p => (
+                <div key={p.id} className={`flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 transition-colors ${vistaAdmin === 'historial' && !p.auditado ? 'bg-amber-50/30 border-l-4 border-amber-300 dark:bg-amber-900/5 dark:border-amber-800' : 'hover:bg-slate-50/50 dark:hover:bg-slate-800/50 border-l-4 border-transparent'}`}>
+                   
+                   {/* Columna 1: Pedido */}
+                   <div className="lg:col-span-5 flex flex-col justify-start">
+                     <div className="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                       {p.clienteNombre}
+                       {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
+                     </div>
+                     <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-1">Asesora: <span className="text-slate-700 dark:text-slate-300">{p.asesora}</span></div>
+                     
+                     <div className="text-[13px] font-medium text-slate-700 dark:text-slate-300 bg-[#f0f4f8] dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3 mt-3 rounded-xl shadow-sm">
+                       <span className="font-bold text-sky-700 dark:text-sky-400 flex items-center gap-1.5 mb-2 uppercase tracking-wider text-xs"><Package size={14}/> Productos a descontar:</span>
+                       {p.productos ? (
+                          <div className="whitespace-pre-wrap leading-relaxed">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
                        ) : (
-                          <>
-                            <div className="font-black text-slate-800 dark:text-slate-100 text-2xl">${(p.montoUsd||0).toFixed(2)}</div>
-                            <div className="font-bold text-emerald-600 dark:text-emerald-400 text-lg mb-2">Bs. {(p.montoVes||0).toFixed(2)}</div>
-                            <div className="text-xs font-semibold text-slate-500 mb-1">Tasa Aplicada: Bs. {p.tasaAplicada}</div>
-                            {p.sobranteUsd > 0 && <div className="text-xs font-bold text-purple-600 dark:text-purple-400 mb-2">+ Sobrante: ${p.sobranteUsd}</div>}
-                            {p.faltanteUsd > 0 && <div className="text-xs font-bold text-red-600 dark:text-red-400 mb-2">- Faltante: ${p.faltanteUsd}</div>}
-                            
-                            {/* Mostrar descuento manual + descuento global si existieron */}
-                            {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
-                              <div className="flex flex-col gap-1 mt-2 mb-3">
-                                {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 dark:bg-pink-900/30 px-2 py-1 rounded w-max border border-pink-200 dark:border-pink-800">Campaña Global: {p.descuentoGlobalAplicado}%</span>}
-                                {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded w-max border border-emerald-200 dark:border-emerald-800">Descuento Asesor: {p.descuentoPorcentaje}%</span>}
-                              </div>
-                            )}
-                          </>
+                          p.carritoObj ? Object.entries(p.carritoObj).map(([key, qty]) => <div key={key} className="flex gap-2 mb-1"><span className="font-bold text-slate-800 dark:text-slate-100">{qty}x</span> <span>{key.replace('|', ' ')}</span></div>) : 'Sin detalle.'
                        )}
-                       <div className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-[#f0f4f8] dark:bg-slate-800 px-3 py-1.5 rounded-lg inline-block my-3 border border-slate-200 dark:border-slate-700">Ref: {p.referencia}</div>
-                       {p.linkComprobantePago && <div className="mb-3"><a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:underline font-bold flex items-center gap-1.5"><FileText size={14}/> Ver Capture Subido por Cliente</a></div>}
-                       <div><StatusBadge status={p.status}/></div>
-                       
-                       {p.notasAuditoria && p.notasAuditoria.length > 0 && (
-                         <div className="mt-3 bg-amber-50 dark:bg-amber-900/20 p-2 rounded-lg border border-amber-200 dark:border-amber-800">
-                           <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-1">Notas de Auditoría:</span>
-                           {p.notasAuditoria.map((n, i) => <div key={i} className="text-xs text-amber-800 dark:text-amber-300 italic">"{n.texto}" - {n.autor}</div>)}
+                     </div>
+                   </div>
+
+                   {/* Columna 2: Pagos */}
+                   <div className="lg:col-span-4 flex flex-col justify-start mt-2 lg:mt-0">
+                     <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monto Validado:</span>
+                     {p.esRegalo ? (
+                        <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 mb-2"><Gift size={20}/> REGALO VIP</div>
+                     ) : (
+                        <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800 mb-3">
+                          <div className="font-black text-slate-800 dark:text-slate-100 text-2xl">${(p.montoUsd||0).toFixed(2)}</div>
+                          <div className="font-bold text-emerald-600 dark:text-emerald-400 text-base mb-1">Bs. {(p.montoVes||0).toFixed(2)}</div>
+                          <div className="text-[11px] font-semibold text-slate-500 mb-2">Tasa Aplicada: Bs. {p.tasaAplicada}</div>
+                          
+                          {p.sobranteUsd > 0 && <div className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded w-max">+ Sobrante: ${p.sobranteUsd}</div>}
+                          {p.faltanteUsd > 0 && <div className="text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded w-max mt-1">- Faltante: ${p.faltanteUsd}</div>}
+                          
+                          {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800">Campaña: {p.descuentoGlobalAplicado}%</span>}
+                              {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">Asesor: {p.descuentoPorcentaje}%</span>}
+                            </div>
+                          )}
+                        </div>
+                     )}
+                     
+                     <div className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 break-all mb-2">
+                       <span className="text-slate-400 mr-1 block sm:inline">Ref:</span>{p.referencia}
+                     </div>
+                     
+                     {p.linkComprobantePago && (
+                       <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2 rounded-lg font-bold flex items-center gap-1.5 transition-colors mb-3 w-max">
+                         <FileText size={16}/> Ver Capture Subido
+                       </a>
+                     )}
+
+                     <div className="mb-2"><StatusBadge status={p.status}/></div>
+                     
+                     {p.notasAuditoria && p.notasAuditoria.length > 0 && (
+                       <div className="mt-2 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
+                         <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-1.5">Notas de Auditoría:</span>
+                         {p.notasAuditoria.map((n, i) => <div key={i} className="text-[11px] text-amber-800 dark:text-amber-300 italic mb-1 last:mb-0">"{n.texto}" - {n.autor}</div>)}
+                       </div>
+                     )}
+                   </div>
+
+                   {/* Columna 3: Acciones */}
+                   <div className="lg:col-span-3 flex flex-col items-stretch lg:items-end justify-start mt-4 lg:mt-0 pt-4 lg:pt-0 border-t border-slate-100 dark:border-slate-700 lg:border-none w-full gap-3">
+                       {esAdmin && p.status === 'Pendiente' && (
+                         <div className="flex flex-col sm:flex-row lg:flex-col gap-2 w-full">
+                           <button onClick={()=>validarPago(p)} className="bg-sky-600 text-white px-5 py-3 rounded-xl font-bold text-sm lg:text-xs shadow-md hover:bg-sky-700 transition-all hover:-translate-y-0.5 w-full">Aprobar y Descontar</button>
+                           <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-5 py-3 rounded-xl font-bold text-sm lg:text-xs transition-colors w-full">Devolver Pedido</button>
                          </div>
                        )}
-                     </td>
-                     <td className="p-4 align-top text-right">
-                       <div className="flex flex-col gap-2 items-end">
-                         {esAdmin && p.status === 'Pendiente' && (
-                           <>
-                             <button onClick={()=>validarPago(p)} className="bg-sky-600 text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-md hover:bg-sky-700 transition-all hover:-translate-y-0.5 w-full sm:w-auto">Aprobar y Descontar</button>
-                             <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-5 py-2.5 rounded-xl font-bold text-xs transition-colors w-full sm:w-auto">Devolver Pedido</button>
-                           </>
-                         )}
-                         {(esAuditor || esAdmin) && p.status !== 'Pendiente' && (
-                           <button onClick={()=>marcarAuditoria(p)} className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border-2 transition-all w-full sm:w-auto ${p.auditado ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
-                             {p.auditado ? <><ShieldCheck size={16}/> Auditoría Validada</> : <><Eye size={16}/> Marcar Revisión</>}
-                           </button>
-                         )}
-                         {vistaAdmin === 'historial' && !p.auditado && (
-                           <span className="text-[10px] font-black uppercase text-amber-600 flex items-center gap-1 mt-1"><AlertTriangle size={12}/> Sin Auditar</span>
-                         )}
-                       </div>
-                     </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                       {(esAuditor || esAdmin) && p.status !== 'Pendiente' && (
+                         <button onClick={()=>marcarAuditoria(p)} className={`px-5 py-3 rounded-xl font-bold text-sm lg:text-xs flex items-center justify-center gap-2 border-2 transition-all w-full lg:w-max ${p.auditado ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+                           {p.auditado ? <><ShieldCheck size={16}/> Auditoría Validada</> : <><Eye size={16}/> Marcar Revisión</>}
+                         </button>
+                       )}
+                       {vistaAdmin === 'historial' && !p.auditado && (
+                         <div className="text-[10px] font-black uppercase text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 w-full lg:w-max mt-1"><AlertTriangle size={14}/> Sin Auditar</div>
+                       )}
+                   </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

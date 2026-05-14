@@ -403,74 +403,79 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         </div>
       )}
 
-      {vista === 'historial' && (
-        <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm animate-in fade-in">
-          <table className="w-full text-left border-collapse text-sm">
-            <thead>
-              <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
-                <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Cliente y Fecha</th>
-                <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Pago</th>
-                <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Estatus</th>
-                {puedeCrear && <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Acciones</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {pedidos.filter(p => !p.esPublico).length === 0 ? <tr><td colSpan={puedeCrear ? 4 : 3} className="p-8 text-center text-slate-400 italic font-bold">No hay ventas registradas aún.</td></tr> : 
-                pedidos.filter(p => !p.esPublico).map(p => (
-                <tr key={p.id} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
-                  <td className="p-4 align-top w-1/3">
-                    <div className="font-bold text-slate-800 dark:text-slate-100 text-base flex items-center gap-2">
-                       {p.clienteNombre}
-                       {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
-                    </div>
-                    <div className="text-xs font-semibold text-slate-400 mt-1">{new Date(p.fechaCreacion).toLocaleDateString()}</div>
-                    <div className="mt-3 text-[11px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300 font-medium">
-                       {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
-                    </div>
-                  </td>
-                  <td className="p-4 align-top">
-                    {p.esRegalo ? (
-                       <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1"><Gift size={14}/> REGALO VIP</div>
-                    ) : (
-                       <>
-                        <div className="font-black text-slate-800 dark:text-slate-100 text-lg">${(p.montoUsd||0).toFixed(2)}</div>
-                        <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
-                        {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
-                          <div className="flex flex-col gap-1 mt-2">
-                            {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded w-max">Campaña: {p.descuentoGlobalAplicado}%</span>}
-                            {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded w-max">Asesor: {p.descuentoPorcentaje}%</span>}
-                          </div>
-                        )}
-                       </>
-                    )}
-                  </td>
-                  <td className="p-4 align-top">
-                    <StatusBadge status={p.status} />
-                    {p.status === 'Rechazado' && <div className="text-[10px] text-red-600 mt-1.5 font-bold bg-red-50 dark:bg-red-900/30 p-2 rounded-lg border border-red-100 dark:border-red-800 max-w-[200px] line-clamp-2 leading-relaxed" title={p.motivoRechazo}>Motivo: {p.motivoRechazo}</div>}
-                  </td>
-                  {puedeCrear && (
-                    <td className="p-4 align-top text-right">
-                      <div className="flex flex-col items-end gap-2">
-                        {p.status === 'Rechazado' && (
-                          <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 hover:bg-amber-200 text-xs font-bold py-1.5 px-3 rounded-lg transition-colors shadow-sm">Corregir Orden</button>
-                        )}
-                        {(p.status === 'Pendiente' || p.status === 'Rechazado') && (
-                          <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="text-xs text-slate-400 hover:text-amber-500 font-semibold underline transition-colors">Mover a Espera</button>
-                        )}
-                        {p.status === 'Despachado' && (
-                          <>
-                            <div className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">Guía: {p.guia}</div>
-                            <button onClick={() => enviarWhatsApp(p)} className="bg-[#25D366]/10 text-[#128C7E] dark:text-[#25D366] hover:bg-[#25D366]/20 text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-colors"><MessageCircle size={14} /> Notificar</button>
-                          </>
-                        )}
-                        {p.auditado && <span className="text-emerald-600 font-bold text-[10px] flex items-center justify-end gap-1 mt-1 uppercase tracking-widest"><ShieldCheck size={12}/> Auditado</span>}
-                      </div>
-                    </td>
+{vista === 'historial' && (
+        <div className="rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden bg-white dark:bg-slate-800/20 animate-in fade-in">
+          
+          <div className="hidden lg:grid lg:grid-cols-12 gap-6 p-4 bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-b dark:border-slate-700 text-sm">
+            <div className="lg:col-span-4 font-bold tracking-wide">Cliente y Fecha</div>
+            <div className="lg:col-span-3 font-bold tracking-wide">Pago</div>
+            <div className="lg:col-span-2 font-bold tracking-wide">Estatus</div>
+            {puedeCrear && <div className="lg:col-span-3 font-bold tracking-wide text-right">Acciones</div>}
+          </div>
+
+          <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-700">
+            {pedidos.filter(p => !p.esPublico).length === 0 ? (
+              <div className="p-10 text-center text-slate-400 italic font-bold">No hay ventas registradas aún.</div>
+            ) : pedidos.filter(p => !p.esPublico).map(p => (
+              <div key={p.id} className="flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                
+                <div className="lg:col-span-4 flex flex-col justify-start">
+                  <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">
+                     {p.clienteNombre}
+                     {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
+                  </div>
+                  <div className="text-xs font-semibold text-slate-400 mt-1">{new Date(p.fechaCreacion).toLocaleDateString()}</div>
+                  <div className="mt-3 text-[12px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300 font-medium">
+                     {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
+                  </div>
+                </div>
+
+                <div className="lg:col-span-3 flex flex-col justify-start mt-2 lg:mt-0">
+                  <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monto a pagar:</span>
+                  {p.esRegalo ? (
+                     <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1"><Gift size={14}/> REGALO VIP</div>
+                  ) : (
+                     <>
+                      <div className="font-black text-slate-800 dark:text-slate-100 text-xl">${(p.montoUsd||0).toFixed(2)}</div>
+                      <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
+                      {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
+                        <div className="flex flex-col gap-1 mt-2 w-max">
+                          {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800/50">Campaña: {p.descuentoGlobalAplicado}%</span>}
+                          {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50">Asesor: {p.descuentoPorcentaje}%</span>}
+                        </div>
+                      )}
+                     </>
                   )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                </div>
+
+                <div className="lg:col-span-2 flex flex-col justify-start mt-2 lg:mt-0 items-start">
+                  <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Estado de la orden:</span>
+                  <StatusBadge status={p.status} />
+                  {p.status === 'Rechazado' && <div className="text-[10px] text-red-600 mt-2 font-bold bg-red-50 dark:bg-red-900/30 p-2 rounded-lg border border-red-100 dark:border-red-800 leading-relaxed w-full">Motivo: {p.motivoRechazo}</div>}
+                </div>
+
+                {puedeCrear && (
+                  <div className="lg:col-span-3 flex flex-row lg:flex-col items-center lg:items-end justify-between lg:justify-start gap-3 mt-4 lg:mt-0 pt-4 lg:pt-0 border-t border-slate-100 dark:border-slate-700 lg:border-none w-full">
+                    <div className="flex flex-wrap lg:flex-col gap-2 w-full lg:w-auto items-center lg:items-end">
+                      {p.status === 'Rechazado' && (
+                        <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 hover:bg-amber-200 text-xs font-bold py-2 px-4 rounded-lg transition-colors shadow-sm w-full lg:w-auto text-center">Corregir Orden</button>
+                      )}
+                      {(p.status === 'Pendiente' || p.status === 'Rechazado') && (
+                        <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="text-xs text-slate-500 hover:text-amber-500 font-bold underline transition-colors p-2 lg:p-0">Mover a Espera</button>
+                      )}
+                      {p.status === 'Despachado' && (
+                        <>
+                          <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">Guía: {p.guia}</div>
+                          <button onClick={() => enviarWhatsApp(p)} className="bg-[#25D366]/10 text-[#128C7E] dark:text-[#25D366] hover:bg-[#25D366]/20 text-xs font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-1.5 transition-colors w-full lg:w-auto mt-1"><MessageCircle size={16} /> Notificar</button>
+                        </>
+                      )}
+                    </div>
+                    {p.auditado && <span className="text-emerald-600 font-bold text-[10px] flex items-center justify-end gap-1 mt-1 uppercase tracking-widest w-full lg:w-auto"><ShieldCheck size={14}/> Auditado</span>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

@@ -220,35 +220,36 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
-      <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
-         <div className="flex justify-between items-center mb-6">
+<div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
            <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><Sparkles className="text-sky-600"/> Top 10 Productos Más Vendidos</h3>
            <span className="text-xs font-bold text-sky-600 bg-sky-50 dark:bg-sky-900/30 px-3 py-1 rounded-lg uppercase tracking-wider">En periodo seleccionado</span>
          </div>
-         <div className="overflow-x-auto">
-           <table className="w-full text-left text-sm border-collapse">
-             <thead>
-               <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
-                 <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Producto y Presentación</th>
-                 <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-center">Unidades Vendidas</th>
-                 {verDinero && <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Ingreso Bruto</th>}
-               </tr>
-             </thead>
-             <tbody>
-               {topProductos.length === 0 ? <tr><td colSpan={verDinero ? 3 : 2} className="p-8 text-center text-slate-400 font-bold italic">No hay ventas registradas en las fechas seleccionadas.</td></tr> : topProductos.map((prod, idx) => (
-                  <tr key={prod.key} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
-                     <td className="p-4">
-                        <div className="flex items-center gap-3">
-                           <div className="w-6 h-6 rounded-full bg-sky-100 dark:bg-sky-900 text-sky-600 dark:text-sky-400 flex items-center justify-center font-black text-xs shrink-0">{idx + 1}</div>
-                           <span className="font-bold text-slate-800 dark:text-slate-100">{prod.key.replace('|', ' - ')}</span>
-                        </div>
-                     </td>
-                     <td className="p-4 text-center font-black text-sky-600 dark:text-sky-400 text-lg">{prod.cantidad}</td>
-                     {verDinero && <td className="p-4 text-right font-black text-emerald-600 dark:text-emerald-400 text-lg">${prod.valor.toFixed(2)}</td>}
-                  </tr>
-               ))}
-             </tbody>
-           </table>
+         
+         <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-700/50">
+            {topProductos.length === 0 ? (
+               <div className="p-8 text-center text-slate-400 font-bold italic">No hay ventas registradas en las fechas seleccionadas.</div>
+            ) : topProductos.map((prod, idx) => (
+               <div key={prod.key} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-xl gap-4">
+                  <div className="flex items-center gap-3 w-full sm:w-1/2">
+                     <div className="w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-900 text-sky-600 dark:text-sky-400 flex items-center justify-center font-black text-sm shrink-0">{idx + 1}</div>
+                     <span className="font-bold text-slate-800 dark:text-slate-100 text-sm sm:text-base leading-tight">{prod.key.replace('|', ' - ')}</span>
+                  </div>
+                  
+                  <div className="flex w-full sm:w-1/2 justify-between sm:justify-end items-center gap-6 pl-11 sm:pl-0">
+                     <div className="text-center sm:text-right">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest sm:hidden mb-0.5">Unidades</div>
+                        <div className="font-black text-sky-600 dark:text-sky-400 text-lg sm:text-xl">{prod.cantidad}</div>
+                     </div>
+                     {verDinero && (
+                       <div className="text-right">
+                          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest sm:hidden mb-0.5">Ingreso Bruto</div>
+                          <div className="font-black text-emerald-600 dark:text-emerald-400 text-lg sm:text-xl">${prod.valor.toFixed(2)}</div>
+                       </div>
+                     )}
+                  </div>
+               </div>
+            ))}
          </div>
       </div>
     </div>

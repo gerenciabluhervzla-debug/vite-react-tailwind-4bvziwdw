@@ -1,26 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  signInWithPopup, 
-  signOut, 
-  onAuthStateChanged, 
-  signInAnonymously, 
-  signInWithCustomToken 
+  signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, signInWithCustomToken 
 } from 'firebase/auth';
 import { 
-  collection, 
-  addDoc, 
-  onSnapshot, 
-  updateDoc, 
-  doc, 
-  setDoc,
-  query,
-  orderBy,
-  limit
+  collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit
 } from 'firebase/firestore';
 import { 
-  ShoppingCart, CheckSquare, Truck, Clock, 
-  Loader2, Archive, LogOut, ShieldCheck, Users, 
-  FileText, FileSpreadsheet, Store, Moon, Sun
+  ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users, 
+  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X 
 } from 'lucide-react';
 
 import { auth, db, googleProvider, appId } from './config/firebase';
@@ -55,6 +42,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('ventas');
   const [darkMode, setDarkMode] = useState(false);
   const [isPublicRoute, setIsPublicRoute] = useState(window.location.hash === '#tienda');
+  
+  // --- NUEVO ESTADO PARA MENÚ MÓVIL ---
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [dialogConfig, setDialogConfig] = useState(null);
   const dialogs = useMemo(() => ({
@@ -176,14 +166,6 @@ export default function App() {
     return () => unsubs.forEach(unsub => unsub());
   }, [user, userProfile?.isApproved]);
 
-  useEffect(() => {
-    const handleUnload = () => {
-      if (user && !user.isAnonymous) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { isOnline: false });
-    };
-    window.addEventListener('beforeunload', handleUnload);
-    return () => window.removeEventListener('beforeunload', handleUnload);
-  }, [user]);
-
   const registrarLogSistem = async (perfilActivo, accion, detalle) => {
     if (!perfilActivo) return;
     try {
@@ -216,6 +198,12 @@ export default function App() {
     } catch (error) {
       dialogs.alert("Error de red al intentar cambiar el estado.", "Fallo de conexión");
     }
+  };
+
+  // Helper para cerrar el menú móvil al navegar
+  const handleTabClick = (tab) => {
+    setActiveTab(tab);
+    setIsMobileMenuOpen(false);
   };
 
   let content;
@@ -257,80 +245,100 @@ export default function App() {
       </div>
     );
   } else {
-    // --- LÓGICA DE CONTROL DE ACCESO BASADO EN ROLES ---
     const r = userProfile?.role;
-    
-    // Ventas: Visible para Admin, Ventas, Adm, Despacho
     const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
-    // Admin Pagos: Visible para Admin, Administración
     const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(r);
-    // Despacho: Visible para Admin, Despacho
     const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO].includes(r);
-    // Reportes: Visible para Admin, Administración, Auditoría, Despacho
     const showReportes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r);
-    // Inventario: Todos pueden visualizar, las modificaciones internas se controlan dentro del panel
     const showInventario = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r); 
-    // Gestión de Usuarios: Solo Admin
     const showUsuarios = [ROLES.ADMIN].includes(r);
-    // Auditoría: Admin y Auditoría
     const showLogs = [ROLES.ADMIN, ROLES.AUDITORIA].includes(r);
 
     content = (
-      <div className="flex flex-col md:flex-row min-h-screen bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors selection:bg-sky-200 dark:selection:bg-sky-900">
-        <aside className="w-full md:w-[280px] bg-[#003366] dark:bg-slate-950 text-slate-200 flex-shrink-0 print:hidden shadow-2xl z-10 flex flex-col h-auto md:h-screen sticky top-0 overflow-y-auto border-r border-sky-800 dark:border-slate-800">
-          <div className="p-8 pb-4 flex flex-col items-center border-b border-sky-800/50 dark:border-slate-800/50 relative">
-            <button onClick={() => setDarkMode(!darkMode)} className="absolute top-4 right-4 p-1.5 bg-sky-800/50 dark:bg-slate-800 rounded-full text-sky-200 dark:text-slate-400 hover:text-white transition-colors">
-              {darkMode ? <Sun size={14}/> : <Moon size={14}/>}
+      <div className="flex flex-col min-h-screen bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors selection:bg-sky-200 dark:selection:bg-sky-900">
+        
+        {/* --- HEADER MÓVIL --- */}
+        <div className="md:hidden flex items-center justify-between bg-[#003366] dark:bg-slate-950 p-4 text-white sticky top-0 z-40 shadow-md">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setIsMobileMenuOpen(true)} className="p-1 rounded-md hover:bg-white/10 transition-colors">
+              <Menu size={28} />
             </button>
-            <div className="w-full flex justify-center mb-6">
-               <img src={BRAND_LOGO} alt="Logo Bluher" className="h-12 w-auto object-contain drop-shadow-md mix-blend-screen dark:mix-blend-normal invert dark:invert-0 brightness-200 dark:brightness-100" />
+            <img src={BRAND_LOGO} alt="Logo" className="h-8 brightness-200" />
+          </div>
+          <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
+            {darkMode ? <Sun size={18}/> : <Moon size={18}/>}
+          </button>
+        </div>
+
+        <div className="flex flex-1 relative">
+          {/* --- OVERLAY OSCURO PARA MÓVILES --- */}
+          {isMobileMenuOpen && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden transition-opacity" onClick={() => setIsMobileMenuOpen(false)}></div>
+          )}
+
+          {/* --- SIDEBAR RESPONSIVO --- */}
+          <aside className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-[#003366] dark:bg-slate-950 text-slate-200 flex flex-col h-full transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
+            <div className="p-8 pb-4 flex flex-col items-center border-b border-sky-800/50 dark:border-slate-800/50 relative">
+              {/* Botón cerrar solo visible en móviles dentro del menú */}
+              <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden absolute top-4 right-4 p-1.5 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
+                <X size={20}/>
+              </button>
+              
+              <button onClick={() => setDarkMode(!darkMode)} className="hidden md:block absolute top-4 right-4 p-1.5 bg-sky-800/50 dark:bg-slate-800 rounded-full text-sky-200 dark:text-slate-400 hover:text-white transition-colors">
+                {darkMode ? <Sun size={14}/> : <Moon size={14}/>}
+              </button>
+              
+              <div className="w-full flex justify-center mb-6 mt-4 md:mt-0">
+                 <img src={BRAND_LOGO} alt="Logo Bluher" className="h-12 w-auto object-contain drop-shadow-md mix-blend-screen dark:mix-blend-normal invert dark:invert-0 brightness-200 dark:brightness-100" />
+              </div>
+              
+              <div className="w-full bg-sky-900/40 dark:bg-slate-800/50 rounded-xl p-4 border border-sky-700/50 dark:border-slate-700/50 text-center">
+                 <div className="text-xs font-medium text-sky-300 dark:text-slate-400 mb-1">Usuario Activo</div>
+                 <div className="text-sm font-bold text-white truncate px-2" title={user.email}>{user.displayName}</div>
+                 <div className="mt-2 inline-flex items-center justify-center px-3 py-1 rounded-full bg-sky-800/80 dark:bg-sky-900/50 text-sky-100 dark:text-sky-300 text-[10px] font-bold uppercase tracking-widest border border-sky-700/50 dark:border-sky-800/50">
+                   {userProfile?.role}
+                 </div>
+              </div>
             </div>
             
-            <div className="w-full bg-sky-900/40 dark:bg-slate-800/50 rounded-xl p-4 border border-sky-700/50 dark:border-slate-700/50 text-center">
-               <div className="text-xs font-medium text-sky-300 dark:text-slate-400 mb-1">Usuario Activo</div>
-               <div className="text-sm font-bold text-white truncate px-2" title={user.email}>{user.displayName}</div>
-               <div className="mt-2 inline-flex items-center justify-center px-3 py-1 rounded-full bg-sky-800/80 dark:bg-sky-900/50 text-sky-100 dark:text-sky-300 text-[10px] font-bold uppercase tracking-widest border border-sky-700/50 dark:border-sky-800/50">
-                 {userProfile?.role}
-               </div>
+            <nav className="mt-6 flex flex-col gap-1.5 px-4 overflow-y-auto flex-1 pb-4">
+              <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Área Operativa</div>
+              {showVentas && <TabButton active={activeTab === 'ventas'} onClick={() => handleTabClick('ventas')} icon={<ShoppingCart size={18} />} label="Ventas y Web" badge={pedidos.filter(p=>p.status==='Rechazado' || p.esPublico).length} badgeColor="bg-red-500 dark:bg-sky-500" />}
+              {showAdmin && <TabButton active={activeTab === 'admin'} onClick={() => handleTabClick('admin')} icon={<CheckSquare size={18} />} label={`Admin y Pagos`} badge={pedidos.filter(p=>p.status==='Pendiente').length} />}
+              {showDespacho && <TabButton active={activeTab === 'despacho'} onClick={() => handleTabClick('despacho')} icon={<Truck size={18} />} label={`Despacho`} badge={pedidos.filter(p=>p.status==='Validado').length} />}
+              
+              {(showReportes || showInventario || showUsuarios || showLogs) && <div className="my-4 border-t border-sky-800/50 dark:border-slate-800 mx-2"></div>}
+              {(showReportes || showInventario || showUsuarios || showLogs) && <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Gestión y Reportes</div>}
+
+              {showReportes && <TabButton active={activeTab === 'reportes'} onClick={() => handleTabClick('reportes')} icon={<FileSpreadsheet size={18} />} label="Reportes" />}
+              {showInventario && <TabButton active={activeTab === 'inventario'} onClick={() => handleTabClick('inventario')} icon={<Archive size={18} />} label="Inventario" badge={movimientos.filter(m=>m.status==='PENDIENTE').length} />}
+              {showUsuarios && <TabButton active={activeTab === 'usuarios'} onClick={() => handleTabClick('usuarios')} icon={<Users size={18} />} label="Usuarios" badge={usuarios.filter(u=>!u.isApproved).length} />}
+              {showLogs && <TabButton active={activeTab === 'logs'} onClick={() => handleTabClick('logs')} icon={<FileText size={18} />} label="Auditoría" />}
+            </nav>
+
+            <div className="p-6 border-t border-sky-800/50 dark:border-slate-800/50">
+              <button onClick={cerrarSesion} className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl text-sky-200 dark:text-slate-400 hover:text-white hover:bg-sky-800 dark:hover:bg-slate-800 transition-colors font-medium text-sm">
+                <LogOut size={16} /> Cerrar Sesión
+              </button>
             </div>
-          </div>
-          
-          <nav className="mt-6 flex flex-row md:flex-col gap-1.5 px-4 overflow-x-auto flex-1 pb-4">
-            <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2 hidden md:block">Área Operativa</div>
-            {showVentas && <TabButton active={activeTab === 'ventas'} onClick={() => setActiveTab('ventas')} icon={<ShoppingCart size={18} />} label="Ventas y Web" badge={pedidos.filter(p=>p.status==='Rechazado' || p.esPublico).length} badgeColor="bg-red-500 dark:bg-sky-500" />}
-            {showAdmin && <TabButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')} icon={<CheckSquare size={18} />} label={`Admin y Pagos`} badge={pedidos.filter(p=>p.status==='Pendiente').length} />}
-            {showDespacho && <TabButton active={activeTab === 'despacho'} onClick={() => setActiveTab('despacho')} icon={<Truck size={18} />} label={`Despacho`} badge={pedidos.filter(p=>p.status==='Validado').length} />}
-            
-            {(showReportes || showInventario || showUsuarios || showLogs) && <div className="hidden md:block my-4 border-t border-sky-800/50 dark:border-slate-800 mx-2"></div>}
-            {(showReportes || showInventario || showUsuarios || showLogs) && <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2 hidden md:block">Gestión y Reportes</div>}
+          </aside>
 
-            {showReportes && <TabButton active={activeTab === 'reportes'} onClick={() => setActiveTab('reportes')} icon={<FileSpreadsheet size={18} />} label="Reportes" />}
-            {showInventario && <TabButton active={activeTab === 'inventario'} onClick={() => setActiveTab('inventario')} icon={<Archive size={18} />} label="Inventario" badge={movimientos.filter(m=>m.status==='PENDIENTE').length} />}
-            {showUsuarios && <TabButton active={activeTab === 'usuarios'} onClick={() => setActiveTab('usuarios')} icon={<Users size={18} />} label="Usuarios" badge={usuarios.filter(u=>!u.isApproved).length} />}
-            {showLogs && <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={<FileText size={18} />} label="Auditoría" />}
-          </nav>
-
-          <div className="p-6 border-t border-sky-800/50 dark:border-slate-800/50">
-            <button onClick={cerrarSesion} className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl text-sky-200 dark:text-slate-400 hover:text-white hover:bg-sky-800 dark:hover:bg-slate-800 transition-colors font-medium text-sm">
-              <LogOut size={16} /> Cerrar Sesión
-            </button>
-          </div>
-        </aside>
-
-        <main className="flex-1 p-4 md:p-10 overflow-y-auto print:p-0 print:m-0 print:bg-white print:block relative">
-          <div className="max-w-6xl mx-auto print:max-w-none print:mx-0">
-            <div className="print:hidden">
-              {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} />}
-              {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} config={configGral} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
-              {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} perfil={userProfile} />}
-              {activeTab === 'reportes' && showReportes && <PanelReportes perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
-              {activeTab === 'inventario' && showInventario && <PanelInventario stock={stockInventario} notas={notasInventario} catalogo={catalogo} movimientos={movimientos} db={db} appId={appId} loggear={loggear} perfil={userProfile} dialogs={dialogs} />}
-              {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
-              {activeTab === 'logs' && showLogs && <PanelLogs logs={logs} />}
+          {/* --- CONTENIDO PRINCIPAL --- */}
+          <main className="flex-1 p-4 md:p-10 overflow-y-auto print:p-0 print:m-0 print:bg-white print:block w-full">
+            <div className="max-w-6xl mx-auto print:max-w-none print:mx-0">
+              <div className="print:hidden">
+                {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} />}
+                {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} config={configGral} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
+                {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} perfil={userProfile} />}
+                {activeTab === 'reportes' && showReportes && <PanelReportes perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
+                {activeTab === 'inventario' && showInventario && <PanelInventario stock={stockInventario} notas={notasInventario} catalogo={catalogo} movimientos={movimientos} db={db} appId={appId} loggear={loggear} perfil={userProfile} dialogs={dialogs} />}
+                {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
+                {activeTab === 'logs' && showLogs && <PanelLogs logs={logs} />}
+              </div>
+              <VistaImpresion pedidos={pedidos.filter(p => p.status === 'Validado')} />
             </div>
-            <VistaImpresion pedidos={pedidos.filter(p => p.status === 'Validado')} />
-          </div>
-        </main>
+          </main>
+        </div>
       </div>
     );
   }
