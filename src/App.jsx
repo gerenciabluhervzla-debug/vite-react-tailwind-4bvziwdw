@@ -246,13 +246,15 @@ export default function App() {
     const r = userProfile?.role;
     const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
     const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA].includes(r);
-    const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO].includes(r);
+    
+    // CORRECCIÓN QA: Auditoría ahora también puede ver la pestaña Despacho
+    const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO, ROLES.AUDITORIA].includes(r);
+    
     const showReportes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r);
     const showInventario = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r); 
     const showUsuarios = [ROLES.ADMIN].includes(r);
     const showLogs = [ROLES.ADMIN, ROLES.AUDITORIA].includes(r);
 
-    // --- CORRECCIÓN QA: FECHA PARA IMPRESIÓN EXCLUSIVA DE HOY ---
     const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     const tDateApp = getVeneziaTimeApp();
     const ddApp = String(tDateApp.getDate()).padStart(2, '0');
@@ -304,7 +306,7 @@ export default function App() {
             <nav className="mt-6 flex flex-col gap-1.5 px-4 overflow-y-auto flex-1 pb-4">
               <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Área Operativa</div>
               {showVentas && <TabButton active={activeTab === 'ventas'} onClick={() => handleTabClick('ventas')} icon={<ShoppingCart size={18} />} label="Ventas y Web" badge={pedidos.filter(p=>p.status==='Rechazado' || p.esPublico).length} badgeColor="bg-red-500 dark:bg-sky-500" />}
-              {showAdmin && <TabButton active={activeTab === 'admin'} onClick={() => handleTabClick('admin')} icon={<CheckSquare size={18} />} label={`Admin y Pagos`} badge={pedidos.filter(p=>p.status==='Pendiente').length} />}
+              {showAdmin && <TabButton active={activeTab === 'admin'} onClick={() => handleTabClick('admin')} icon={<CheckSquare size={18} />} label={r === ROLES.AUDITORIA ? 'Auditoría Pagos' : 'Admin y Pagos'} badge={pedidos.filter(p=>p.status==='Pendiente').length} />}
               {showDespacho && <TabButton active={activeTab === 'despacho'} onClick={() => handleTabClick('despacho')} icon={<Truck size={18} />} label={`Despacho`} badge={pedidos.filter(p=>p.status==='Validado').length} />}
               
               {(showReportes || showInventario || showUsuarios || showLogs) && <div className="my-4 border-t border-sky-800/50 dark:border-slate-800 mx-2"></div>}
@@ -334,7 +336,6 @@ export default function App() {
                 {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
                 {activeTab === 'logs' && showLogs && <PanelLogs logs={logs} />}
               </div>
-              {/* FILTRO APLICADO: Solo imprime pedidos de hoy */}
               <VistaImpresion pedidos={pedidos.filter(p => p.status === 'Validado' && p.fechaDespacho === todayStrApp)} />
             </div>
           </main>

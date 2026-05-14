@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, FileOutput, MessageSquare, ShieldCheck, Eye } from 'lucide-react';
+import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, FileOutput, MessageSquare, ShieldCheck, Eye, X } from 'lucide-react';
 import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image'; 
 import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs, perfil }) {
-  const [vistaDespacho, setVistaDespacho] = useState('pendientes');
-
-  // --- PERMISOS ---
+  
+  // CORRECCIÓN QA: Si es auditor, mandarlo directo al historial de cierres
   const esAuditor = [ROLES.AUDITORIA, ROLES.ADMIN].includes(perfil?.role);
+  const esAuditorPuro = perfil?.role === ROLES.AUDITORIA;
+  
+  const [vistaDespacho, setVistaDespacho] = useState(esAuditorPuro ? 'historial_cierres' : 'pendientes');
 
   const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
   const pedidosDespachados = pedidos.filter(p => p.status === 'Despachado');
@@ -144,15 +146,15 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     setConteoFisico(prev => ({ ...prev, [key]: isNaN(num) ? 0 : num }));
   };
 
-  // --- FUNCIONES DE AUDITORÍA DE CIERRES ---
+  // --- LÓGICA DE AUDITORÍA Y DESCARGAS DE CIERRES ---
   const auditarCierreRapido = async (cierre) => {
     if(!esAuditor) return;
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
         auditado: true, auditadoPor: perfil?.nombre || 'Auditor', fechaAuditoria: Date.now() 
       });
-      loggear('AUDITORIA_CIERRE_RAPIDA', `Cierre de inventario del ${cierre.fecha} validado.`);
-    } catch(e) { console.error(e); dialogs.alert("Error de conexión al validar el cierre."); }
+      loggear('AUDITORIA_CIERRE_RAPIDA', `Cierre de ${cierre.fecha} validado.`);
+    } catch(e) { console.error(e); }
   };
 
   const auditarCierreConNota = (cierre) => {
@@ -165,7 +167,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
              auditado: true, auditadoPor: perfil?.nombre || 'Auditor', notasAuditoria: nuevasNotas, fechaAuditoria: Date.now() 
           });
-          loggear('AUDITORIA_CIERRE_NOTA', `Cierre de inventario del ${cierre.fecha} auditado con nota.`);
+          loggear('AUDITORIA_CIERRE_NOTA', `Cierre de ${cierre.fecha} auditado con nota.`);
        } catch(e) { console.error(e); }
     }, "Añadir Nota de Auditoría");
   };
@@ -361,10 +363,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         <div>
           <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><Truck className="text-sky-600"/> Logística de Envíos</h2>
           <div className="flex flex-wrap gap-2 mt-4 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-max">
-            <button onClick={() => setVistaDespacho('pendientes')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Por Empacar ({pedidosValidados.length})</button>
-            <button onClick={() => setVistaDespacho('historial')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Enviados</button>
-            <button onClick={() => setVistaDespacho('inventario')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'inventario' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Cierre Físico</button>
-            <button onClick={() => setVistaDespacho('historial_cierres')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'historial_cierres' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial de Cierres</button>
+            {!esAuditorPuro && <button onClick={() => setVistaDespacho('pendientes')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Por Empacar ({pedidosValidados.length})</button>}
+            {!esAuditorPuro && <button onClick={() => setVistaDespacho('historial')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Enviados</button>}
+            {!esAuditorPuro && <button onClick={() => setVistaDespacho('inventario')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'inventario' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Cierre Físico</button>}
+            <button onClick={() => setVistaDespacho('historial_cierres')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'historial_cierres' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>{esAuditorPuro ? 'Auditar Cierres' : 'Historial de Cierres'}</button>
           </div>
         </div>
         {['pendientes', 'historial'].includes(vistaDespacho) && (
