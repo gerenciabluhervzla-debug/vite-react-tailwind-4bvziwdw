@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff } from 'lucide-react';
 import { StatusBadge, InputDark } from '../components/ui';
-import { setDoc, doc, updateDoc } from 'firebase/firestore';
+// IMPORTANTE: Se añade increment para transacciones atómicas seguras
+import { setDoc, doc, updateDoc, increment } from 'firebase/firestore'; 
 import { ROLES } from '../config/constants';
 
 export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, dialogs, loggear }) {
-  const [vistaAdmin, setVistaAdmin] = useState('pendientes');
+  const [vistaAdmin, setVistaAdmin] = useState('pendientes'); // 'pendientes', 'historial', 'auditoria'
   const esAuditor = [ROLES.AUDITORIA, ROLES.ADMIN].includes(perfil?.role);
   const esAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(perfil?.role);
 
@@ -27,7 +28,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
   const actualizarTasa = async () => {
     dialogs.prompt("Ingresa la nueva tasa del día en Bolívares (Bs/$):", async (nuevaTasa) => {
-      const tasaNum = parseFloat(nuevaTasa);
+      // CORRECCIÓN QA: Reemplazamos la coma por un punto ANTES de parsear
+      const tasaSanitizada = nuevaTasa.replace(',', '.');
+      const tasaNum = parseFloat(tasaSanitizada);
+      
       if (isNaN(tasaNum) || tasaNum <= 0) {
         setTimeout(() => dialogs.alert("Ingresa un número válido."), 150);
         return;
@@ -45,7 +49,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         }, { merge: true });
         
         loggear('ACTUALIZACION_TASA', `Se cambió la tasa del día a: ${tasaNum} Bs/$`);
-        setTimeout(() => dialogs.alert("Tasa actualizada correctamente para todo el sistema.", "Éxito"), 150);
+        setTimeout(() => dialogs.alert(`Tasa actualizada correctamente a ${tasaNum} Bs/$.`, "Éxito"), 150);
       } catch(e) { 
         setTimeout(() => dialogs.alert("Error actualizando tasa.", "Error"), 150); 
       }
@@ -85,19 +89,26 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
   const isGlobalDiscountActive = config?.descuentoGlobalActivo;
 
+  // --- CORRECCIÓN QA: VALIDACIÓN SEGURA DEL PAGO ---
   const validarPago = async (pedido) => {
     dialogs.prompt("¿El cliente pagó de más?\n\nSi hay dinero SOBRANTE a favor del cliente, ingrésalo en dólares ($). Deja 0 si el pago fue exacto.", async (valSobrante) => {
       let sobranteUsd = parseFloat(valSobrante) || 0;
 
       try {
         const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
-        let currentStock = { ...stock };
+        
+        // 1. Preparamos los incrementos negativos (restas seguras)
+        const updates = {};
         Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => {
-           let actualEnvios = typeof currentStock[itemKey] === 'object' ? currentStock[itemKey].envios : (currentStock[itemKey] || 0);
-           let actualRecep = typeof currentStock[itemKey] === 'object' ? currentStock[itemKey].recepcion : 0;
-           currentStock[itemKey] = { envios: Math.max(0, actualEnvios - qty), recepcion: actualRecep };
+           updates[`${itemKey}.envios`] = increment(-qty); // Resta atómica de la base de datos
         });
-        await setDoc(stockRef, currentStock);
+
+        // 2. Si hay algo que descontar, enviamos la actualización
+        if (Object.keys(updates).length > 0) {
+           await updateDoc(stockRef, updates);
+        }
+
+        // 3. Pasamos el pedido a Validado
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Validado', sobranteUsd });
         loggear('PAGO_VALIDADO', `Aprobación y descuento de stock: ${pedido.clienteNombre} ${sobranteUsd > 0 ? `(Sobrante registrado: $${sobranteUsd})` : ''}`);
         

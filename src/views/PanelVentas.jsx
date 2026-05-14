@@ -3,7 +3,7 @@ import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkle
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
 import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
-import { GEMINI_API_KEY, URL_GOOGLE_SCRIPT } from '../config/firebase';
+import { WORKER_GEMINI_URL, URL_GOOGLE_SCRIPT } from '../config/firebase'; 
 import { compressImage } from '../utils/image';
 import { ROLES } from '../config/constants';
 
@@ -65,6 +65,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
   const analizarConGemini = async () => {
     if (!textoCrudo.trim()) return dialogs.alert("Pega el mensaje de WhatsApp del cliente primero.", "Mensaje Vacío");
+    if (!WORKER_GEMINI_URL) return dialogs.alert("La URL del Worker de Gemini no está configurada.", "Error de Entorno");
+    
     setAnalizando(true);
 
     try {
@@ -74,8 +76,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       carrito: mapea cantidades a estas llaves: [${llavesCatalogo}].
       Texto: ${textoCrudo}`;
       
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const res = await fetch(WORKER_GEMINI_URL, {
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
@@ -114,7 +117,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
            carritoObj: Object.keys(nuevoCarritoObj).length > 0 ? nuevoCarritoObj : prev.carritoObj 
          }));
       }
-    } catch(e) { console.error(e); dialogs.alert("Error comunicando con IA. Ingresa manual.", "Error"); } finally { setAnalizando(false); }
+    } catch(e) { console.error(e); dialogs.alert("Error comunicando con la IA. Ingresa manual.", "Error"); } finally { setAnalizando(false); }
   };
 
   const cargarPedidoParaEditar = (pedido) => {
@@ -144,7 +147,12 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       const base64Data = await compressImage(file, 800, 0.7);
       const response = await fetch(URL_GOOGLE_SCRIPT, {
         method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ fileName: `GuiaML_${Date.now()}.jpg`, mimeType: 'image/jpeg', data: base64Data })
+        body: JSON.stringify({ 
+           tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
+           fileName: `GuiaML_${Date.now()}.jpg`, 
+           mimeType: 'image/jpeg', 
+           data: base64Data 
+        })
       });
       const result = await response.json();
       if (result.url) setFormData({ ...formData, linkGuiaML: result.url });
@@ -215,11 +223,24 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       if (!finalProductosText.includes("Concentrado (Unidad)")) finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Auto]`;
     }
 
-    const targetDate = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    if (targetDate.getHours() > 12 || (targetDate.getHours() === 12 && targetDate.getMinutes() >= 30)) {
+    // --- CÁLCULO DE HORA VENEZUELA (BLINDADO) ---
+    const getVeneziaTime = () => {
+      const now = new Date();
+      return new Date(now.toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    };
+
+    const targetDate = getVeneziaTime();
+    const hora = targetDate.getHours();
+    const minutos = targetDate.getMinutes();
+
+    if (hora > 12 || (hora === 12 && minutos >= 30)) {
        targetDate.setDate(targetDate.getDate() + 1);
     }
-    const fechaDespachoStr = targetDate.toLocaleDateString('es-VE');
+    
+    const dd = String(targetDate.getDate()).padStart(2, '0');
+    const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const yyyy = targetDate.getFullYear();
+    const fechaDespachoStr = `${dd}/${mm}/${yyyy}`;
 
     try {
       if (editId) {
@@ -258,7 +279,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl border dark:border-slate-700 transition-colors shadow-sm">
+    <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-3xl border dark:border-slate-700 transition-colors shadow-sm">
       <div className="flex flex-wrap gap-4 mb-8 border-b dark:border-slate-700 pb-2 overflow-x-auto">
         {puedeCrear && <button onClick={() => { setVista('nuevo'); if(editId) cancelarEdicion(); }} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'nuevo' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ShoppingCart size={18} className="inline mr-1" /> {editId ? 'Corrigiendo' : 'Registrar'}</button>}
         
@@ -334,8 +355,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
              <div className="flex flex-col">
                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Empresa de Envío</label>
                <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} disabled={!tasaActualizadaHoy && !editId} className={`p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold cursor-pointer shadow-sm disabled:opacity-50 ${!formData.courier ? 'border-amber-300 text-slate-400' : 'border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200'}`}>
-                 <option value="" disabled>Seleccionar...</option>
-                 <option value="ZOOM">ZOOM</option> <option value="MRW">MRW</option> <option value="Tealca">Tealca</option> <option value="Domesa">Domesa</option>
+                 <option value="" disabled>Seleccionar...</option> <option value="ZOOM">ZOOM</option> <option value="MRW">MRW</option> <option value="Tealca">Tealca</option> <option value="Domesa">Domesa</option>
                </select>
              </div>
              
@@ -383,9 +403,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                <div className="flex flex-col">
                  <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2 transition-colors">Moneda de Pago</label>
                  <select disabled={formData.esRegalo || (!tasaActualizadaHoy && !editId)} value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} className={`p-3.5 border-2 rounded-2xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold cursor-pointer disabled:opacity-50 shadow-inner ${!formData.moneda ? 'border-amber-500 text-slate-400' : 'border-slate-700 text-white'}`}>
-                   <option value="" disabled>Seleccionar...</option>
-                   <option value="USD">Dólares (USD)</option> 
-                   <option value="VES">Bolívares (VES)</option>
+                   <option value="" disabled>Seleccionar...</option> <option value="USD">Dólares (USD)</option> <option value="VES">Bolívares (VES)</option>
                  </select>
                </div>
                <div className="flex flex-col relative">
@@ -408,9 +426,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         </div>
       )}
 
-{vista === 'historial' && (
+      {vista === 'historial' && (
         <div className="rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden bg-white dark:bg-slate-800/20 animate-in fade-in">
-          
           <div className="hidden lg:grid lg:grid-cols-12 gap-6 p-4 bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-b dark:border-slate-700 text-sm">
             <div className="lg:col-span-4 font-bold tracking-wide">Cliente y Fecha</div>
             <div className="lg:col-span-3 font-bold tracking-wide">Pago</div>

@@ -38,4 +38,4 @@ export const googleProvider = new GoogleAuthProvider();
 export const appId = typeof __app_id !== 'undefined' ? __app_id : (getEnvVar('VITE_FIREBASE_APP_ID') || 'app-bluher-official');
 
 export const URL_GOOGLE_SCRIPT = getEnvVar('VITE_GOOGLE_SCRIPT_URL');
-export const GEMINI_API_KEY = getEnvVar('VITE_GEMINI_API_KEY');
+export const WORKER_GEMINI_URL = getEnvVar('VITE_GEMINI_WORKER_URL')

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { PlusCircle, ArrowRightLeft, FileText, CheckCircle, AlertTriangle } from 'lucide-react';
-import { setDoc, doc, updateDoc } from 'firebase/firestore';
+// IMPORTANTE: Importamos increment para proteger el inventario
+import { setDoc, doc, updateDoc, increment } from 'firebase/firestore'; 
 import ModalCrearMovimiento from './ModalCrearMovimiento';
 import { ROLES } from '../../config/constants';
 
@@ -8,25 +9,28 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
   const [modalType, setModalType] = useState(null); 
   
   const rol = perfil?.role;
-  // Despacho y Admin pueden dar ingreso de mercancía de proveedores
   const puedeHacerIngreso = [ROLES.ADMIN, ROLES.DESPACHO].includes(rol);
-  // Despacho y Admin pueden iniciar una transferencia hacia recepción
   const puedeTransferir = [ROLES.ADMIN, ROLES.DESPACHO].includes(rol);
-  // Administración y Admin son quienes reciben y aprueban la llegada de la transferencia
   const esRecepcion = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(rol);
   
+  // --- CORRECCIÓN QA: Actualización Atómica en Recepción ---
   const aprobarTransferencia = async (mov) => {
     dialogs.confirm("¿Confirmas que recibiste físicamente estas cantidades exactas en el Almacén de Recepción?", async () => {
       try {
         const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
-        let currentStock = { ...stock };
         
+        // Creamos el objeto de incremento
+        const updates = {};
         Object.entries(mov.items).forEach(([key, qty]) => {
-           let actualEnv = typeof currentStock[key] === 'object' ? currentStock[key].envios : (currentStock[key]||0);
-           let actualRec = typeof currentStock[key] === 'object' ? currentStock[key].recepcion : 0;
-           currentStock[key] = { envios: actualEnv, recepcion: actualRec + qty };
+           updates[`${key}.recepcion`] = increment(qty); // Suma segura al inventario
         });
-        await setDoc(stockRef, currentStock);
+        
+        // Si hay items, actualizamos la base de datos de golpe
+        if(Object.keys(updates).length > 0){
+           await updateDoc(stockRef, updates);
+        }
+
+        // Finalizamos el estatus del movimiento
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'movimientos', mov.id), { status: 'COMPLETADO', fechaAprobacion: Date.now(), aprobadoPor: perfil.nombre });
         loggear('TRANSFERENCIA_APROBADA', `Recepción aprobó entrada de transferencia enviada por ${mov.creadoPor}`);
       } catch(e) { console.error(e); }

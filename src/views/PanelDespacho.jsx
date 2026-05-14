@@ -42,7 +42,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
         const response = await fetch(URL_GOOGLE_SCRIPT, {
             method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ fileName: `Soporte_${id.substring(0,5)}_${field}.jpg`, mimeType: 'image/jpeg', data: base64Data })
+            body: JSON.stringify({tokenSecreto: "BLUHER_SECURE_TOKEN_2026", fileName: `Soporte_${id.substring(0,5)}_${field}.jpg`, mimeType: 'image/jpeg', data: base64Data })
         });
         const result = await response.json();
         

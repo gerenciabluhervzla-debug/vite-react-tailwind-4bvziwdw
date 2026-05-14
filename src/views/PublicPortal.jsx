@@ -27,7 +27,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
   const tasa = parseFloat(config?.tasaDia) || 1;
 
-  // --- LÓGICA DE DESCUENTO GLOBAL PÚBLICO ---
   const hoyTimestamp = new Date().getTime();
   const isGlobalDiscountActive = config?.descuentoGlobalActivo &&
      config?.descuentoGlobalPorcentaje > 0 &&
@@ -37,7 +36,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
   const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
 
-  // Lógica del Carrito
   const updateQty = (key, delta) => {
     setCarrito(prev => {
       const actual = prev[key] || 0;
@@ -78,7 +76,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
     return ['Todos', ...catalogo.filter(c => c.categoria !== 'Complementos Automáticos').map(c => c.categoria)];
   }, [catalogo]);
 
-  // Calcular Totales (Incluyendo la rebaja de la campaña)
   const { totalItems, subtotalUsdOriginal, subtotalUsd } = useMemo(() => {
     let items = 0;
     let usd = 0;
@@ -93,9 +90,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       }));
     });
     
-    // Aplicamos el descuento global matemáticamente al total
     const discountedUsd = usd * (1 - globalDiscountPercent / 100);
-
     return { totalItems: items, subtotalUsdOriginal: usd, subtotalUsd: discountedUsd };
   }, [carrito, catalogo, globalDiscountPercent]);
 
@@ -111,7 +106,12 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       const base64Data = await compressImage(file, 800, 0.7);
       const response = await fetch(URL_GOOGLE_SCRIPT, {
         method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ fileName: `ComprobanteWeb_${Date.now()}.jpg`, mimeType: 'image/jpeg', data: base64Data })
+        body: JSON.stringify({ 
+           tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
+           fileName: `ComprobanteWeb_${Date.now()}.jpg`, 
+           mimeType: 'image/jpeg', 
+           data: base64Data 
+        })
       });
       const result = await response.json();
       if (result.url) setForm({ ...form, comprobanteUrl: result.url });
@@ -123,10 +123,12 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
     }
   };
 
+  // LIMPIEZA DE CÓDIGO MALICIOSO
+  const limpiarTexto = (str) => str ? str.replace(/[<>]/g, "") : "";
+
   const confirmarPedido = async (e) => {
     e.preventDefault();
     if (totalItems === 0) return dialogs.alert("Tu carrito está vacío.");
-    
     if (!form.nombre || !form.cedula || !form.telefono || !form.agencia || !form.direccion) {
       return dialogs.alert("Por favor, llena todos los datos obligatorios de envío.");
     }
@@ -143,10 +145,10 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       const productosString = lineas.join('\n');
 
       const nuevoPedido = {
-        clienteNombre: form.nombre,
-        clienteCedula: form.cedula,
-        clienteTelefono: form.telefono,
-        direccion: form.direccion,
+        clienteNombre: limpiarTexto(form.nombre),
+        clienteCedula: limpiarTexto(form.cedula),
+        clienteTelefono: limpiarTexto(form.telefono),
+        direccion: limpiarTexto(form.direccion),
         courier: form.agencia,
         esMercadoLibre: false,
         esRegalo: false,
@@ -164,7 +166,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         esPublico: true,
         auditado: false,
         fechaCreacion: Date.now(),
-        descuentoGlobalAplicado: globalDiscountPercent // Guardar registro de que compraron en campaña
+        descuentoGlobalAplicado: globalDiscountPercent 
       };
 
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), nuevoPedido);
@@ -172,7 +174,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       dialogs.alert("¡Tu pedido y pago han sido enviados con éxito! Nuestro equipo lo procesará en breve.", "¡Gracias por tu compra!");
       setCarrito({});
       setIsCartOpen(false);
-      setForm({ nombre: '', cedula: '', telefono: '', agencia: 'ZOOM', direccion: '', referencia: '', comprobanteUrl: '' });
+      setForm({ nombre: '', cedula: '', telefono: '', agencia: '', direccion: '', referencia: '', comprobanteUrl: '' });
       
     } catch (error) {
       console.error(error);
@@ -184,7 +186,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-slate-900 transition-colors text-slate-800 dark:text-slate-100 pb-20">
-      {/* HEADER PÚBLICO */}
       <header className="sticky top-0 z-40 bg-white/80 dark:bg-slate-950/80 backdrop-blur-lg border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex justify-between items-center shadow-sm">
         <button onClick={onBack} className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
           <ArrowLeft size={24} />
@@ -201,21 +202,18 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         </div>
       </header>
 
-      {/* BANNER DE DESCUENTO GLOBAL */}
       {isGlobalDiscountActive && (
          <div className="bg-gradient-to-r from-pink-500 to-purple-600 text-white text-center py-2 px-4 font-bold text-xs sm:text-sm animate-pulse shadow-md">
             ¡APROVECHA EL {globalDiscountPercent}% DE DESCUENTO EN TODA LA TIENDA HASTA EL {config.descuentoGlobalFin}!
          </div>
       )}
 
-      {/* HERO SECTION */}
       <div className="bg-[#003366] text-white py-12 px-4 text-center border-b-4 border-sky-400">
         <Store size={48} className="mx-auto mb-4 opacity-50" />
         <h1 className="text-3xl md:text-4xl font-black mb-2 uppercase tracking-tighter">Tienda Oficial Bluher</h1>
         <p className="text-sky-200 text-sm md:text-base font-medium max-w-lg mx-auto">Selecciona tus productos profesionales. Tasa de cálculo de hoy: <b>{tasa} Bs/$</b></p>
       </div>
 
-      {/* SECCIÓN DE BÚSQUEDA Y FILTROS */}
       <div className="max-w-6xl mx-auto px-4 mt-8">
         <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
           <div className="relative mb-6">
@@ -245,7 +243,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         </div>
       </div>
 
-      {/* CATÁLOGO DE PRODUCTOS */}
       <main className="max-w-6xl mx-auto p-4 mt-4">
         {catalogFiltered.length === 0 ? (
           <div className="text-center py-20 px-4 bg-white dark:bg-slate-800 rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 mt-8">
@@ -273,7 +270,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                         const qty = carrito[key] || 0;
                         const disp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
                         
-                        // Lógica visual del descuento en producto
                         const originalPrice = prod.precios[i];
                         const discountedPrice = originalPrice * (1 - globalDiscountPercent / 100);
 
@@ -311,7 +307,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         )}
       </main>
 
-      {/* SIDEBAR DEL CARRITO / CHECKOUT */}
       {isCartOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setIsCartOpen(false)}></div>
@@ -372,8 +367,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                          <Input label="Cédula o RIF" value={form.cedula} onChange={e=>setForm({...form, cedula: e.target.value})} required placeholder="Ej: V-12345678"/>
                          <Input label="Teléfono" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
                          
-                        {/* MODO CLARO */}
-                        <div className="flex flex-col">
+                         <div className="flex flex-col">
                            <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Agencia de Envío</label>
                            <select value={form.agencia} onChange={e=>setForm({...form, agencia: e.target.value})} required className={`p-3.5 border-2 rounded-2xl focus:border-sky-500 outline-none font-bold transition-all text-sm bg-slate-50 ${!form.agencia ? 'border-amber-400 text-slate-400' : 'border-slate-100 text-slate-700'}`}>
                              <option value="" disabled>Seleccionar agencia...</option>
@@ -409,7 +403,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
               )}
             </div>
 
-            {/* Footer Carrito */}
             <div className="p-6 bg-white dark:bg-slate-900 border-t dark:border-slate-800">
                {isGlobalDiscountActive && (
                  <div className="flex justify-between items-center mb-1 text-slate-400">
@@ -426,8 +419,8 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                </div>
                <div className="text-right text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-6">Equivale a: Bs. {totalVes.toFixed(2)}</div>
                
-               <button form="checkout-form" type="submit" disabled={totalItems === 0 || enviando} className="w-full bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white font-black py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 uppercase tracking-widest transition-all hover:-translate-y-1 disabled:opacity-50 disabled:hover:translate-y-0">
-                 {enviando ? <Loader2 className="animate-spin"/> : 'Enviar Pedido por Web'}
+               <button form="checkout-form" type="submit" disabled={totalItems === 0 || enviando || subiendoFoto} className="w-full bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 disabled:bg-slate-400 dark:disabled:bg-slate-700 text-white font-black py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 uppercase tracking-widest transition-all hover:-translate-y-1 disabled:opacity-50 disabled:hover:translate-y-0">
+                 {enviando ? <><Loader2 className="animate-spin"/> Procesando...</> : 'Enviar Pedido y Comprobante'}
                </button>
             </div>
           </div>

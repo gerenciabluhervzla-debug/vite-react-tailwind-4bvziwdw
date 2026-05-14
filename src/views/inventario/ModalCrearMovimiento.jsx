@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { ArrowRightLeft, PlusCircle, X, Camera, Loader2 } from 'lucide-react';
-import { addDoc, collection, setDoc, doc } from 'firebase/firestore';
+// ¡Atención a la importación de 'increment'!
+import { addDoc, collection, setDoc, doc, updateDoc, increment } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../../config/firebase';
-import { compressImage } from '../../utils/image'; // <-- Importamos nuestro compresor (nota los ../../)
+import { compressImage } from '../../utils/image';
 
 export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId, loggear, perfil, dialogs, onClose }) {
   const [carrito, setCarrito] = useState({});
   const [fotoUrl, setFotoUrl] = useState('');
-  const [subiendoFoto, setSubiendoFoto] = useState(false); // <-- Añadimos estado de carga para el botón
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
   const isTransfer = tipo === 'TRANSFERENCIA';
 
   const updateQty = (key, delta) => {
@@ -25,7 +26,6 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
     });
   };
 
-  // --- LÓGICA DE SUBIDA DE FOTO CON COMPRESIÓN ---
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -35,38 +35,25 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
         return;
     }
 
-    setSubiendoFoto(true); // Bloqueamos el input mientras procesa
+    setSubiendoFoto(true);
     try {
-        // COMPRESIÓN MÁGICA: Reducimos el peso de la evidencia de 5MB a ~150KB
         const base64Data = await compressImage(file, 800, 0.7);
-        
         const response = await fetch(URL_GOOGLE_SCRIPT, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-                fileName: `Evidencia_Movimiento_${Date.now()}.jpg`,
-                mimeType: 'image/jpeg',
-                data: base64Data
-            })
+            body: JSON.stringify({tokenSecreto: "BLUHER_SECURE_TOKEN_2026", fileName: `Evidencia_Movimiento_${Date.now()}.jpg`, mimeType: 'image/jpeg', data: base64Data })
         });
-
         const result = await response.json();
-        if (result.url) {
-            setFotoUrl(result.url);
-        } else {
-            throw new Error("No se recibió URL válida");
-        }
+        if (result.url) { setFotoUrl(result.url); } 
+        else { throw new Error("No se recibió URL válida"); }
     } catch (error) {
-        console.error(error);
-        dialogs.alert("Error subiendo la evidencia fotográfica a Drive. Revisa tu conexión.", "Fallo de Red");
-    } finally {
-        setSubiendoFoto(false);
-    }
+        console.error(error); dialogs.alert("Error subiendo la evidencia fotográfica a Drive.", "Fallo de Red");
+    } finally { setSubiendoFoto(false); }
   };
 
   const handleSubmit = async () => {
-    if (Object.keys(carrito).length === 0) return dialogs.alert("No has seleccionado ningún producto para el movimiento.", "Carrito Vacío");
-    if (isTransfer && !fotoUrl) return dialogs.alert("Debes incluir una foto como soporte físico para enviar a Recepción.", "Soporte Obligatorio");
+    if (Object.keys(carrito).length === 0) return dialogs.alert("No has seleccionado ningún producto.", "Carrito Vacío");
+    if (isTransfer && !fotoUrl) return dialogs.alert("Debes incluir una foto como soporte físico.", "Soporte Obligatorio");
     
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), {
@@ -76,24 +63,27 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
       });
 
       const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
-      let currentStock = { ...stock };
+      const updates = {};
 
       Object.entries(carrito).forEach(([key, qty]) => {
-         let actualEnv = typeof currentStock[key] === 'object' ? currentStock[key].envios : (currentStock[key]||0);
-         let actualRec = typeof currentStock[key] === 'object' ? currentStock[key].recepcion : 0;
-         
          if (tipo === 'INGRESO') {
-           currentStock[key] = { envios: actualEnv + qty, recepcion: actualRec };
+           // Sumamos a envíos
+           updates[`${key}.envios`] = increment(qty);
          } else if (tipo === 'TRANSFERENCIA') {
-           currentStock[key] = { envios: actualEnv - qty, recepcion: actualRec };
+           // Restamos de envíos (recepción se suma después cuando lo aprueben)
+           updates[`${key}.envios`] = increment(-qty);
          }
       });
-      await setDoc(stockRef, currentStock);
+      
+      // Aplicar actualización atómica
+      if(Object.keys(updates).length > 0){
+         await updateDoc(stockRef, updates);
+      }
 
       loggear(`MOVIMIENTO_${tipo}`, `${perfil.nombre} generó un(a) ${tipo} de ${Object.keys(carrito).length} items.`);
-      dialogs.alert(`La operación de ${tipo} fue registrada exitosamente en el sistema.`, "Movimiento Procesado"); 
+      dialogs.alert(`La operación de ${tipo} fue registrada exitosamente.`, "Movimiento Procesado"); 
       onClose();
-    } catch(e) { console.error(e); }
+    } catch(e) { console.error(e); dialogs.alert("Error de conexión al procesar el movimiento."); }
   };
 
   return (
