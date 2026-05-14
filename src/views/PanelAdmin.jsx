@@ -12,9 +12,17 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const esAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(perfil?.role);
 
   const [descForm, setDescForm] = useState({ porcentaje: '', inicio: '', fin: '' });
-  
-  // NUEVO: Estado para el modal interactivo de validación (Sobrante + Capture)
   const [modalValidacion, setModalValidacion] = useState(null);
+
+  // --- FILTRO DE FECHAS PARA EL HISTORIAL (POR DEFECTO HOY) ---
+  const getVeneziaDate = () => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+  const hoyStr = getVeneziaDate();
+  
+  const [fechaInicio, setFechaInicio] = useState(hoyStr);
+  const [fechaFin, setFechaFin] = useState(hoyStr);
 
   useEffect(() => {
     if (config) {
@@ -27,7 +35,16 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   }, [config]);
 
   const pendientes = pedidos.filter(p => p.status === 'Pendiente');
-  const historial = pedidos.filter(p => p.status !== 'Pendiente');
+  
+  const historialFiltrado = useMemo(() => {
+    const todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
+    if (!fechaInicio || !fechaFin) return todosHistorial;
+    
+    const fInicio = new Date(fechaInicio + 'T00:00:00').getTime();
+    const fFin = new Date(fechaFin + 'T23:59:59').getTime();
+    
+    return todosHistorial.filter(p => p.fechaCreacion >= fInicio && p.fechaCreacion <= fFin);
+  }, [pedidos, fechaInicio, fechaFin]);
 
   const actualizarTasa = async () => {
     dialogs.prompt("Ingresa la nueva tasa del día en Bolívares (Bs/$):", async (nuevaTasa) => {
@@ -83,7 +100,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Apagar Campaña");
   };
 
-  // --- LÓGICA DEL NUEVO MODAL DE VALIDACIÓN Y CAPTURE ---
   const abrirModalValidacion = (pedido) => {
     setModalValidacion({
       pedido: pedido,
@@ -115,7 +131,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     try {
       let urlComprobanteAdmin = '';
       
-      // Si el admin pegó una imagen, la subimos primero a Drive
       if (file && URL_GOOGLE_SCRIPT) {
         const base64Data = await compressImage(file, 800, 0.7);
         const response = await fetch(URL_GOOGLE_SCRIPT, {
@@ -131,7 +146,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         if (result.url) urlComprobanteAdmin = result.url;
       }
 
-      // Resta atómica del inventario (Protección contra colisiones)
       const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
       const updates = {};
       Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => {
@@ -142,7 +156,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
          await updateDoc(stockRef, updates);
       }
 
-      // Construir payload de actualización del pedido
       const sobranteUsd = parseFloat(sobrante.replace(',', '.')) || 0;
       const payloadPedido = { status: 'Validado', sobranteUsd };
       if (urlComprobanteAdmin) payloadPedido.linkComprobanteAdmin = urlComprobanteAdmin;
@@ -208,7 +221,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     return Object.values(dias).sort((a,b) => b.fecha.localeCompare(a.fecha)); 
   }, [pedidos]);
 
-  const listado = vistaAdmin === 'pendientes' ? pendientes : historial;
+  const listado = vistaAdmin === 'pendientes' ? pendientes : historialFiltrado;
   const fechaHoy = new Date().toLocaleDateString('es-VE');
   const tasaActualizadaHoy = config?.ultimaActualizacion === fechaHoy;
   const isGlobalDiscountActiveStatus = config?.descuentoGlobalActivo;
@@ -306,108 +319,129 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           </div>
         </div>
 
-        {['pendientes', 'historial'].includes(vistaAdmin) && (
-          <div className="rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden bg-white dark:bg-slate-800/20 animate-in fade-in">
-            <div className="hidden lg:grid lg:grid-cols-12 gap-6 p-4 bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-b dark:border-slate-700 text-sm">
-              <div className="lg:col-span-5 font-bold tracking-wide">Datos del Pedido</div>
-              <div className="lg:col-span-4 font-bold tracking-wide">Información de Pago</div>
-              <div className="lg:col-span-3 font-bold tracking-wide text-right">Acción Requerida</div>
+        {vistaAdmin === 'historial' && (
+          <div className="flex flex-col sm:flex-row gap-4 mb-6 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+            <div className="flex-1">
+               <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Desde (Fecha)</label>
+               <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm" />
             </div>
+            <div className="flex-1">
+               <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Hasta (Fecha)</label>
+               <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm" />
+            </div>
+            <div className="flex items-end pb-1">
+               {(fechaInicio !== hoyStr || fechaFin !== hoyStr) && (
+                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 underline">Limpiar y ver Hoy</button>
+               )}
+            </div>
+          </div>
+        )}
 
-            <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-700">
-              {listado.length === 0 ? (
-                <div className="p-10 text-center text-slate-400 italic font-bold">Lista limpia. Buen trabajo.</div>
-              ) : listado.map(p => (
-                <div key={p.id} className={`flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 transition-colors ${vistaAdmin === 'historial' && !p.auditado ? 'bg-amber-50/30 border-l-4 border-amber-300 dark:bg-amber-900/5 dark:border-amber-800' : 'hover:bg-slate-50/50 dark:hover:bg-slate-800/50 border-l-4 border-transparent'}`}>
-                   
-                   {/* Columna 1: Pedido */}
-                   <div className="lg:col-span-5 flex flex-col justify-start">
-                     <div className="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                       {p.clienteNombre}
-                       {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
-                     </div>
-                     <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-1">Asesora: <span className="text-slate-700 dark:text-slate-300">{p.asesora}</span></div>
-                     
-                     <div className="text-[13px] font-medium text-slate-700 dark:text-slate-300 bg-[#f0f4f8] dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3 mt-3 rounded-xl shadow-sm">
-                       <span className="font-bold text-sky-700 dark:text-sky-400 flex items-center gap-1.5 mb-2 uppercase tracking-wider text-xs"><Package size={14}/> Productos a descontar:</span>
-                       {p.productos ? (
-                          <div className="whitespace-pre-wrap leading-relaxed">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
-                       ) : (
-                          p.carritoObj ? Object.entries(p.carritoObj).map(([key, qty]) => <div key={key} className="flex gap-2 mb-1"><span className="font-bold text-slate-800 dark:text-slate-100">{qty}x</span> <span>{key.replace('|', ' ')}</span></div>) : 'Sin detalle.'
-                       )}
-                     </div>
+        {['pendientes', 'historial'].includes(vistaAdmin) && (
+          <div className="flex flex-col gap-6">
+            {listado.length === 0 ? (
+              <div className="p-10 text-center text-slate-400 italic font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl">
+                No hay pedidos para mostrar en esta vista/fecha.
+              </div>
+            ) : listado.map(p => (
+              <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-6 transition-colors border-2 rounded-2xl shadow-sm bg-white dark:bg-slate-800 ${vistaAdmin === 'historial' && !p.auditado ? 'border-amber-300 dark:border-amber-800' : 'border-slate-200 dark:border-slate-600 hover:border-sky-300'}`}>
+                 
+                 <div className="absolute top-4 right-4">
+                    <StatusBadge status={p.status}/>
+                 </div>
+
+                 {/* Columna 1: Pedido */}
+                 <div className="lg:col-span-5 flex flex-col justify-start">
+                   <div className="font-bold text-lg text-slate-800 dark:text-slate-100 pr-24 leading-tight">
+                     {p.clienteNombre}
+                   </div>
+                   <div className="text-[11px] font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1 mb-2">
+                     Ingresado el: {new Date(p.fechaCreacion).toLocaleDateString('es-VE')} a las {new Date(p.fechaCreacion).toLocaleTimeString('es-VE', {hour: '2-digit', minute:'2-digit'})}
                    </div>
 
-                   {/* Columna 2: Pagos */}
-                   <div className="lg:col-span-4 flex flex-col justify-start mt-2 lg:mt-0">
-                     <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monto Validado:</span>
-                     {p.esRegalo ? (
-                        <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 mb-2"><Gift size={20}/> REGALO VIP</div>
+                   <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                     <span className="bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">Vendedor: {p.asesora}</span>
+                     {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded font-black uppercase tracking-widest border border-yellow-300">MercadoLibre</span>}
+                   </div>
+                   
+                   <div className="text-[13px] font-medium text-slate-700 dark:text-slate-300 bg-[#f0f4f8] dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3 mt-3 rounded-xl shadow-inner">
+                     <span className="font-bold text-sky-700 dark:text-sky-400 flex items-center gap-1.5 mb-2 uppercase tracking-wider text-[10px]"><Package size={14}/> Productos Facturados:</span>
+                     {p.productos ? (
+                        <div className="whitespace-pre-wrap leading-relaxed">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
                      ) : (
-                        <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800 mb-3">
-                          <div className="font-black text-slate-800 dark:text-slate-100 text-2xl">${(p.montoUsd||0).toFixed(2)}</div>
-                          <div className="font-bold text-emerald-600 dark:text-emerald-400 text-base mb-1">Bs. {(p.montoVes||0).toFixed(2)}</div>
-                          <div className="text-[11px] font-semibold text-slate-500 mb-2">Tasa Aplicada: Bs. {p.tasaAplicada}</div>
-                          
-                          {p.sobranteUsd > 0 && <div className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded w-max">+ Sobrante: ${p.sobranteUsd}</div>}
-                          {p.faltanteUsd > 0 && <div className="text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded w-max mt-1">- Faltante: ${p.faltanteUsd}</div>}
-                          
-                          {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800">Campaña: {p.descuentoGlobalAplicado}%</span>}
-                              {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">Asesor: {p.descuentoPorcentaje}%</span>}
-                            </div>
-                          )}
-                        </div>
+                        p.carritoObj ? Object.entries(p.carritoObj).map(([key, qty]) => <div key={key} className="flex gap-2 mb-1"><span className="font-bold text-slate-800 dark:text-slate-100">{qty}x</span> <span>{key.replace('|', ' ')}</span></div>) : 'Sin detalle.'
                      )}
-                     
-                     <div className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 break-all mb-2">
-                       <span className="text-slate-400 mr-1 block sm:inline">Ref:</span>{p.referencia}
-                     </div>
-                     
-                     <div className="flex flex-col gap-2 mb-3">
-                        {p.linkComprobantePago && (
-                          <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2 rounded-lg font-bold flex items-center gap-1.5 transition-colors w-max border border-sky-100 dark:border-sky-800">
-                            <FileText size={16}/> Capture (Cliente/Ventas)
-                          </a>
-                        )}
-                        {p.linkComprobanteAdmin && (
-                          <a href={p.linkComprobanteAdmin} target="_blank" rel="noreferrer" className="text-xs text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 p-2 rounded-lg font-bold flex items-center gap-1.5 transition-colors w-max border border-purple-100 dark:border-purple-800">
-                            <ImageIcon size={16}/> Extracto Banco (Admin)
-                          </a>
-                        )}
-                     </div>
+                   </div>
+                 </div>
 
-                     <div className="mb-2"><StatusBadge status={p.status}/></div>
-                     
-                     {p.notasAuditoria && p.notasAuditoria.length > 0 && (
-                       <div className="mt-2 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
-                         <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-1.5">Notas de Auditoría:</span>
-                         {p.notasAuditoria.map((n, i) => <div key={i} className="text-[11px] text-amber-800 dark:text-amber-300 italic mb-1 last:mb-0">"{n.texto}" - {n.autor}</div>)}
+                 {/* Columna 2: Pagos */}
+                 <div className="lg:col-span-4 flex flex-col justify-start mt-2 lg:mt-0">
+                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-100 dark:border-slate-700 pb-1">Análisis Financiero</span>
+                   
+                   {p.esRegalo ? (
+                      <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl"><Gift size={20}/> REGALO VIP</div>
+                   ) : (
+                      <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-3">
+                        <div className="font-black text-slate-800 dark:text-slate-100 text-2xl">${(p.montoUsd||0).toFixed(2)}</div>
+                        <div className="font-bold text-emerald-600 dark:text-emerald-400 text-base mb-1">Bs. {(p.montoVes||0).toFixed(2)}</div>
+                        <div className="text-[11px] font-semibold text-slate-500 mb-2">Tasa Aplicada: Bs. {p.tasaAplicada}</div>
+                        
+                        {p.sobranteUsd > 0 && <div className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded w-max mt-2 border border-purple-200">+ Sobrante: ${p.sobranteUsd}</div>}
+                        {p.faltanteUsd > 0 && <div className="text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded w-max mt-2 border border-red-200">- Faltante: ${p.faltanteUsd}</div>}
+                        
+                        {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800">Campaña: {p.descuentoGlobalAplicado}%</span>}
+                            {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">Asesor: {p.descuentoPorcentaje}%</span>}
+                          </div>
+                        )}
+                      </div>
+                   )}
+                   
+                   <div className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 break-all mb-3">
+                     <span className="text-slate-400 mr-1 block sm:inline">Ref:</span>{p.referencia}
+                   </div>
+                   
+                   <div className="flex flex-col gap-2">
+                      {p.linkComprobantePago && (
+                        <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2 rounded-lg font-bold flex items-center gap-1.5 transition-colors w-max border border-sky-100 dark:border-sky-800/50">
+                          <FileText size={16}/> Capture (Cliente/Ventas)
+                        </a>
+                      )}
+                      {p.linkComprobanteAdmin && (
+                        <a href={p.linkComprobanteAdmin} target="_blank" rel="noreferrer" className="text-xs text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 p-2 rounded-lg font-bold flex items-center gap-1.5 transition-colors w-max border border-purple-100 dark:border-purple-800/50">
+                          <ImageIcon size={16}/> Extracto Banco (Admin)
+                        </a>
+                      )}
+                   </div>
+
+                   {p.notasAuditoria && p.notasAuditoria.length > 0 && (
+                     <div className="mt-3 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
+                       <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-1.5">Notas de Auditoría:</span>
+                       {p.notasAuditoria.map((n, i) => <div key={i} className="text-[11px] text-amber-800 dark:text-amber-300 italic mb-1 last:mb-0">"{n.texto}" - {n.autor}</div>)}
+                     </div>
+                   )}
+                 </div>
+
+                 {/* Columna 3: Acciones */}
+                 <div className="lg:col-span-3 flex flex-col items-stretch lg:items-end justify-start mt-4 lg:mt-0 pt-4 lg:pt-0 border-t border-slate-100 dark:border-slate-700 lg:border-none w-full gap-3 h-full">
+                     {esAdmin && p.status === 'Pendiente' && (
+                       <div className="flex flex-col gap-2 w-full mt-auto">
+                         <button onClick={()=>abrirModalValidacion(p)} className="bg-sky-600 text-white px-5 py-3 rounded-xl font-black text-sm shadow-md hover:bg-sky-700 transition-all hover:-translate-y-0.5 w-full uppercase tracking-wider">Validar Pago</button>
+                         <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-5 py-3 rounded-xl font-bold text-sm transition-colors w-full">Devolver Pedido</button>
                        </div>
                      )}
-                   </div>
-
-                   {/* Columna 3: Acciones */}
-                   <div className="lg:col-span-3 flex flex-col items-stretch lg:items-end justify-start mt-4 lg:mt-0 pt-4 lg:pt-0 border-t border-slate-100 dark:border-slate-700 lg:border-none w-full gap-3">
-                       {esAdmin && p.status === 'Pendiente' && (
-                         <div className="flex flex-col sm:flex-row lg:flex-col gap-2 w-full">
-                           <button onClick={()=>abrirModalValidacion(p)} className="bg-sky-600 text-white px-5 py-3 rounded-xl font-bold text-sm lg:text-xs shadow-md hover:bg-sky-700 transition-all hover:-translate-y-0.5 w-full">Aprobar y Descontar</button>
-                           <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-5 py-3 rounded-xl font-bold text-sm lg:text-xs transition-colors w-full">Devolver Pedido</button>
-                         </div>
-                       )}
-                       {(esAuditor || esAdmin) && p.status !== 'Pendiente' && (
-                         <button onClick={()=>marcarAuditoria(p)} className={`px-5 py-3 rounded-xl font-bold text-sm lg:text-xs flex items-center justify-center gap-2 border-2 transition-all w-full lg:w-max ${p.auditado ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
-                           {p.auditado ? <><ShieldCheck size={16}/> Auditoría Validada</> : <><Eye size={16}/> Marcar Revisión</>}
-                         </button>
-                       )}
-                       {vistaAdmin === 'historial' && !p.auditado && (
-                         <div className="text-[10px] font-black uppercase text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 w-full lg:w-max mt-1"><AlertTriangle size={14}/> Sin Auditar</div>
-                       )}
-                   </div>
-                </div>
-              ))}
-            </div>
+                     {(esAuditor || esAdmin) && p.status !== 'Pendiente' && (
+                       <button onClick={()=>marcarAuditoria(p)} className={`px-5 py-3 rounded-xl font-bold text-sm lg:text-xs flex items-center justify-center gap-2 border-2 transition-all w-full lg:w-max mt-auto ${p.auditado ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400' : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+                         {p.auditado ? <><ShieldCheck size={16}/> Auditoría Validada</> : <><Eye size={16}/> Marcar Revisión</>}
+                       </button>
+                     )}
+                     {vistaAdmin === 'historial' && !p.auditado && (
+                       <div className="text-[10px] font-black uppercase text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 w-full lg:w-max mt-2 border border-amber-200"><AlertTriangle size={14}/> Sin Auditar</div>
+                     )}
+                 </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -500,8 +534,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                     }}/>
                  </div>
                  
-                 <button onClick={procesarValidacionDefinitiva} disabled={modalValidacion.subiendo} className="w-full bg-[#003366] hover:bg-[#002244] dark:bg-sky-600 dark:hover:bg-sky-700 text-white font-black py-4 rounded-xl mt-6 shadow-xl transition-transform hover:-translate-y-0.5 disabled:opacity-50 flex items-center justify-center gap-2">
-                   {modalValidacion.subiendo ? <><Loader2 className="animate-spin"/> Subiendo Extracto y Validando...</> : 'Aprobar y Descontar Inventario'}
+                 <button onClick={procesarValidacionDefinitiva} disabled={modalValidacion.subiendo} className="w-full bg-[#003366] hover:bg-[#002244] dark:bg-sky-600 dark:hover:bg-sky-700 text-white font-black py-4 rounded-xl mt-6 shadow-xl transition-transform hover:-translate-y-0.5 disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest">
+                   {modalValidacion.subiendo ? <><Loader2 className="animate-spin"/> Guardando...</> : 'Aprobar y Descontar'}
                  </button>
               </div>
            </div>

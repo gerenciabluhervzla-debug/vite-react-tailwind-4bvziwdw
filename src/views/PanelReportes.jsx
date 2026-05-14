@@ -7,13 +7,14 @@ export default function PanelReportes({ perfil, pedidos, catalogo, stock }) {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   };
-  const hoy = getVeneziaDate();
+  const hoyStr = getVeneziaDate();
   
-  const [fechaInicio, setFechaInicio] = useState(hoy);
-  const [fechaFin, setFechaFin] = useState(hoy);
+  const [fechaInicio, setFechaInicio] = useState(hoyStr);
+  const [fechaFin, setFechaFin] = useState(hoyStr);
   
   const verDinero = perfil?.role === 'ADMIN' || perfil?.role === 'ADMINISTRACION' || perfil?.role === 'AUDITORIA';
 
+  // Filtro principal para la vista visual y el PDF (Día seleccionado)
   const pedidosFiltrados = useMemo(() => {
     if (!fechaInicio || !fechaFin) return [];
     const fInicio = new Date(fechaInicio + 'T00:00:00').getTime();
@@ -24,7 +25,7 @@ export default function PanelReportes({ perfil, pedidos, catalogo, stock }) {
     });
   }, [pedidos, fechaInicio, fechaFin]);
 
-  const totales = useMemo(() => {
+  const totalesFiltro = useMemo(() => {
     let usd = 0; let ves = 0; let count = 0;
     pedidosFiltrados.forEach(p => {
       usd += (p.montoUsd || 0);
@@ -33,6 +34,17 @@ export default function PanelReportes({ perfil, pedidos, catalogo, stock }) {
     });
     return { usd, ves, count };
   }, [pedidosFiltrados]);
+
+  // Cálculo especial: Ventas en USD de TODO EL MES ACTUAL (Month to Date)
+  const ventasMesUsd = useMemo(() => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const primerDiaMes = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    const hoyFin = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).getTime();
+    
+    return pedidos
+      .filter(p => p.status !== 'Rechazado' && p.status !== 'Pendiente' && p.fechaCreacion >= primerDiaMes && p.fechaCreacion <= hoyFin)
+      .reduce((sum, p) => sum + (p.montoUsd || 0), 0);
+  }, [pedidos]);
 
   const topProductos = useMemo(() => {
     const conteo = {};
@@ -64,22 +76,28 @@ export default function PanelReportes({ perfil, pedidos, catalogo, stock }) {
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Reporte de Ventas Bluher</title>
+        <title>Cierre de Ventas Bluher</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
           body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 900px; margin: 0 auto; }
           .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0ea5e9; padding-bottom: 20px; margin-bottom: 30px; }
           .logo { height: 60px; object-fit: contain; }
-          h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; }
-          .meta-info { margin-bottom: 30px; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between;}
-          .meta-box p { margin: 5px 0; font-size: 14px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
+          h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; text-transform: uppercase; }
+          
+          .kpi-container { display: flex; gap: 20px; margin-bottom: 30px; }
+          .kpi-box { flex: 1; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; }
+          .kpi-box.main { background: #0f172a; color: white; border: none; }
+          .kpi-box h3 { margin: 0 0 10px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
+          .kpi-box.main h3 { color: #38bdf8; }
+          .kpi-box p { margin: 0; font-size: 24px; font-weight: 900; }
+          .kpi-box.main p { font-size: 32px; }
+          
+          h2 { font-size: 16px; font-weight: 900; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-top: 40px;}
+          table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
           th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 8px; text-align: left; vertical-align: top; }
-          th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
-          .total-box { margin-top: 30px; padding: 20px; background: #0f172a; color: white; border-radius: 12px; text-align: right; }
-          .total-box h3 { margin: 0 0 10px 0; color: #38bdf8; text-transform: uppercase; letter-spacing: 2px; font-size: 14px; }
-          .total-box .big-number { font-size: 32px; font-weight: 900; margin: 0; }
-          .total-box .sub-number { font-size: 18px; color: #cbd5e1; margin: 5px 0 0 0; }
+          th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+          .products-list { color: #475569; line-height: 1.5; }
+          
           @media print { body { padding: 0; } .no-print { display: none; } }
         </style>
       </head>
@@ -90,15 +108,37 @@ export default function PanelReportes({ perfil, pedidos, catalogo, stock }) {
 
         <div class="header">
           <div>
-            <h1>Reporte Detallado de Ventas</h1>
-            <p style="color: #64748b; margin-top: 5px; font-size: 14px;">Periodo: ${fechaInicio} al ${fechaFin}</p>
+            <h1>Reporte de Ventas</h1>
+            <p style="color: #64748b; margin-top: 5px; font-size: 14px;">Fecha(s) consultada: ${fechaInicio} al ${fechaFin}</p>
           </div>
           <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
         </div>
 
+        <div class="kpi-container">
+           <div class="kpi-box">
+              <h3>Ventas del Día (Bs)</h3>
+              <p>Bs. ${totalesFiltro.ves.toFixed(2)}</p>
+           </div>
+           <div class="kpi-box main">
+              <h3>Ventas del Día (USD)</h3>
+              <p>$${totalesFiltro.usd.toFixed(2)}</p>
+           </div>
+           <div class="kpi-box" style="border-color: #c084fc; background: #faf5ff;">
+              <h3 style="color: #9333ea;">Ventas Acum. del Mes</h3>
+              <p style="color: #7e22ce;">$${ventasMesUsd.toFixed(2)}</p>
+           </div>
+        </div>
+
+        <h2>Detalle de Clientes del Día</h2>
         <table>
           <thead>
-            <tr><th>Cliente</th><th>Referencia</th><th>Productos</th><th style="text-align:right;">Monto Bs</th><th style="text-align:right;">Monto $</th></tr>
+            <tr>
+              <th style="width: 25%;">Cliente</th>
+              <th style="width: 20%;">Ref. Bancaria</th>
+              <th style="width: 35%;">Productos Facturados</th>
+              <th style="text-align:right; width: 10%;">Bs</th>
+              <th style="text-align:right; width: 10%;">USD</th>
+            </tr>
           </thead>
           <tbody>
     `;
@@ -106,23 +146,20 @@ export default function PanelReportes({ perfil, pedidos, catalogo, stock }) {
     pedidosFiltrados.forEach(p => {
        const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
        html += `<tr>
-         <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${new Date(p.fechaCreacion).toLocaleDateString('es-VE')}</span></td>
-         <td>${p.referencia}</td>
-         <td style="color:#475569;">${prodsFormat}</td>
-         <td style="text-align:right; font-weight:bold; color:#059669;">Bs ${(p.montoVes || 0).toFixed(2)}</td>
-         <td style="text-align:right; font-weight:bold; font-size:14px;">$${(p.montoUsd || 0).toFixed(2)}</td>
+         <td><strong>${p.clienteNombre}</strong></td>
+         <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia}</span></td>
+         <td class="products-list">${prodsFormat}</td>
+         <td style="text-align:right; font-weight:bold; color:#059669;">${(p.montoVes || 0).toFixed(2)}</td>
+         <td style="text-align:right; font-weight:900; font-size:13px;">$${(p.montoUsd || 0).toFixed(2)}</td>
        </tr>`;
     });
 
+    if (pedidosFiltrados.length === 0) {
+      html += `<tr><td colspan="5" style="text-align:center; padding: 30px; font-style: italic; color: #94a3b8;">No se registraron ventas válidas en la fecha seleccionada.</td></tr>`;
+    }
+
     html += `</tbody></table>
       
-      <div class="total-box">
-         <h3>Ventas Totales del Periodo</h3>
-         <p class="big-number">$${totales.usd.toFixed(2)} USD</p>
-         <p class="sub-number">Bs. ${totales.ves.toFixed(2)}</p>
-         <p style="font-size:12px; color:#64748b; margin-top:15px;">Total de pedidos procesados: ${totales.count}</p>
-      </div>
-
       <div style="margin-top: 50px; border-top: 1px dashed #cbd5e1; padding-top: 20px; color: #94a3b8; font-size: 11px; text-align: center;">
          Documento generado automáticamente por el Sistema de Gestión Bluher el ${new Date().toLocaleString('es-VE')}
       </div>
@@ -157,17 +194,17 @@ export default function PanelReportes({ perfil, pedidos, catalogo, stock }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center gap-4 transition-colors">
           <div className="w-14 h-14 rounded-2xl bg-sky-50 dark:bg-sky-900/30 flex items-center justify-center text-sky-600 dark:text-sky-400"><ShoppingBag size={24}/></div>
-          <div><div className="text-sm font-bold text-slate-400 uppercase tracking-widest">Pedidos</div><div className="text-3xl font-black text-slate-800 dark:text-slate-100">{totales.count}</div></div>
+          <div><div className="text-sm font-bold text-slate-400 uppercase tracking-widest">Pedidos</div><div className="text-3xl font-black text-slate-800 dark:text-slate-100">{totalesFiltro.count}</div></div>
         </div>
         {verDinero && (
           <>
             <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center gap-4 transition-colors">
               <div className="w-14 h-14 rounded-2xl bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400"><DollarSign size={24}/></div>
-              <div><div className="text-sm font-bold text-slate-400 uppercase tracking-widest">Ingresos USD</div><div className="text-3xl font-black text-slate-800 dark:text-slate-100">${totales.usd.toFixed(2)}</div></div>
+              <div><div className="text-sm font-bold text-slate-400 uppercase tracking-widest">Ingresos USD</div><div className="text-3xl font-black text-slate-800 dark:text-slate-100">${totalesFiltro.usd.toFixed(2)}</div></div>
             </div>
             <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center gap-4 transition-colors">
               <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400"><TrendingUp size={24}/></div>
-              <div><div className="text-sm font-bold text-slate-400 uppercase tracking-widest">Ingresos Bs</div><div className="text-3xl font-black text-slate-800 dark:text-slate-100">Bs. {totales.ves.toFixed(2)}</div></div>
+              <div><div className="text-sm font-bold text-slate-400 uppercase tracking-widest">Ingresos Bs</div><div className="text-3xl font-black text-slate-800 dark:text-slate-100">Bs. {totalesFiltro.ves.toFixed(2)}</div></div>
             </div>
           </>
         )}
