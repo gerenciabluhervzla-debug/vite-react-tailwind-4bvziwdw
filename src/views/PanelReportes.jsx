@@ -1,216 +1,226 @@
 import React, { useState, useMemo } from 'react';
-import { FileSpreadsheet, CalendarDays, TrendingUp, DollarSign, ShoppingBag, Search, FileOutput, Sparkles } from 'lucide-react';
-import { BRAND_LOGO } from '../config/constants';
+import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp } from 'lucide-react';
+import { ROLES } from '../config/constants';
 
-export default function PanelReportes({ perfil, pedidos, catalogo, stock }) {
-  const getVeneziaDate = () => {
-    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  };
-  const hoyStr = getVeneziaDate();
-  
-  const [fechaInicio, setFechaInicio] = useState(hoyStr);
-  const [fechaFin, setFechaFin] = useState(hoyStr);
-  
-  const verDinero = perfil?.role === 'ADMIN' || perfil?.role === 'ADMINISTRACION' || perfil?.role === 'AUDITORIA';
+export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
+  const [rangoRango, setRangoRango] = useState('hoy');
+  const [fechaInicio, setFechaInicio] = useState('');
+  const [fechaFin, setFechaFin] = useState('');
 
-  // Filtro principal para la vista visual y el PDF (Día seleccionado)
-  const pedidosFiltrados = useMemo(() => {
-    if (!fechaInicio || !fechaFin) return [];
-    const fInicio = new Date(fechaInicio + 'T00:00:00').getTime();
-    const fFin = new Date(fechaFin + 'T23:59:59').getTime();
-    return pedidos.filter(p => {
-      if(p.status === 'Rechazado' || p.status === 'Pendiente') return false;
-      return p.fechaCreacion >= fInicio && p.fechaCreacion <= fFin;
-    });
-  }, [pedidos, fechaInicio, fechaFin]);
+  const rol = perfil?.role;
+  const verTotalInventario = rol === ROLES.ADMIN;
+  // Despacho no puede ver dinero en absoluto
+  const verDinero = rol !== ROLES.DESPACHO;
 
-  const totalesFiltro = useMemo(() => {
-    let usd = 0; let ves = 0; let count = 0;
-    pedidosFiltrados.forEach(p => {
-      usd += (p.montoUsd || 0);
-      ves += (p.montoVes || 0);
-      count++;
-    });
-    return { usd, ves, count };
-  }, [pedidosFiltrados]);
-
-  // Cálculo especial: Ventas en USD de TODO EL MES ACTUAL (Month to Date)
-  const ventasMesUsd = useMemo(() => {
-    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    const primerDiaMes = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
-    const hoyFin = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).getTime();
-    
-    return pedidos
-      .filter(p => p.status !== 'Rechazado' && p.status !== 'Pendiente' && p.fechaCreacion >= primerDiaMes && p.fechaCreacion <= hoyFin)
-      .reduce((sum, p) => sum + (p.montoUsd || 0), 0);
+  const validados = useMemo(() => {
+    return pedidos.filter(p => p.status !== 'Rechazado' && !p.esPublico);
   }, [pedidos]);
 
+  const pedidosFiltrados = useMemo(() => {
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
+
+    return validados.filter(p => {
+      if (rangoRango === 'hoy') return p.fechaCreacion >= startOfDay;
+      if (rangoRango === 'mes') return p.fechaCreacion >= startOfMonth;
+      if (rangoRango === 'año') return p.fechaCreacion >= startOfYear;
+      if (rangoRango === 'todo') return true;
+      if (rangoRango === 'custom') {
+        const start = fechaInicio ? new Date(fechaInicio).getTime() : 0;
+        const end = fechaFin ? new Date(fechaFin).getTime() + 86399999 : Infinity;
+        return p.fechaCreacion >= start && p.fechaCreacion <= end;
+      }
+      return true;
+    });
+  }, [validados, rangoRango, fechaInicio, fechaFin]);
+
+  const metricas = useMemo(() => {
+    let ventasUSD = 0;
+    let ventasVES = 0;
+    let mlUSD = 0;
+    let mlVES = 0;
+    let regalosUSD = 0;
+    let descuentosUSD = 0;
+
+    pedidosFiltrados.forEach(p => {
+      let valorOriginalUsd = 0;
+      if (p.carritoObj) {
+        Object.entries(p.carritoObj).forEach(([key, qty]) => {
+          const [n, pr] = key.split('|');
+          catalogo.forEach(cat => cat.productos.forEach(prod => {
+            if (prod.nombre === n) {
+              const idx = prod.presentaciones.indexOf(pr);
+              if (idx >= 0 && prod.precios) {
+                valorOriginalUsd += (prod.precios[idx] * qty);
+              }
+            }
+          }));
+        });
+      }
+
+      if (p.esRegalo) {
+        regalosUSD += valorOriginalUsd;
+      } else {
+        ventasUSD += (p.montoUsd || 0);
+        ventasVES += (p.montoVes || 0);
+
+        if (p.esMercadoLibre) {
+          mlUSD += (p.montoUsd || 0);
+          mlVES += (p.montoVes || 0);
+        }
+
+        const diferencia = valorOriginalUsd - (p.montoUsd || 0);
+        if (diferencia > 0) {
+          descuentosUSD += diferencia;
+        }
+      }
+    });
+
+    return { ventasUSD, ventasVES, mlUSD, mlVES, regalosUSD, descuentosUSD };
+  }, [pedidosFiltrados, catalogo]);
+
+  const totalValInventario = useMemo(() => {
+    let t = 0;
+    Object.entries(stock).forEach(([key, val]) => {
+      const c = typeof val === 'object' ? val.envios : val;
+      if (c > 0) {
+        const [n, pr] = key.split('|');
+        catalogo.forEach(cat => cat.productos.forEach(p => { 
+          if(p.nombre === n){ 
+            const i = p.presentaciones.indexOf(pr); 
+            if(i >= 0) t += (c * p.precios[i]); 
+          } 
+        }));
+      }
+    });
+    return t;
+  }, [stock, catalogo]);
+
   const topProductos = useMemo(() => {
-    const conteo = {};
+    const map = {};
     pedidosFiltrados.forEach(p => {
       if (p.carritoObj) {
         Object.entries(p.carritoObj).forEach(([key, qty]) => {
-          if(!conteo[key]) conteo[key] = { cantidad: 0, valor: 0 };
-          conteo[key].cantidad += qty;
-          const [nombre, pres] = key.split('|');
-          let price = 0;
+          if (!map[key]) map[key] = { cantidad: 0, valor: 0 };
+          map[key].cantidad += qty;
+          const [n, pr] = key.split('|');
+          let precioUnitario = 0;
           catalogo.forEach(c => c.productos.forEach(prod => {
-            if(prod.nombre === nombre) {
-               const idx = prod.presentaciones.indexOf(pres);
-               if(idx >= 0 && prod.precios) price = prod.precios[idx];
+            if (prod.nombre === n) {
+              const idx = prod.presentaciones.indexOf(pr);
+              if (idx >= 0) precioUnitario = prod.precios[idx] || 0;
             }
           }));
-          conteo[key].valor += (price * qty);
+          map[key].valor += (qty * precioUnitario);
         });
       }
     });
-    return Object.entries(conteo).map(([key, data]) => ({ key, ...data })).sort((a,b) => b.cantidad - a.cantidad).slice(0, 10);
+    return Object.entries(map)
+      .map(([key, data]) => ({ key, ...data }))
+      .sort((a, b) => b.cantidad - a.cantidad)
+      .slice(0, 10);
   }, [pedidosFiltrados, catalogo]);
 
-  const imprimirPDFVentas = () => {
-    const printWindow = window.open('', '_blank');
-    if(!printWindow) return alert("Por favor permite las ventanas emergentes (Pop-ups) para generar el PDF.");
-    
-    let html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Cierre de Ventas Bluher</title>
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-          body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 900px; margin: 0 auto; }
-          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0ea5e9; padding-bottom: 20px; margin-bottom: 30px; }
-          .logo { height: 60px; object-fit: contain; }
-          h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; text-transform: uppercase; }
-          
-          .kpi-container { display: flex; gap: 20px; margin-bottom: 30px; }
-          .kpi-box { flex: 1; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; }
-          .kpi-box.main { background: #0f172a; color: white; border: none; }
-          .kpi-box h3 { margin: 0 0 10px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
-          .kpi-box.main h3 { color: #38bdf8; }
-          .kpi-box p { margin: 0; font-size: 24px; font-weight: 900; }
-          .kpi-box.main p { font-size: 32px; }
-          
-          h2 { font-size: 16px; font-weight: 900; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-top: 40px;}
-          table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
-          th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 8px; text-align: left; vertical-align: top; }
-          th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-          .products-list { color: #475569; line-height: 1.5; }
-          
-          @media print { body { padding: 0; } .no-print { display: none; } }
-        </style>
-      </head>
-      <body>
-        <div class="no-print" style="margin-bottom: 20px; background: #fffbeb; color: #b45309; padding: 15px; border-radius: 8px; border: 1px solid #fde68a; font-weight: bold; text-align: center;">
-           Elige "Guardar como PDF" (Save as PDF) en el menú de impresión que acaba de aparecer.
-        </div>
-
-        <div class="header">
-          <div>
-            <h1>Reporte de Ventas</h1>
-            <p style="color: #64748b; margin-top: 5px; font-size: 14px;">Fecha(s) consultada: ${fechaInicio} al ${fechaFin}</p>
-          </div>
-          <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
-        </div>
-
-        <div class="kpi-container">
-           <div class="kpi-box">
-              <h3>Ventas del Día (Bs)</h3>
-              <p>Bs. ${totalesFiltro.ves.toFixed(2)}</p>
-           </div>
-           <div class="kpi-box main">
-              <h3>Ventas del Día (USD)</h3>
-              <p>$${totalesFiltro.usd.toFixed(2)}</p>
-           </div>
-           <div class="kpi-box" style="border-color: #c084fc; background: #faf5ff;">
-              <h3 style="color: #9333ea;">Ventas Acum. del Mes</h3>
-              <p style="color: #7e22ce;">$${ventasMesUsd.toFixed(2)}</p>
-           </div>
-        </div>
-
-        <h2>Detalle de Clientes del Día</h2>
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 25%;">Cliente</th>
-              <th style="width: 20%;">Ref. Bancaria</th>
-              <th style="width: 35%;">Productos Facturados</th>
-              <th style="text-align:right; width: 10%;">Bs</th>
-              <th style="text-align:right; width: 10%;">USD</th>
-            </tr>
-          </thead>
-          <tbody>
-    `;
-
-    pedidosFiltrados.forEach(p => {
-       const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
-       html += `<tr>
-         <td><strong>${p.clienteNombre}</strong></td>
-         <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia}</span></td>
-         <td class="products-list">${prodsFormat}</td>
-         <td style="text-align:right; font-weight:bold; color:#059669;">${(p.montoVes || 0).toFixed(2)}</td>
-         <td style="text-align:right; font-weight:900; font-size:13px;">$${(p.montoUsd || 0).toFixed(2)}</td>
-       </tr>`;
-    });
-
-    if (pedidosFiltrados.length === 0) {
-      html += `<tr><td colspan="5" style="text-align:center; padding: 30px; font-style: italic; color: #94a3b8;">No se registraron ventas válidas en la fecha seleccionada.</td></tr>`;
-    }
-
-    html += `</tbody></table>
-      
-      <div style="margin-top: 50px; border-top: 1px dashed #cbd5e1; padding-top: 20px; color: #94a3b8; font-size: 11px; text-align: center;">
-         Documento generado automáticamente por el Sistema de Gestión Bluher el ${new Date().toLocaleString('es-VE')}
-      </div>
-    </body></html>`;
-    
-    printWindow.document.write(html);
-    printWindow.document.close();
-    setTimeout(() => { printWindow.print(); }, 1000);
-  };
-
   return (
-    <div className="space-y-6 animate-in fade-in">
-      <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
-        <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3 mb-6"><FileSpreadsheet className="text-sky-600"/> Centro de Reportes</h2>
-        <div className="flex flex-col md:flex-row gap-4 items-end bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
-          <div className="flex-1 w-full">
-             <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Desde (Fecha)</label>
-             <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="w-full p-3.5 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500" />
-          </div>
-          <div className="flex-1 w-full">
-             <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Hasta (Fecha)</label>
-             <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="w-full p-3.5 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500" />
-          </div>
-          {verDinero && (
-            <button onClick={imprimirPDFVentas} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-3.5 px-6 rounded-xl flex items-center gap-2 shadow-md w-full md:w-auto transition-transform hover:-translate-y-0.5 justify-center">
-              <FileOutput size={18}/> Descargar PDF
-            </button>
-          )}
+    <div className="space-y-8 animate-in fade-in">
+      <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 transition-colors">
+        <div>
+          <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-2"><CalendarDays className="text-sky-600"/> Período del Reporte</h2>
+          <p className="text-xs font-medium text-slate-500">Las métricas se recalcularán basadas en las fechas seleccionadas.</p>
         </div>
-      </div>
+        
+        <div className="flex flex-wrap gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full xl:w-auto">
+          <button onClick={()=>setRangoRango('hoy')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'hoy' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Hoy</button>
+          <button onClick={()=>setRangoRango('mes')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'mes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Mes Actual</button>
+          <button onClick={()=>setRangoRango('año')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'año' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Este Año</button>
+          <button onClick={()=>setRangoRango('todo')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'todo' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Histórico Total</button>
+          <button onClick={()=>setRangoRango('custom')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'custom' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Personalizado</button>
+        </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center gap-4 transition-colors">
-          <div className="w-14 h-14 rounded-2xl bg-sky-50 dark:bg-sky-900/30 flex items-center justify-center text-sky-600 dark:text-sky-400"><ShoppingBag size={24}/></div>
-          <div><div className="text-sm font-bold text-slate-400 uppercase tracking-widest">Pedidos</div><div className="text-3xl font-black text-slate-800 dark:text-slate-100">{totalesFiltro.count}</div></div>
-        </div>
-        {verDinero && (
-          <>
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center gap-4 transition-colors">
-              <div className="w-14 h-14 rounded-2xl bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400"><DollarSign size={24}/></div>
-              <div><div className="text-sm font-bold text-slate-400 uppercase tracking-widest">Ingresos USD</div><div className="text-3xl font-black text-slate-800 dark:text-slate-100">${totalesFiltro.usd.toFixed(2)}</div></div>
-            </div>
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center gap-4 transition-colors">
-              <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400"><TrendingUp size={24}/></div>
-              <div><div className="text-sm font-bold text-slate-400 uppercase tracking-widest">Ingresos Bs</div><div className="text-3xl font-black text-slate-800 dark:text-slate-100">Bs. {totalesFiltro.ves.toFixed(2)}</div></div>
-            </div>
-          </>
+        {rangoRango === 'custom' && (
+          <div className="flex gap-4 items-center w-full xl:w-auto animate-in slide-in-from-left-4">
+             <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="p-2.5 text-xs font-bold rounded-xl border-2 border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:border-sky-500" />
+             <span className="text-slate-400 font-black">a</span>
+             <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="p-2.5 text-xs font-bold rounded-xl border-2 border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:border-sky-500" />
+          </div>
         )}
       </div>
 
-      <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+      {(verDinero || verTotalInventario) && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+           {verDinero && (
+             <>
+               <div className="bg-[#003366] text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-sky-600 relative overflow-hidden">
+                  <div className="relative z-10">
+                    <div className="text-[11px] uppercase font-black tracking-widest opacity-70 mb-2">Ventas Netas ($)</div>
+                    <div className="text-4xl lg:text-5xl font-black">${metricas.ventasUSD.toFixed(2)}</div>
+                  </div>
+                  <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+               </div>
+               
+               <div className="bg-emerald-600 text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-emerald-800 relative overflow-hidden">
+                  <div className="relative z-10">
+                    <div className="text-[11px] uppercase font-black tracking-widest opacity-70 mb-2">Ventas Netas (Bs)</div>
+                    <div className="text-4xl lg:text-5xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                  </div>
+                  <TrendingUp size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+               </div>
+             </>
+           )}
+
+           {verTotalInventario && (
+             <div className="bg-purple-700 text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-purple-900 relative overflow-hidden">
+                <div className="relative z-10">
+                  <div className="text-[11px] uppercase font-black tracking-widest text-purple-200 mb-2">Inventario Físico ($)</div>
+                  <div className="text-4xl lg:text-5xl font-black">${totalValInventario.toFixed(2)}</div>
+                  <div className="text-[10px] font-bold text-purple-300 mt-2 bg-purple-800/50 w-max px-2 py-1 rounded">No se afecta por filtro de fecha</div>
+                </div>
+                <Archive size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+             </div>
+           )}
+        </div>
+      )}
+
+      {verDinero && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
+            <div className="w-14 h-14 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-500 rounded-2xl flex items-center justify-center shrink-0">
+              <Store size={28}/>
+            </div>
+            <div>
+              <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">MercadoLibre</div>
+              <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.mlUSD.toFixed(2)}</div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Bs. {metricas.mlVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
+            <div className="w-14 h-14 bg-pink-100 dark:bg-pink-900/30 text-pink-600 dark:text-pink-500 rounded-2xl flex items-center justify-center shrink-0">
+              <Gift size={28}/>
+            </div>
+            <div>
+              <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Costo por Obsequios</div>
+              <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.regalosUSD.toFixed(2)}</div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Dinero no ingresado por VIPs</div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
+            <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-500 rounded-2xl flex items-center justify-center shrink-0">
+              <Percent size={28}/>
+            </div>
+            <div>
+              <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Impacto Descuentos</div>
+              <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.descuentosUSD.toFixed(2)}</div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Diferencia Vs precio catálogo</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+<div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
            <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><Sparkles className="text-sky-600"/> Top 10 Productos Más Vendidos</h3>
            <span className="text-xs font-bold text-sky-600 bg-sky-50 dark:bg-sky-900/30 px-3 py-1 rounded-lg uppercase tracking-wider">En periodo seleccionado</span>
