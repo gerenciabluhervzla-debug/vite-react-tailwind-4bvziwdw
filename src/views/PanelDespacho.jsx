@@ -42,7 +42,12 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
         const response = await fetch(URL_GOOGLE_SCRIPT, {
             method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({tokenSecreto: "BLUHER_SECURE_TOKEN_2026", fileName: `Soporte_${id.substring(0,5)}_${field}.jpg`, mimeType: 'image/jpeg', data: base64Data })
+            body: JSON.stringify({ 
+               tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
+               fileName: `Soporte_${id.substring(0,5)}_${field}.jpg`, 
+               mimeType: 'image/jpeg', 
+               data: base64Data 
+            })
         });
         const result = await response.json();
         
@@ -196,8 +201,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
   const todayStr = new Date().toLocaleDateString('es-VE');
 
-  // --- LÓGICA DE NUMERACIÓN DIARIA ---
-  // Agrupa los pedidos por fecha de despacho y les asigna un número según el orden de creación.
   const numeracionDiaria = useMemo(() => {
     const map = {};
     const agrupados = {};
@@ -209,7 +212,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     });
     
     Object.keys(agrupados).forEach(fecha => {
-       // Ordenar ascendente: el más viejo (primero en llegar) es el #1
        agrupados[fecha].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
        agrupados[fecha].forEach((p, index) => {
           map[p.id] = index + 1;
@@ -248,7 +250,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {/* --- VISTA NORMAL DE LOGÍSTICA CON CARTAS SEPARADAS --- */}
       {['pendientes', 'historial'].includes(vistaDespacho) && (
         <div className="flex flex-col gap-8 w-full">
           {pedidosAMostrar.length === 0 ? (
@@ -271,7 +272,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
             return (
               <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-5 md:p-6 transition-colors border-2 rounded-2xl shadow-md ${cardClass}`}>
                 
-                {/* Numeración Correlativa */}
                 <div className="absolute -top-3 -left-3 bg-[#003366] dark:bg-sky-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md">
                   {numeracionDiaria[p.id]}
                 </div>
@@ -360,7 +360,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {/* --- VISTAS DE AUDITORÍA Y CIERRES SE MANTIENEN INTACTAS... --- */}
       {vistaDespacho === 'inventario' && (
         <div className="animate-in fade-in">
           {!conteoActivo ? (
@@ -490,6 +489,20 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                           }
                         </div>
                       </div>
+                      
+                      {cierre.notasAuditoria && cierre.notasAuditoria.length > 0 && (
+                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
+                          <div className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-1.5 flex items-center gap-1">
+                            <MessageSquare size={12}/> Observaciones de Auditoría:
+                          </div>
+                          {cierre.notasAuditoria.map((n, i) => (
+                             <div key={i} className="text-xs text-amber-800 dark:text-amber-300 italic mb-1 last:mb-0">
+                                "{n.texto}" <span className="font-bold opacity-70">- {n.autor}</span>
+                             </div>
+                          ))}
+                        </div>
+                      )}
+
                     </div>
                     
                     <button onClick={() => generarCSV(cierre)} className="w-full py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors">
@@ -501,7 +514,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           </div>
         </div>
       )}
-
     </div>
   );
 }
