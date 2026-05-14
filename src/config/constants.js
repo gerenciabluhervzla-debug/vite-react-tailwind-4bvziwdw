@@ -1,4 +1,4 @@
-export const BRAND_LOGO = "logobluher.jpg"; 
+export const BRAND_LOGO = "logobluher.png"; 
 
 export const ROLES = {
   ADMIN: 'Administrador',
