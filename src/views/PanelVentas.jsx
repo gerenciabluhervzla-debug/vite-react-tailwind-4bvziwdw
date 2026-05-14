@@ -37,6 +37,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
   const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
 
+  // EFECTO QUE RECALCULA EL CARRITO AUTOMÁTICAMENTE
   useEffect(() => {
     if (!formData.carritoObj) return;
     let sub = 0;
@@ -49,7 +50,13 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     const dExtra = parseFloat(formData.descuentoPorcentaje) || 0;
     const final = subConCampaña * (1 - dExtra / 100);
     
-    setFormData(prev => ({ ...prev, montoPago: final.toFixed(2), tasa: prev.tasa || config.tasaDia }));
+    // CORRECCIÓN QA: Forzar siempre a USD cuando se auto-calcula desde el catálogo
+    setFormData(prev => ({ 
+      ...prev, 
+      montoPago: final.toFixed(2), 
+      moneda: 'USD', 
+      tasa: prev.tasa || config.tasaDia 
+    }));
   }, [formData.carritoObj, formData.descuentoPorcentaje, config.tasaDia, catalogo, globalDiscountPercent]);
 
   const copiarLinkTienda = () => {
@@ -71,7 +78,10 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
     try {
       const llavesCatalogo = catalogo.flatMap(c => c.productos.flatMap(p => p.presentaciones.map(pres => `${p.nombre}|${pres}`))).join(', ');
-      const prompt = `Analiza este WhatsApp y extrae JSON: Nombre, Teléfono, Cédula, courier (ZOOM, MRW, Tealca, Domesa), Dirección, Productos, montoPago, Tipo de envío (si dice "MercadoLibre", esMercadoLibre=true), asesora. Si hay descuento con flecha 18$ ➜ 13$, precio a cobrar es 13.
+      
+      // CORRECCIÓN QA: Instrucciones estrictas de formato de moneda
+      const prompt = `Analiza este WhatsApp y extrae JSON: Nombre, Teléfono, Cédula, courier (ZOOM, MRW, Tealca, Domesa), Dirección, Productos, montoPago, Tipo de envío (si dice "MercadoLibre", esMercadoLibre=true), asesora. 
+      La variable "moneda" DEBE ser estrictamente "USD" o "VES". Si habla de dólares o $ es "USD", si habla de bolívares o Bs es "VES".
       productosCrudos: texto exacto.
       carrito: mapea cantidades a estas llaves: [${llavesCatalogo}].
       Texto: ${textoCrudo}`;
@@ -108,10 +118,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
            if (lineas.length > 0) txtFormat = lineas.join('\n');
          }
 
+         // Sanitización de moneda por si la IA se equivoca
+         let monedaSanitizada = result.moneda;
+         if (typeof monedaSanitizada === 'string') {
+            const m = monedaSanitizada.toUpperCase();
+            if (m.includes('BS') || m.includes('VES') || m.includes('BOL')) monedaSanitizada = 'VES';
+            else monedaSanitizada = 'USD';
+         } else {
+            monedaSanitizada = 'USD';
+         }
+
          setFormData(prev => ({ 
            ...prev, 
            ...result, 
            tasa: result.tasa || prev.tasa,
+           moneda: Object.keys(nuevoCarritoObj).length > 0 ? 'USD' : monedaSanitizada,
            esMercadoLibre: result.esMercadoLibre || false,
            productos: txtFormat || prev.productos, 
            carritoObj: Object.keys(nuevoCarritoObj).length > 0 ? nuevoCarritoObj : prev.carritoObj 
@@ -123,7 +144,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   const cargarPedidoParaEditar = (pedido) => {
     setFormData({
       clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, direccion: pedido.direccion,
-      productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda, 
+      productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD', 
       montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: ''
     });
     setEditId(pedido.id);
@@ -223,7 +244,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       if (!finalProductosText.includes("Concentrado (Unidad)")) finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Auto]`;
     }
 
-    // --- CÁLCULO DE HORA VENEZUELA (BLINDADO) ---
     const getVeneziaTime = () => {
       const now = new Date();
       return new Date(now.toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -293,7 +313,11 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
       {!tasaActualizadaHoy && vista === 'nuevo' && !editId && puedeCrear && (
         <div className="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-xl shadow-sm font-bold flex items-center gap-3">
-           <AlertTriangle size={24}/> ATENCIÓN: La tasa del día no ha sido actualizada. Solicite a Administración que la actualice.
+           <AlertTriangle size={24} className="shrink-0"/> 
+           <div>
+             ATENCIÓN: La tasa del día no ha sido actualizada. 
+             <span className="block text-xs font-normal">Puedes preparar el pedido pero no podrás enviarlo hasta que Administración actualice la tasa.</span>
+           </div>
         </div>
       )}
 
@@ -347,21 +371,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
           )}
 
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-             <Input label="Nombre de Asesora" name="asesora" value={formData.asesora} onChange={(e)=>setFormData({...formData, asesora: e.target.value})} required disabled={!tasaActualizadaHoy && !editId} />
-             <Input label="Nombre del Cliente" name="clienteNombre" value={formData.clienteNombre} onChange={(e)=>setFormData({...formData, clienteNombre: e.target.value})} required disabled={!tasaActualizadaHoy && !editId} />
-             <Input label="Cédula/RIF" name="clienteCedula" value={formData.clienteCedula} onChange={(e)=>setFormData({...formData, clienteCedula: e.target.value})} required disabled={!tasaActualizadaHoy && !editId} />
-             <Input label="Teléfono de Contacto" name="clienteTelefono" value={formData.clienteTelefono} onChange={(e)=>setFormData({...formData, clienteTelefono: e.target.value})} required disabled={!tasaActualizadaHoy && !editId} />
+             <Input label="Nombre de Asesora" name="asesora" value={formData.asesora} onChange={(e)=>setFormData({...formData, asesora: e.target.value})} required />
+             <Input label="Nombre del Cliente" name="clienteNombre" value={formData.clienteNombre} onChange={(e)=>setFormData({...formData, clienteNombre: e.target.value})} required />
+             <Input label="Cédula/RIF" name="clienteCedula" value={formData.clienteCedula} onChange={(e)=>setFormData({...formData, clienteCedula: e.target.value})} required />
+             <Input label="Teléfono de Contacto" name="clienteTelefono" value={formData.clienteTelefono} onChange={(e)=>setFormData({...formData, clienteTelefono: e.target.value})} required />
              
              <div className="flex flex-col">
                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Empresa de Envío</label>
-               <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} disabled={!tasaActualizadaHoy && !editId} className={`p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold cursor-pointer shadow-sm disabled:opacity-50 ${!formData.courier ? 'border-amber-300 text-slate-400' : 'border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200'}`}>
+               <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} required className={`p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold cursor-pointer shadow-sm ${!formData.courier ? 'border-amber-300 text-slate-400' : 'border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200'}`}>
                  <option value="" disabled>Seleccionar...</option> <option value="ZOOM">ZOOM</option> <option value="MRW">MRW</option> <option value="Tealca">Tealca</option> <option value="Domesa">Domesa</option>
                </select>
              </div>
              
              <div className="flex flex-col justify-center gap-3 mt-6">
                <div className="flex items-center gap-3">
-                 <input type="checkbox" id="ml-check" checked={formData.esMercadoLibre} onChange={(e) => setFormData({...formData, esMercadoLibre: e.target.checked})} disabled={!tasaActualizadaHoy && !editId} className="w-5 h-5 accent-sky-600 cursor-pointer rounded disabled:opacity-50" />
+                 <input type="checkbox" id="ml-check" checked={formData.esMercadoLibre} onChange={(e) => setFormData({...formData, esMercadoLibre: e.target.checked})} className="w-5 h-5 accent-sky-600 cursor-pointer rounded" />
                  <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Es envío de MercadoLibre</label>
                </div>
                
@@ -370,26 +394,26 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                     <label className={`flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-xs ${formData.linkGuiaML ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-sky-300 dark:border-sky-700 text-sky-600 hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/20'}`}>
                        {subiendoML ? <Loader2 size={16} className="animate-spin"/> : (formData.linkGuiaML ? <CheckCircle size={16}/> : <UploadCloud size={16}/>)}
                        {formData.linkGuiaML ? 'Guía ML Cargada y Lista' : 'Adjuntar Imagen de Guía ML'}
-                       <input type="file" accept="image/*" className="hidden" onChange={handleFileUploadML} disabled={subiendoML || (!tasaActualizadaHoy && !editId)}/>
+                       <input type="file" accept="image/*" className="hidden" onChange={handleFileUploadML} disabled={subiendoML}/>
                     </label>
                  </div>
                )}
 
                <div className="flex items-center gap-3">
-                 <input type="checkbox" id="regalo-check" checked={formData.esRegalo} onChange={(e) => setFormData({...formData, esRegalo: e.target.checked})} disabled={!tasaActualizadaHoy && !editId} className="w-5 h-5 accent-purple-600 cursor-pointer rounded disabled:opacity-50" />
+                 <input type="checkbox" id="regalo-check" checked={formData.esRegalo} onChange={(e) => setFormData({...formData, esRegalo: e.target.checked})} className="w-5 h-5 accent-purple-600 cursor-pointer rounded" />
                  <label htmlFor="regalo-check" className="text-sm font-bold text-purple-700 dark:text-purple-400 cursor-pointer uppercase tracking-wider flex items-center gap-1"><Gift size={16}/> Es Regalo / Obsequio VIP</label>
                </div>
              </div>
 
              <div className="md:col-span-2">
                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors block">Dirección de Envío Completa</label>
-               <textarea name="direccion" value={formData.direccion} onChange={(e)=>setFormData({...formData, direccion: e.target.value})} required disabled={!tasaActualizadaHoy && !editId} rows={2} className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm disabled:opacity-50"></textarea>
+               <textarea name="direccion" value={formData.direccion} onChange={(e)=>setFormData({...formData, direccion: e.target.value})} required rows={2} className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm"></textarea>
              </div>
              
              <div className="md:col-span-2 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl border border-slate-100 dark:border-slate-700">
                <div className="flex justify-between items-center mb-4">
                  <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"><Package size={20} className="text-sky-600"/> Inventario a Despachar</label>
-                 <button type="button" onClick={() => setIsCatalogOpen(true)} disabled={!tasaActualizadaHoy && !editId} className="text-sm font-bold text-sky-700 dark:text-sky-400 bg-sky-100/50 dark:bg-sky-900/30 hover:bg-sky-100 dark:hover:bg-sky-900 py-2.5 px-6 rounded-xl transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"><Search size={16} /> Catálogo Visual</button>
+                 <button type="button" onClick={() => setIsCatalogOpen(true)} className="text-sm font-bold text-sky-700 dark:text-sky-400 bg-sky-100/50 dark:bg-sky-900/30 hover:bg-sky-100 dark:hover:bg-sky-900 py-2.5 px-6 rounded-xl transition-colors flex items-center gap-2 shadow-sm"><Search size={16} /> Catálogo Visual</button>
                </div>
                {formData.productos ? (
                  <div className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm font-medium leading-relaxed">{typeof formData.productos === 'string' ? formData.productos : JSON.stringify(formData.productos)}</div>
@@ -399,26 +423,35 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
              </div>
 
              <div className={`md:col-span-2 p-8 rounded-3xl shadow-inner grid grid-cols-1 md:grid-cols-4 gap-6 transition-colors ${formData.esRegalo ? 'bg-purple-900/20 border-2 border-purple-500 text-purple-300' : 'bg-[#003366] dark:bg-slate-950 text-white'}`}>
-               <div className="flex flex-col"><InputDark disabled={formData.esRegalo || (!tasaActualizadaHoy && !editId)} type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 45.20" /></div>
+               <div className="flex flex-col"><InputDark disabled={formData.esRegalo} type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 45.20" /></div>
                <div className="flex flex-col">
                  <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2 transition-colors">Moneda de Pago</label>
-                 <select disabled={formData.esRegalo || (!tasaActualizadaHoy && !editId)} value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} className={`p-3.5 border-2 rounded-2xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold cursor-pointer disabled:opacity-50 shadow-inner ${!formData.moneda ? 'border-amber-500 text-slate-400' : 'border-slate-700 text-white'}`}>
+                 <select disabled={formData.esRegalo} value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} required={!formData.esRegalo} className={`p-3.5 border-2 rounded-2xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold cursor-pointer disabled:opacity-50 shadow-inner ${!formData.moneda && !formData.esRegalo ? 'border-amber-500 text-slate-400' : 'border-slate-700 text-white'}`}>
                    <option value="" disabled>Seleccionar...</option> <option value="USD">Dólares (USD)</option> <option value="VES">Bolívares (VES)</option>
                  </select>
                </div>
                <div className="flex flex-col relative">
-                  <InputDark disabled={formData.esRegalo || (!tasaActualizadaHoy && !editId)} type="number" step="0.01" label="Monto Final a Pagar" value={formData.esRegalo ? '0' : formData.montoPago} onChange={(e)=>setFormData({...formData, montoPago: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 30.50" />
-                  {!formData.esRegalo && formData.tasa && formData.montoPago && <span className="text-xs text-sky-400 font-bold absolute -bottom-5 left-2">{formData.moneda === 'USD' ? `Equivale: Bs. ${((parseFloat(formData.montoPago)||0) * parseFloat(formData.tasa)).toFixed(2)}` : `Equivale: $${((parseFloat(formData.montoPago)||0) / parseFloat(formData.tasa)).toFixed(2)}`}</span>}
+                  <InputDark disabled={formData.esRegalo} type="number" step="0.01" label="Monto Final a Pagar" value={formData.esRegalo ? '0' : formData.montoPago} onChange={(e)=>setFormData({...formData, montoPago: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 30.50" />
+                  
+                  {/* CORRECCIÓN QA: Helper de conversión robusto basado en selección explícita */}
+                  {!formData.esRegalo && formData.tasa && formData.montoPago && formData.moneda && (
+                    <span className="text-xs text-sky-400 font-bold absolute -bottom-5 left-2">
+                       {formData.moneda === 'USD' 
+                          ? `Equivale: Bs. ${((parseFloat(formData.montoPago)||0) * parseFloat(formData.tasa)).toFixed(2)}` 
+                          : `Equivale: $${((parseFloat(formData.montoPago)||0) / parseFloat(formData.tasa)).toFixed(2)}`
+                       }
+                    </span>
+                  )}
                </div>
-               <InputDark disabled={formData.esRegalo || (!tasaActualizadaHoy && !editId)} label="Referencia / Banco" value={formData.esRegalo ? 'MUESTRA / OBSEQUIO VIP' : formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required={!formData.esRegalo} placeholder="Ej. 1234 Banesco" />
+               <InputDark disabled={formData.esRegalo} label="Referencia / Banco" value={formData.esRegalo ? 'MUESTRA / OBSEQUIO VIP' : formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required={!formData.esRegalo} placeholder="Ej. 1234 Banesco" />
                
                {!formData.esRegalo && (
-                 <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-6"><InputDark type="number" step="0.01" disabled={!tasaActualizadaHoy && !editId} label="Añadir Descuento Asesor (%)" value={formData.descuentoPorcentaje} onChange={(e)=>setFormData({...formData, descuentoPorcentaje: e.target.value})} placeholder="Ej: 5" /></div>
+                 <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-6"><InputDark type="number" step="0.01" label="Añadir Descuento Asesor (%)" value={formData.descuentoPorcentaje} onChange={(e)=>setFormData({...formData, descuentoPorcentaje: e.target.value})} placeholder="Ej: 5" /></div>
                )}
              </div>
              
              <div className="md:col-span-2 mt-4">
-                <button type="submit" disabled={enviando || (!tasaActualizadaHoy && !editId)} className={`w-full text-white font-black py-5 rounded-3xl shadow-2xl flex justify-center items-center gap-3 text-lg transition-all hover:scale-[1.02] tracking-widest uppercase ${editId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-sky-600 hover:bg-sky-700'} disabled:opacity-50 disabled:hover:scale-100`}>
+                <button type="submit" disabled={enviando || (!tasaActualizadaHoy && !editId)} className={`w-full text-white font-black py-5 rounded-3xl shadow-2xl flex justify-center items-center gap-3 text-lg transition-all tracking-widest uppercase ${editId ? 'bg-amber-600 hover:bg-amber-700 hover:scale-[1.02]' : 'bg-sky-600 hover:bg-sky-700 hover:scale-[1.02]'} disabled:bg-slate-400 disabled:hover:scale-100 dark:disabled:bg-slate-700`}>
                   {enviando ? <Loader2 className="animate-spin" /> : <><CheckCircle size={24} /> {editId ? 'Actualizar y Reenviar Pedido' : 'Procesar Orden de Venta'}</>}
                 </button>
              </div>
@@ -562,7 +595,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
           setFormData(prev => ({
             ...prev, 
             productos: prev.productos ? `${prev.productos}\n${txt}` : txt, 
-            carritoObj: { ...(prev.carritoObj || {}), ...obj }
+            carritoObj: { ...(prev.carritoObj || {}), ...obj },
+            moneda: 'USD' // Garantizar USD al usar catálogo manual
           })); 
           setIsCatalogOpen(false);
         }}
