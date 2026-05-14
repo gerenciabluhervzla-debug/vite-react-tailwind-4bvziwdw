@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { ArrowRightLeft, PlusCircle, X, Camera, Loader2 } from 'lucide-react';
+import { ArrowRightLeft, PlusCircle, X, Camera, Loader2, CheckCircle } from 'lucide-react';
 import { addDoc, collection, doc, updateDoc, increment } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../../config/firebase';
 import { compressImage } from '../../utils/image';
 
 export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId, loggear, perfil, dialogs, onClose }) {
   const [carrito, setCarrito] = useState({});
-  const [fotoUrl, setFotoUrl] = useState('');
+  // AHORA GUARDAMOS UN ARREGLO DE FOTOS
+  const [fotosUrls, setFotosUrls] = useState([]);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
   const isTransfer = tipo === 'TRANSFERENCIA';
 
@@ -25,7 +26,6 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
     });
   };
 
-  // --- CORRECCIÓN UX: ESCRITURA MANUAL DE CANTIDADES ---
   const handleDirectInput = (key, val) => {
     let num = parseInt(val, 10);
     if (isNaN(num) || num < 0) num = 0;
@@ -62,27 +62,34 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify({ 
                tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
-               fileName: `Evidencia_Movimiento_${Date.now()}.jpg`, 
+               fileName: `Evidencia_Mov_${Date.now()}.jpg`, 
                mimeType: 'image/jpeg', 
                data: base64Data 
             })
         });
         const result = await response.json();
-        if (result.url) { setFotoUrl(result.url); } 
+        if (result.url) { 
+           // AGREGAMOS LA NUEVA FOTO AL ARREGLO
+           setFotosUrls(prev => [...prev, result.url]); 
+        } 
         else { throw new Error("No se recibió URL válida"); }
     } catch (error) {
         console.error(error); dialogs.alert("Error subiendo la evidencia fotográfica a Drive.", "Fallo de Red");
     } finally { setSubiendoFoto(false); }
   };
 
+  const removeFoto = (indexToRemove) => {
+    setFotosUrls(prev => prev.filter((_, i) => i !== indexToRemove));
+  };
+
   const handleSubmit = async () => {
     if (Object.keys(carrito).length === 0) return dialogs.alert("No has seleccionado ningún producto.", "Carrito Vacío");
-    if (isTransfer && !fotoUrl) return dialogs.alert("Debes incluir una foto como soporte físico.", "Soporte Obligatorio");
+    if (isTransfer && fotosUrls.length === 0) return dialogs.alert("Debes incluir al menos una foto como soporte físico.", "Soporte Obligatorio");
     
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), {
         tipo, origen: isTransfer ? 'ENVIOS' : 'PROVEEDOR', destino: isTransfer ? 'RECEPCION' : 'ENVIOS',
-        items: carrito, foto: fotoUrl, status: isTransfer ? 'PENDIENTE' : 'COMPLETADO',
+        items: carrito, fotos: fotosUrls, status: isTransfer ? 'PENDIENTE' : 'COMPLETADO',
         fechaCreacion: Date.now(), creadoPor: perfil.nombre
       });
 
@@ -131,7 +138,6 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
                         <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-1 rounded-lg">
                           <button onClick={()=>updateQty(key, -1)} className="bg-white dark:bg-slate-800 px-2 py-1 rounded text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white font-bold shadow-sm">-</button>
                           
-                          {/* CAMPO DE TEXTO MANUAL */}
                           <input 
                             type="number" 
                             min="0" 
@@ -154,19 +160,32 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
 
         <div className="p-6 border-t dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col gap-6">
           {isTransfer && (
-            <div className="bg-purple-50 dark:bg-purple-900/20 p-4 border border-purple-100 dark:border-purple-800 rounded-2xl flex items-center gap-4">
-              <div className="flex-1">
-                <label className="text-xs font-bold uppercase tracking-widest text-purple-800 dark:text-purple-400 block mb-2">Evidencia Fotográfica Obligatoria</label>
-                <div className="flex gap-3 relative">
-                  <input type="text" placeholder="URL Foto de los productos empacados" className="w-full border-2 border-purple-200 dark:border-purple-800 p-3 rounded-xl text-sm outline-none focus:border-purple-500 bg-white dark:bg-slate-900 dark:text-white font-medium" value={fotoUrl} onChange={e=>setFotoUrl(e.target.value)} />
-                  <label className={`text-white p-3 rounded-xl cursor-pointer flex items-center justify-center w-12 shadow-md transition-colors ${fotoUrl ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-purple-600 hover:bg-purple-700'}`}>
-                    {subiendoFoto ? <Loader2 size={20} className="animate-spin" /> : <Camera size={20}/>} 
-                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileUpload} disabled={subiendoFoto}/>
-                  </label>
-                </div>
+            <div className="bg-purple-50 dark:bg-purple-900/20 p-4 border border-purple-100 dark:border-purple-800 rounded-2xl flex flex-col gap-3">
+              <label className="text-xs font-bold uppercase tracking-widest text-purple-800 dark:text-purple-400 block">
+                Evidencias Fotográficas Obligatorias (Mínimo 1)
+              </label>
+              
+              <div className="flex gap-3 flex-wrap items-center">
+                 {fotosUrls.map((url, idx) => (
+                    <div key={idx} className="relative group">
+                       <a href={url} target="_blank" rel="noreferrer" className="w-14 h-14 bg-white dark:bg-slate-800 border-2 border-emerald-400 dark:border-emerald-600 rounded-xl flex items-center justify-center text-emerald-500 shadow-sm hover:scale-105 transition-transform" title="Ver foto">
+                          <Camera size={20} />
+                       </a>
+                       <button onClick={() => removeFoto(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-md" title="Eliminar foto">
+                          <X size={12} />
+                       </button>
+                    </div>
+                 ))}
+                 
+                 <label className={`w-14 h-14 text-white rounded-xl cursor-pointer flex items-center justify-center shadow-md transition-colors ${fotosUrls.length > 0 ? 'bg-purple-400 hover:bg-purple-500' : 'bg-purple-600 hover:bg-purple-700 animate-pulse'}`} title="Añadir otra foto">
+                   {subiendoFoto ? <Loader2 size={20} className="animate-spin" /> : <PlusCircle size={24}/>} 
+                   <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileUpload} disabled={subiendoFoto}/>
+                 </label>
               </div>
+              <p className="text-[10px] font-semibold text-purple-600 dark:text-purple-400">Puedes subir varias fotos si son muchas cajas o el soporte no entra en una sola toma.</p>
             </div>
           )}
+          
           <div className="flex justify-between items-center">
             <div className="font-bold text-slate-500 dark:text-slate-400 text-lg">Total de Items: <span className="text-2xl text-slate-800 dark:text-white ml-2">{Object.values(carrito).reduce((a,b)=>a+b,0)}</span></div>
             <button onClick={handleSubmit} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-4 px-8 rounded-xl shadow-lg transition-all hover:-translate-y-0.5 text-lg">{isTransfer ? 'Confirmar Transferencia' : 'Aprobar Ingreso Stock'}</button>

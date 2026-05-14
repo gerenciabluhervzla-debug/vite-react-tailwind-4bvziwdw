@@ -4,12 +4,17 @@ import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const [rangoRango, setRangoRango] = useState('hoy');
-  const [fechaInicio, setFechaInicio] = useState('');
-  const [fechaFin, setFechaFin] = useState('');
+  
+  const getLocalToday = () => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+  
+  const [fechaInicio, setFechaInicio] = useState(getLocalToday());
+  const [fechaFin, setFechaFin] = useState(getLocalToday());
 
   const rol = perfil?.role;
   const verTotalInventario = rol === ROLES.ADMIN;
-  // Despacho no puede ver dinero en absoluto
   const verDinero = rol !== ROLES.DESPACHO;
 
   const validados = useMemo(() => {
@@ -17,10 +22,10 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   }, [pedidos]);
 
   const pedidosFiltrados = useMemo(() => {
-    const now = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const startOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const startOfMonth = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    const startOfYear = new Date(d.getFullYear(), 0, 1).getTime();
 
     return validados.filter(p => {
       if (rangoRango === 'hoy') return p.fechaCreacion >= startOfDay;
@@ -36,7 +41,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     });
   }, [validados, rangoRango, fechaInicio, fechaFin]);
 
-  // CÁLCULO ESPECÍFICO PARA EL PDF (ACUMULADO DEL MES EN CURSO)
   const ventasMesUsdPDF = useMemo(() => {
     const now = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
@@ -46,12 +50,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   }, [validados]);
 
   const metricas = useMemo(() => {
-    let ventasUSD = 0;
-    let ventasVES = 0;
-    let mlUSD = 0;
-    let mlVES = 0;
-    let regalosUSD = 0;
-    let descuentosUSD = 0;
+    let ventasUSD = 0; let ventasVES = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
 
     pedidosFiltrados.forEach(p => {
       let valorOriginalUsd = 0;
@@ -61,9 +60,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           catalogo.forEach(cat => cat.productos.forEach(prod => {
             if (prod.nombre === n) {
               const idx = prod.presentaciones.indexOf(pr);
-              if (idx >= 0 && prod.precios) {
-                valorOriginalUsd += (prod.precios[idx] * qty);
-              }
+              if (idx >= 0 && prod.precios) { valorOriginalUsd += (prod.precios[idx] * qty); }
             }
           }));
         });
@@ -75,15 +72,10 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         ventasUSD += (p.montoUsd || 0);
         ventasVES += (p.montoVes || 0);
 
-        if (p.esMercadoLibre) {
-          mlUSD += (p.montoUsd || 0);
-          mlVES += (p.montoVes || 0);
-        }
+        if (p.esMercadoLibre) { mlUSD += (p.montoUsd || 0); mlVES += (p.montoVes || 0); }
 
         const diferencia = valorOriginalUsd - (p.montoUsd || 0);
-        if (diferencia > 0) {
-          descuentosUSD += diferencia;
-        }
+        if (diferencia > 0) descuentosUSD += diferencia;
       }
     });
 
@@ -97,10 +89,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       if (c > 0) {
         const [n, pr] = key.split('|');
         catalogo.forEach(cat => cat.productos.forEach(p => { 
-          if(p.nombre === n){ 
-            const i = p.presentaciones.indexOf(pr); 
-            if(i >= 0) t += (c * p.precios[i]); 
-          } 
+          if(p.nombre === n){ const i = p.presentaciones.indexOf(pr); if(i >= 0) t += (c * p.precios[i]); } 
         }));
       }
     });
@@ -126,19 +115,29 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         });
       }
     });
-    return Object.entries(map)
-      .map(([key, data]) => ({ key, ...data }))
-      .sort((a, b) => b.cantidad - a.cantidad)
-      .slice(0, 10);
+    return Object.entries(map).map(([key, data]) => ({ key, ...data })).sort((a, b) => b.cantidad - a.cantidad).slice(0, 10);
   }, [pedidosFiltrados, catalogo]);
 
-  // --- FUNCIÓN DE EXPORTACIÓN A PDF EXACTAMENTE COMO PEDISTE ---
   const imprimirPDFVentas = () => {
     const printWindow = window.open('', '_blank');
     if(!printWindow) return alert("Por favor permite las ventanas emergentes (Pop-ups) para generar el PDF.");
 
-    let periodoEtiqueta = rangoRango.toUpperCase();
-    if(rangoRango === 'custom') periodoEtiqueta = `${fechaInicio} al ${fechaFin}`;
+    // --- LÓGICA DE ETIQUETA DE PERIODO MEJORADA ---
+    let periodoEtiqueta = '';
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    
+    if (rangoRango === 'hoy') {
+       periodoEtiqueta = `Hoy (${d.toLocaleDateString('es-VE')})`;
+    } else if (rangoRango === 'mes') {
+       periodoEtiqueta = `Mes de ${meses[d.getMonth()]} ${d.getFullYear()}`;
+    } else if (rangoRango === 'año') {
+       periodoEtiqueta = `Año ${d.getFullYear()}`;
+    } else if (rangoRango === 'todo') {
+       periodoEtiqueta = `Histórico Completo`;
+    } else if (rangoRango === 'custom') {
+       periodoEtiqueta = `Del ${fechaInicio.split('-').reverse().join('/')} al ${fechaFin.split('-').reverse().join('/')}`;
+    }
 
     let html = `
       <!DOCTYPE html>
@@ -177,7 +176,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         <div class="header">
           <div>
             <h1>Reporte de Ventas</h1>
-            <p style="color: #64748b; margin-top: 5px; font-size: 14px;">Periodo Seleccionado: ${periodoEtiqueta}</p>
+            <p style="color: #64748b; margin-top: 5px; font-size: 14px; font-weight: bold;">Periodo: ${periodoEtiqueta}</p>
           </div>
           <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
         </div>
@@ -192,7 +191,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
               <p>$${metricas.ventasUSD.toFixed(2)}</p>
            </div>
            <div class="kpi-box" style="border-color: #c084fc; background: #faf5ff;">
-              <h3 style="color: #9333ea;">Acumulado del Mes ($)</h3>
+              <h3 style="color: #9333ea;">Ventas Acum. del Mes</h3>
               <p style="color: #7e22ce;">$${ventasMesUsdPDF.toFixed(2)}</p>
            </div>
         </div>
