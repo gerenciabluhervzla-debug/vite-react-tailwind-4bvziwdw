@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, FileOutput } from 'lucide-react';
+import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, FileOutput, MessageSquare } from 'lucide-react';
 import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image'; 
@@ -99,7 +99,13 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const forzarEnvioHoy = async (id) => {
     dialogs.confirm("¿Autorizar que este pedido se imprima y se envíe HOY de forma excepcional?", async () => {
       try {
-        const fechaHoy = new Date().toLocaleDateString('es-VE');
+        const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+        const tDate = getVeneziaTime();
+        const dd = String(tDate.getDate()).padStart(2, '0');
+        const mm = String(tDate.getMonth() + 1).padStart(2, '0');
+        const yyyy = tDate.getFullYear();
+        const fechaHoy = `${dd}/${mm}/${yyyy}`;
+
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id), { fechaDespacho: fechaHoy });
         loggear('ENVIO_FORZADO', `Se autorizó envío fuera de horario para pedido ${id}`);
         setTimeout(() => dialogs.alert("Envío autorizado exitosamente.", "Actualizado"), 150);
@@ -151,7 +157,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     document.body.removeChild(link);
   };
 
-  // --- NUEVA FUNCIÓN: GENERAR Y GUARDAR COMO PDF ---
   const imprimirPDF = (cierre) => {
     const printWindow = window.open('', '_blank');
     if(!printWindow) return dialogs.alert("Por favor permite las ventanas emergentes (Pop-ups) para generar el PDF.");
@@ -240,7 +245,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     
     printWindow.document.write(html);
     printWindow.document.close();
-    // Esperamos un segundo para que carguen las fuentes/logo y abrimos la ventana de impresión
     setTimeout(() => { printWindow.print(); }, 1000);
   };
 
@@ -271,8 +275,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario'), nuevoCierre);
         loggear('CIERRE_INVENTARIO', `Cierre registrado con ${totalDiferencias} diferencias.`);
         setConteoActivo(false);
-        // Al finalizar el conteo, le preguntamos si quiere el reporte
-        dialogs.confirm("Cierre guardado con éxito. ¿Deseas descargar el reporte ahora?", () => {
+        dialogs.confirm("Cierre guardado con éxito. ¿Deseas descargar el reporte en PDF ahora?", () => {
            imprimirPDF(nuevoCierre);
         }, "Reporte Listo");
       } catch (error) { console.error(error); }
@@ -287,7 +290,15 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   });
 
   const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
-  const todayStr = new Date().toLocaleDateString('es-VE');
+  
+  const todayStr = useMemo(() => {
+    const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const tDate = getVeneziaTime();
+    const dd = String(tDate.getDate()).padStart(2, '0');
+    const mm = String(tDate.getMonth() + 1).padStart(2, '0');
+    const yyyy = tDate.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  }, []);
 
   const numeracionDiaria = useMemo(() => {
     const map = {};
@@ -323,7 +334,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
         {['pendientes', 'historial'].includes(vistaDespacho) && (
           <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm w-full md:w-auto justify-center">
-            <Printer size={18} /> Imprimir Etiquetas ({todayStr})
+            <Printer size={18} /> Imprimir Etiquetas (Solo {todayStr})
           </button>
         )}
       </div>
@@ -333,7 +344,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           <div className="p-2 bg-sky-100 dark:bg-sky-900/50 rounded-full text-sky-600 dark:text-sky-400 shrink-0"><Clock size={20} /></div>
           <div>
             <h3 className="text-sky-900 dark:text-sky-300 font-bold text-lg">Órdenes en proceso</h3>
-            <p className="text-sky-800/80 dark:text-sky-200/80 text-sm mt-1 font-medium">Hay <strong>{pedidosPendientes} pedido(s)</strong> en revisión por administración. Imprime cuando estén validados para usar menos papel.</p>
+            <p className="text-sky-800/80 dark:text-sky-200/80 text-sm mt-1 font-medium">Hay <strong>{pedidosPendientes} pedido(s)</strong> en revisión por administración. Imprime cuando estén validados.</p>
           </div>
         </div>
       )}
@@ -370,7 +381,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                   <div className="text-xs font-semibold text-slate-500 mt-2">Tel: {p.clienteTelefono}</div>
                   
                   <div className={`text-[11px] font-bold uppercase tracking-wider mt-3 p-2 rounded-lg inline-block w-max ${esParaManana && vistaDespacho === 'pendientes' ? 'bg-red-100 text-red-700 border border-red-200' : 'text-slate-500 bg-slate-100 dark:bg-slate-900'}`}>
-                    Sale: {p.fechaDespacho} {esParaManana && vistaDespacho === 'pendientes' && '(NO IMPRIMIR)'}
+                    Sale: {p.fechaDespacho} {esParaManana && vistaDespacho === 'pendientes' && '(NO IMPRIMIR HOY)'}
                   </div>
 
                   {esParaManana && vistaDespacho === 'pendientes' && [ROLES.ADMIN].includes(perfil?.role) && (
@@ -448,7 +459,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {/* VISTA: AUDITORÍA DE INVENTARIO FÍSICO */}
       {vistaDespacho === 'inventario' && (
         <div className="animate-in fade-in">
           {!conteoActivo ? (
@@ -532,13 +542,12 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {/* VISTA: HISTORIAL DE CIERRES */}
       {vistaDespacho === 'historial_cierres' && (
         <div className="animate-in fade-in space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
              <div>
                <h3 className="font-black text-slate-700 dark:text-slate-200 text-lg flex items-center gap-2"><FileSpreadsheet className="text-emerald-600"/> Reportes Guardados</h3>
-               <p className="text-sm text-slate-500">Consulta o descarga cierres anteriores en PDF/CSV.</p>
+               <p className="text-sm text-slate-500">Consulta o descarga cierres anteriores.</p>
              </div>
              <div className="flex items-center gap-3 mt-4 sm:mt-0 w-full sm:w-auto">
                <CalendarDays className="text-slate-400 shrink-0"/>
@@ -579,6 +588,20 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                           }
                         </div>
                       </div>
+                      
+                      {cierre.notasAuditoria && cierre.notasAuditoria.length > 0 && (
+                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
+                          <div className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-1.5 flex items-center gap-1">
+                            <MessageSquare size={12}/> Observaciones de Auditoría:
+                          </div>
+                          {cierre.notasAuditoria.map((n, i) => (
+                             <div key={i} className="text-xs text-amber-800 dark:text-amber-300 italic mb-1 last:mb-0">
+                                "{n.texto}" <span className="font-bold opacity-70">- {n.autor}</span>
+                             </div>
+                          ))}
+                        </div>
+                      )}
+
                     </div>
                     
                     <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">

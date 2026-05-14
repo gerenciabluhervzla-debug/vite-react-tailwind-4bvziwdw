@@ -252,10 +252,16 @@ export default function App() {
     const showUsuarios = [ROLES.ADMIN].includes(r);
     const showLogs = [ROLES.ADMIN, ROLES.AUDITORIA].includes(r);
 
+    // --- CORRECCIÓN QA: FECHA PARA IMPRESIÓN EXCLUSIVA DE HOY ---
+    const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const tDateApp = getVeneziaTimeApp();
+    const ddApp = String(tDateApp.getDate()).padStart(2, '0');
+    const mmApp = String(tDateApp.getMonth() + 1).padStart(2, '0');
+    const todayStrApp = `${ddApp}/${mmApp}/${tDateApp.getFullYear()}`;
+
     content = (
       <div className="flex flex-col min-h-screen bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors selection:bg-sky-200 dark:selection:bg-sky-900">
         
-        {/* --- HEADER MÓVIL --- */}
         <div className="md:hidden flex items-center justify-between bg-[#003366] dark:bg-slate-950 p-4 text-white sticky top-0 z-40 shadow-md">
           <div className="flex items-center gap-3">
             <button onClick={() => setIsMobileMenuOpen(true)} className="p-1 rounded-md hover:bg-white/10 transition-colors">
@@ -269,18 +275,15 @@ export default function App() {
         </div>
 
         <div className="flex flex-1 relative">
-          {/* --- OVERLAY OSCURO PARA MÓVILES --- */}
           {isMobileMenuOpen && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden transition-opacity" onClick={() => setIsMobileMenuOpen(false)}></div>
           )}
 
-          {/* --- SIDEBAR RESPONSIVO Y STICKY (FIJO EN PC) --- */}
           <aside className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-[#003366] dark:bg-slate-950 text-slate-200 flex flex-col h-full transform transition-transform duration-300 ease-in-out md:sticky md:top-0 md:h-screen md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
             <div className="p-8 pb-4 flex flex-col items-center border-b border-sky-800/50 dark:border-slate-800/50 relative">
               <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden absolute top-4 right-4 p-1.5 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
                 <X size={20}/>
               </button>
-              
               <button onClick={() => setDarkMode(!darkMode)} className="hidden md:block absolute top-4 right-4 p-1.5 bg-sky-800/50 dark:bg-slate-800 rounded-full text-sky-200 dark:text-slate-400 hover:text-white transition-colors">
                 {darkMode ? <Sun size={14}/> : <Moon size={14}/>}
               </button>
@@ -320,7 +323,6 @@ export default function App() {
             </div>
           </aside>
 
-          {/* --- CONTENIDO PRINCIPAL --- */}
           <main className="flex-1 p-4 md:p-10 overflow-y-auto print:p-0 print:m-0 print:bg-white print:block w-full">
             <div className="max-w-6xl mx-auto print:max-w-none print:mx-0">
               <div className="print:hidden">
@@ -332,7 +334,8 @@ export default function App() {
                 {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
                 {activeTab === 'logs' && showLogs && <PanelLogs logs={logs} />}
               </div>
-              <VistaImpresion pedidos={pedidos.filter(p => p.status === 'Validado')} />
+              {/* FILTRO APLICADO: Solo imprime pedidos de hoy */}
+              <VistaImpresion pedidos={pedidos.filter(p => p.status === 'Validado' && p.fechaDespacho === todayStrApp)} />
             </div>
           </main>
         </div>
