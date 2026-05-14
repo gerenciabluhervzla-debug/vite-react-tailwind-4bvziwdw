@@ -32,7 +32,10 @@ export function StatusBadge({ status }) {
 export function TabButton({ active, onClick, icon, label, badge, badgeColor }) { 
   return (
     <button onClick={onClick} className={`flex items-center justify-between w-full p-4 rounded-2xl font-black transition-all ${active ? 'bg-sky-600 text-white shadow-xl scale-105' : 'text-sky-100/60 dark:text-slate-400 hover:bg-sky-900/40 dark:hover:bg-slate-800/80 hover:text-white'}`}>
-      <div className="flex items-center gap-3">{icon} <span className="hidden md:inline text-xs uppercase tracking-widest">{label}</span></div> 
+      <div className="flex items-center gap-3">
+         {icon} 
+         <span className="text-xs uppercase tracking-widest">{label}</span>
+      </div> 
       {badge > 0 && <span className={`${badgeColor || 'bg-red-500'} text-white text-[9px] px-2 py-0.5 rounded-full font-bold shadow-lg`}>{badge}</span>}
     </button>
   ); 

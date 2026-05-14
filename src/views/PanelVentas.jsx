@@ -11,7 +11,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
   
-  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: 'ZOOM', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: 'USD', montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false, descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' };
+  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '', montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false, descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' };
   
   const [formData, setFormData] = useState(defaultForm);
   const [editId, setEditId] = useState(null); 
@@ -160,7 +160,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     e.preventDefault();
     if (!tasaActualizadaHoy && !editId) return dialogs.alert("NO puedes registrar ventas nuevas porque la Tasa del Día no ha sido actualizada hoy por Administración.", "Tasa Desactualizada");
     if (!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) return dialogs.alert("Debes seleccionar productos del Catálogo Visual.", "Carrito Vacío");
+    if (!formData.courier) return dialogs.alert("Por favor selecciona la Empresa de Envío.", "Falta Agencia");
     if (!formData.esRegalo && (!formData.tasa || parseFloat(formData.tasa) <= 0)) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
+    if (!formData.esRegalo && !formData.moneda) return dialogs.alert("Por favor selecciona la moneda de pago.", "Falta Moneda");
     if (formData.esMercadoLibre && !formData.linkGuiaML) return dialogs.alert("Si es un envío de MercadoLibre, debes adjuntar la imagen de la guía antes de procesar la orden.", "Falta Guía ML");
     
     let sinStock = false;
@@ -331,7 +333,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
              
              <div className="flex flex-col">
                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Empresa de Envío</label>
-               <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} disabled={!tasaActualizadaHoy && !editId} className="p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 cursor-pointer shadow-sm disabled:opacity-50">
+               <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} disabled={!tasaActualizadaHoy && !editId} className={`p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold cursor-pointer shadow-sm disabled:opacity-50 ${!formData.courier ? 'border-amber-300 text-slate-400' : 'border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200'}`}>
+                 <option value="" disabled>Seleccionar...</option>
                  <option value="ZOOM">ZOOM</option> <option value="MRW">MRW</option> <option value="Tealca">Tealca</option> <option value="Domesa">Domesa</option>
                </select>
              </div>
@@ -379,8 +382,10 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                <div className="flex flex-col"><InputDark disabled={formData.esRegalo || (!tasaActualizadaHoy && !editId)} type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 45.20" /></div>
                <div className="flex flex-col">
                  <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2 transition-colors">Moneda de Pago</label>
-                 <select disabled={formData.esRegalo || (!tasaActualizadaHoy && !editId)} value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} className="p-3.5 border-2 border-slate-700 rounded-2xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold text-white cursor-pointer disabled:opacity-50 shadow-inner">
-                   <option value="USD">Dólares (USD)</option> <option value="VES">Bolívares (VES)</option>
+                 <select disabled={formData.esRegalo || (!tasaActualizadaHoy && !editId)} value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} className={`p-3.5 border-2 rounded-2xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold cursor-pointer disabled:opacity-50 shadow-inner ${!formData.moneda ? 'border-amber-500 text-slate-400' : 'border-slate-700 text-white'}`}>
+                   <option value="" disabled>Seleccionar...</option>
+                   <option value="USD">Dólares (USD)</option> 
+                   <option value="VES">Bolívares (VES)</option>
                  </select>
                </div>
                <div className="flex flex-col relative">

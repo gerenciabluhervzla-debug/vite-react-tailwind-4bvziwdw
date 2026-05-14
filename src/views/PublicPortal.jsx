@@ -19,7 +19,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
     nombre: '',
     cedula: '',
     telefono: '',
-    agencia: 'ZOOM',
+    agencia: '',
     direccion: '',
     referencia: '',
     comprobanteUrl: ''
@@ -352,7 +352,8 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                          
                          <div className="flex flex-col">
                            <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2">Agencia de Envío</label>
-                           <select value={form.agencia} onChange={e=>setForm({...form, agencia: e.target.value})} required className="p-3.5 border-2 border-slate-700 bg-slate-800 text-white rounded-2xl focus:border-sky-400 outline-none font-bold transition-all text-sm">
+                           <select value={form.agencia} onChange={e=>setForm({...form, agencia: e.target.value})} required className={`p-3.5 border-2 bg-slate-800 rounded-2xl focus:border-sky-400 outline-none font-bold transition-all text-sm ${!form.agencia ? 'border-amber-500 text-slate-400' : 'border-slate-700 text-white'}`}>
+                             <option value="" disabled>Seleccionar agencia...</option>
                              <option value="ZOOM">ZOOM</option>
                              <option value="MRW">MRW</option>
                              <option value="Tealca">Tealca</option>
@@ -371,9 +372,11 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                          <Input label="Cédula o RIF" value={form.cedula} onChange={e=>setForm({...form, cedula: e.target.value})} required placeholder="Ej: V-12345678"/>
                          <Input label="Teléfono" value={form.telefono} onChange={e=>setForm({...form, telefono: e.target.value})} required placeholder="Ej: 0414..."/>
                          
-                         <div className="flex flex-col">
+                        {/* MODO CLARO */}
+                        <div className="flex flex-col">
                            <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Agencia de Envío</label>
-                           <select value={form.agencia} onChange={e=>setForm({...form, agencia: e.target.value})} required className="p-3.5 border-2 border-slate-100 rounded-2xl focus:border-sky-500 outline-none font-bold transition-all text-sm bg-slate-50 text-slate-700">
+                           <select value={form.agencia} onChange={e=>setForm({...form, agencia: e.target.value})} required className={`p-3.5 border-2 rounded-2xl focus:border-sky-500 outline-none font-bold transition-all text-sm bg-slate-50 ${!form.agencia ? 'border-amber-400 text-slate-400' : 'border-slate-100 text-slate-700'}`}>
+                             <option value="" disabled>Seleccionar agencia...</option>
                              <option value="ZOOM">ZOOM</option>
                              <option value="MRW">MRW</option>
                              <option value="Tealca">Tealca</option>

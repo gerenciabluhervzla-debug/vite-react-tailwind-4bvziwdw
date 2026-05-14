@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, MessageSquare } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays } from 'lucide-react';
 import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image'; 
@@ -196,6 +196,28 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
   const todayStr = new Date().toLocaleDateString('es-VE');
 
+  // --- LÓGICA DE NUMERACIÓN DIARIA ---
+  // Agrupa los pedidos por fecha de despacho y les asigna un número según el orden de creación.
+  const numeracionDiaria = useMemo(() => {
+    const map = {};
+    const agrupados = {};
+    
+    pedidos.forEach(p => {
+       const fecha = p.fechaDespacho || 'Sin Fecha';
+       if (!agrupados[fecha]) agrupados[fecha] = [];
+       agrupados[fecha].push(p);
+    });
+    
+    Object.keys(agrupados).forEach(fecha => {
+       // Ordenar ascendente: el más viejo (primero en llegar) es el #1
+       agrupados[fecha].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+       agrupados[fecha].forEach((p, index) => {
+          map[p.id] = index + 1;
+       });
+    });
+    return map;
+  }, [pedidos]);
+
   return (
     <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
       
@@ -226,121 +248,119 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
+      {/* --- VISTA NORMAL DE LOGÍSTICA CON CARTAS SEPARADAS --- */}
       {['pendientes', 'historial'].includes(vistaDespacho) && (
-        <div className="rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden bg-white dark:bg-slate-800/20">
-          <div className="hidden lg:grid lg:grid-cols-12 gap-6 p-4 bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-b dark:border-slate-700 text-sm">
-            <div className="lg:col-span-3 font-bold tracking-wide">Datos del Paquete</div>
-            <div className="lg:col-span-5 font-bold tracking-wide">Dirección y Contenido</div>
-            <div className="lg:col-span-4 font-bold tracking-wide">Gestión de Guía y Soportes</div>
-          </div>
+        <div className="flex flex-col gap-8 w-full">
+          {pedidosAMostrar.length === 0 ? (
+            <div className="p-10 text-center text-slate-400 italic font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl">
+              No hay envíos en esta vista.
+            </div>
+          ) : pedidosAMostrar.map(p => {
+            
+            const valorGuia = guiasInput[p.id]?.guia !== undefined ? guiasInput[p.id].guia : (p.guia || '');
+            const valorLinkFoto = guiasInput[p.id]?.fotoProductos !== undefined ? guiasInput[p.id].fotoProductos : (p.linkFotoProductos || '');
 
-          <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-700">
-            {pedidosAMostrar.length === 0 ? (
-              <div className="p-10 text-center text-slate-400 italic font-bold">No hay envíos en esta vista.</div>
-            ) : pedidosAMostrar.map(p => {
-              
-              const valorGuia = guiasInput[p.id]?.guia !== undefined ? guiasInput[p.id].guia : (p.guia || '');
-              const valorLinkFoto = guiasInput[p.id]?.fotoProductos !== undefined ? guiasInput[p.id].fotoProductos : (p.linkFotoProductos || '');
+            const isLinkML = p.esMercadoLibre && !!p.linkGuiaML;
+            const valorLinkGuia = isLinkML ? p.linkGuiaML : (guiasInput[p.id]?.link !== undefined ? guiasInput[p.id].link : (p.linkGuia || ''));
 
-              const isLinkML = p.esMercadoLibre && !!p.linkGuiaML;
-              const valorLinkGuia = isLinkML ? p.linkGuiaML : (guiasInput[p.id]?.link !== undefined ? guiasInput[p.id].link : (p.linkGuia || ''));
+            const esParaManana = p.fechaDespacho !== todayStr;
+            const cardClass = esParaManana && vistaDespacho === 'pendientes' 
+                ? "bg-red-50/80 dark:bg-red-900/20 border-red-300 dark:border-red-800" 
+                : "bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 hover:border-sky-400";
 
-              const esParaManana = p.fechaDespacho !== todayStr;
-              const cardClass = esParaManana && vistaDespacho === 'pendientes' 
-                  ? "bg-red-50/50 dark:bg-red-900/10 border-red-200 dark:border-red-800" 
-                  : "hover:bg-slate-50/50 dark:hover:bg-slate-800/50";
-
-              return (
-                <div key={p.id} className={`flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 transition-colors border-l-4 ${cardClass} ${esParaManana && vistaDespacho === 'pendientes' ? 'border-l-red-500' : 'border-l-transparent'}`}>
+            return (
+              <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-5 md:p-6 transition-colors border-2 rounded-2xl shadow-md ${cardClass}`}>
+                
+                {/* Numeración Correlativa */}
+                <div className="absolute -top-3 -left-3 bg-[#003366] dark:bg-sky-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md">
+                  {numeracionDiaria[p.id]}
+                </div>
+                
+                <div className="lg:col-span-3 flex flex-col justify-start">
+                  <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">{p.clienteNombre}</div>
+                  <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-2">{p.courier}</div>
+                  <div className="text-xs font-semibold text-slate-500 mt-2">Tel: {p.clienteTelefono}</div>
                   
-                  <div className="lg:col-span-3 flex flex-col justify-start">
-                    <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">{p.clienteNombre}</div>
-                    <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-2">{p.courier}</div>
-                    <div className="text-xs font-semibold text-slate-500 mt-2">Tel: {p.clienteTelefono}</div>
-                    
-                    <div className={`text-[11px] font-bold uppercase tracking-wider mt-3 p-2 rounded-lg ${esParaManana && vistaDespacho === 'pendientes' ? 'bg-red-100 text-red-700 border border-red-200' : 'text-slate-400'}`}>
-                      Sale: {p.fechaDespacho} {esParaManana && vistaDespacho === 'pendientes' && '(NO IMPRIMIR HOY)'}
-                    </div>
-
-                    {esParaManana && vistaDespacho === 'pendientes' && [ROLES.ADMIN].includes(perfil?.role) && (
-                      <button onClick={() => forzarEnvioHoy(p.id)} className="w-full mt-3 bg-red-100 hover:bg-red-200 text-red-700 dark:bg-red-900/40 dark:text-red-300 py-2 rounded-xl text-xs font-bold transition-colors">
-                        Autorizar Envío Hoy (Excepción)
-                      </button>
-                    )}
+                  <div className={`text-[11px] font-bold uppercase tracking-wider mt-3 p-2 rounded-lg inline-block w-max ${esParaManana && vistaDespacho === 'pendientes' ? 'bg-red-100 text-red-700 border border-red-200' : 'text-slate-500 bg-slate-100 dark:bg-slate-900'}`}>
+                    Sale: {p.fechaDespacho} {esParaManana && vistaDespacho === 'pendientes' && '(NO IMPRIMIR)'}
                   </div>
 
-                  <div className="lg:col-span-5 flex flex-col justify-start mt-2 lg:mt-0">
-                    
-                    {p.esMercadoLibre && vistaDespacho === 'pendientes' && (
-                      <button 
-                        onClick={() => marcarGuiaMLImpresa(p)}
-                        className={`mb-3 w-full text-left p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider transition-colors ${p.guiaMLImpresa ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-yellow-400 text-slate-900 animate-pulse'}`}
-                      >
-                        {p.guiaMLImpresa ? <CheckCircle size={18} className="shrink-0" /> : <AlertTriangle size={18} className="shrink-0" />}
-                        {p.guiaMLImpresa ? 'RECUERDA PEGAR LA GUÍA DE MERCADOLIBRE' : '¡MERCADOLIBRE! ABRIR E IMPRIMIR GUÍA'}
-                      </button>
-                    )}
+                  {esParaManana && vistaDespacho === 'pendientes' && [ROLES.ADMIN].includes(perfil?.role) && (
+                    <button onClick={() => forzarEnvioHoy(p.id)} className="w-full mt-3 bg-red-100 hover:bg-red-200 text-red-700 dark:bg-red-900/40 dark:text-red-300 py-2 rounded-xl text-xs font-bold transition-colors">
+                      Autorizar Envío Hoy
+                    </button>
+                  )}
+                </div>
 
-                    <div className="font-medium bg-[#f0f4f8] dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-3 whitespace-pre-wrap shadow-sm text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">
-                      {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
-                    </div>
-                    <div className="text-[13px] font-semibold text-slate-600 dark:text-slate-400 flex items-start gap-2 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg">
-                      <div className="mt-0.5 text-sky-600"><Package size={16}/></div>
-                      {p.direccion}
-                    </div>
+                <div className="lg:col-span-5 flex flex-col justify-start mt-2 lg:mt-0">
+                  {p.esMercadoLibre && vistaDespacho === 'pendientes' && (
+                    <button 
+                      onClick={() => marcarGuiaMLImpresa(p)}
+                      className={`mb-3 w-full text-left p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider transition-colors ${p.guiaMLImpresa ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-yellow-400 text-slate-900 animate-pulse'}`}
+                    >
+                      {p.guiaMLImpresa ? <CheckCircle size={18} className="shrink-0" /> : <AlertTriangle size={18} className="shrink-0" />}
+                      {p.guiaMLImpresa ? 'PEGA LA GUÍA DE MERCADOLIBRE' : '¡MERCADOLIBRE! IMPRIMIR GUÍA'}
+                    </button>
+                  )}
+
+                  <div className="font-medium bg-[#f0f4f8] dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700/50 mb-3 whitespace-pre-wrap shadow-inner text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">
+                    {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
                   </div>
-
-                  <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0 bg-slate-50/50 dark:bg-slate-900/30 p-4 lg:p-0 rounded-2xl lg:bg-transparent lg:rounded-none border border-slate-100 dark:border-slate-700 lg:border-none">
-                    {p.status === 'Despachado' ? (
-                      <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm w-full">
-                        <div className="text-sm mb-4"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100 text-lg break-all">{p.guia}</span></div>
-                        <div className="flex flex-col gap-3 mb-5">
-                          {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors truncate"><FileText size={16} className="shrink-0"/> Ver Recibo Digital</a>}
-                          {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors truncate"><Camera size={16} className="shrink-0"/> Ver Foto del Paquete</a>}
-                        </div>
-                        <div className="text-xs text-emerald-600 dark:text-emerald-400 font-black mb-3 uppercase tracking-widest flex items-center gap-1"><CheckCircle size={14}/> Despachado OK</div>
-                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors">Corregir Información</button>
-                      </div>
-                    ) : (
-                      <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm flex flex-col gap-3 w-full">
-                        <input type="text" placeholder="N° de Guía Tracking" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
-                        <div className="flex flex-col lg:flex-row gap-3">
-                            <div className="flex-1 relative w-full">
-                              <input type="text" placeholder="URL Recibo" readOnly={isLinkML} className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'} ${isLinkML ? 'opacity-70 cursor-not-allowed' : ''}`} value={valorLinkGuia} onChange={(e) => !isLinkML && handleGuiaChange(p.id, 'link', e.target.value)} />
-                              <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg transition-colors shadow-sm ${isLinkML ? 'cursor-not-allowed bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'cursor-pointer'} ${valorLinkGuia && !isLinkML ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title={isLinkML ? "Guía provista por Ventas" : "Subir Recibo Agencia"}>
-                                {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkGuia ? <CheckCircle size={16}/> : <UploadCloud size={16} />)}
-                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => !isLinkML && handleFileUpload(e, p.id, 'link')} disabled={isLinkML || subiendo.field !== null} />
-                              </label>
-                            </div>
-
-                            <div className="flex-1 relative w-full">
-                              <input type="text" placeholder="URL Foto Caja" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkFoto ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkFoto} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
-                              <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkFoto ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto del Paquete">
-                                {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkFoto ? <CheckCircle size={16}/> : <Camera size={16} />)}
-                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} disabled={subiendo.field !== null} />
-                              </label>
-                            </div>
-                        </div>
-
-                        <div className="flex flex-col lg:flex-row gap-2 mt-2">
-                           <button onClick={() => guardarAvance(p)} className="flex-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                             <Save size={16}/> Guardar Avance
-                           </button>
-                           <button onClick={() => guardarGuia(p)} className="flex-1 bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white text-xs font-bold py-3 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
-                             <Truck size={16}/> Archivar
-                           </button>
-                        </div>
-                      </div>
-                    )}
+                  <div className="text-[13px] font-semibold text-slate-600 dark:text-slate-400 flex items-start gap-2 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border border-slate-100 dark:border-slate-700/50">
+                    <div className="mt-0.5 text-sky-600"><Package size={16}/></div>
+                    {p.direccion}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+
+                <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0 bg-slate-50/50 dark:bg-slate-900/30 p-4 lg:p-0 rounded-2xl lg:bg-transparent lg:rounded-none border border-slate-200 dark:border-slate-700 lg:border-none">
+                  {p.status === 'Despachado' ? (
+                    <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm w-full">
+                      <div className="text-sm mb-4"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100 text-lg break-all">{p.guia}</span></div>
+                      <div className="flex flex-col gap-3 mb-5">
+                        {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors truncate"><FileText size={16} className="shrink-0"/> Ver Recibo Digital</a>}
+                        {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors truncate"><Camera size={16} className="shrink-0"/> Ver Foto del Paquete</a>}
+                      </div>
+                      <div className="text-xs text-emerald-600 dark:text-emerald-400 font-black mb-3 uppercase tracking-widest flex items-center gap-1"><CheckCircle size={14}/> Despachado OK</div>
+                      <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors">Corregir Información</button>
+                    </div>
+                  ) : (
+                    <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm flex flex-col gap-3 w-full h-full justify-between">
+                      <input type="text" placeholder="N° de Guía Tracker" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                      <div className="flex flex-col lg:flex-row gap-3">
+                          <div className="flex-1 relative w-full">
+                            <input type="text" placeholder="URL Recibo" readOnly={isLinkML} className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'} ${isLinkML ? 'opacity-70 cursor-not-allowed' : ''}`} value={valorLinkGuia} onChange={(e) => !isLinkML && handleGuiaChange(p.id, 'link', e.target.value)} />
+                            <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg transition-colors shadow-sm ${isLinkML ? 'cursor-not-allowed bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'cursor-pointer'} ${valorLinkGuia && !isLinkML ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title={isLinkML ? "Guía provista por Ventas" : "Subir Recibo Agencia"}>
+                              {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkGuia ? <CheckCircle size={16}/> : <UploadCloud size={16} />)}
+                              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => !isLinkML && handleFileUpload(e, p.id, 'link')} disabled={isLinkML || subiendo.field !== null} />
+                            </label>
+                          </div>
+                          <div className="flex-1 relative w-full">
+                            <input type="text" placeholder="URL Foto Caja" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkFoto ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkFoto} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
+                            <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkFoto ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto del Paquete">
+                              {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkFoto ? <CheckCircle size={16}/> : <Camera size={16} />)}
+                              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} disabled={subiendo.field !== null} />
+                            </label>
+                          </div>
+                      </div>
+
+                      <div className="flex flex-col lg:flex-row gap-2 mt-2">
+                         <button onClick={() => guardarAvance(p)} className="flex-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                           <Save size={16}/> Guardar Avance
+                         </button>
+                         <button onClick={() => guardarGuia(p)} className="flex-1 bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white text-xs font-bold py-3 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
+                           <Truck size={16}/> Archivar
+                         </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* VISTA: AUDITORÍA DE INVENTARIO FÍSICO */}
+      {/* --- VISTAS DE AUDITORÍA Y CIERRES SE MANTIENEN INTACTAS... --- */}
       {vistaDespacho === 'inventario' && (
         <div className="animate-in fade-in">
           {!conteoActivo ? (
@@ -424,7 +444,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {/* VISTA: HISTORIAL DE CIERRES */}
       {vistaDespacho === 'historial_cierres' && (
         <div className="animate-in fade-in space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
@@ -471,21 +490,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                           }
                         </div>
                       </div>
-                      
-                      {/* MOSTRAR NOTAS DE AUDITORÍA SI EXISTEN */}
-                      {cierre.notasAuditoria && cierre.notasAuditoria.length > 0 && (
-                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
-                          <div className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-1.5 flex items-center gap-1">
-                            <MessageSquare size={12}/> Observaciones de Auditoría:
-                          </div>
-                          {cierre.notasAuditoria.map((n, i) => (
-                             <div key={i} className="text-xs text-amber-800 dark:text-amber-300 italic mb-1 last:mb-0">
-                                "{n.texto}" <span className="font-bold opacity-70">- {n.autor}</span>
-                             </div>
-                          ))}
-                        </div>
-                      )}
-
                     </div>
                     
                     <button onClick={() => generarCSV(cierre)} className="w-full py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors">
