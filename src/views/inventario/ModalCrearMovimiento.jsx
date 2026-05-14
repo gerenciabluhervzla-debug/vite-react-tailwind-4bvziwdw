@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowRightLeft, PlusCircle, X, Camera, Loader2 } from 'lucide-react';
-// ¡Atención a la importación de 'increment'!
-import { addDoc, collection, setDoc, doc, updateDoc, increment } from 'firebase/firestore'; 
+import { addDoc, collection, doc, updateDoc, increment } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../../config/firebase';
 import { compressImage } from '../../utils/image';
 
@@ -26,6 +25,26 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
     });
   };
 
+  // --- CORRECCIÓN UX: ESCRITURA MANUAL DE CANTIDADES ---
+  const handleDirectInput = (key, val) => {
+    let num = parseInt(val, 10);
+    if (isNaN(num) || num < 0) num = 0;
+    
+    if (isTransfer) {
+      let maxDisp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key]||0);
+      if (num > maxDisp) num = maxDisp; 
+    }
+
+    setCarrito(prev => {
+      if (num === 0) {
+        const copia = { ...prev };
+        delete copia[key];
+        return copia;
+      }
+      return { ...prev, [key]: num };
+    });
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -41,7 +60,12 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
         const response = await fetch(URL_GOOGLE_SCRIPT, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({tokenSecreto: "BLUHER_SECURE_TOKEN_2026", fileName: `Evidencia_Movimiento_${Date.now()}.jpg`, mimeType: 'image/jpeg', data: base64Data })
+            body: JSON.stringify({ 
+               tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
+               fileName: `Evidencia_Movimiento_${Date.now()}.jpg`, 
+               mimeType: 'image/jpeg', 
+               data: base64Data 
+            })
         });
         const result = await response.json();
         if (result.url) { setFotoUrl(result.url); } 
@@ -67,15 +91,12 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
 
       Object.entries(carrito).forEach(([key, qty]) => {
          if (tipo === 'INGRESO') {
-           // Sumamos a envíos
            updates[`${key}.envios`] = increment(qty);
          } else if (tipo === 'TRANSFERENCIA') {
-           // Restamos de envíos (recepción se suma después cuando lo aprueben)
            updates[`${key}.envios`] = increment(-qty);
          }
       });
       
-      // Aplicar actualización atómica
       if(Object.keys(updates).length > 0){
          await updateDoc(stockRef, updates);
       }
@@ -109,7 +130,17 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
                         <span className="font-medium text-slate-600 dark:text-slate-400">{pres} {isTransfer && <span className="text-[10px] font-bold text-sky-600 bg-sky-50 dark:bg-sky-900/30 dark:text-sky-400 px-1.5 py-0.5 rounded ml-1 tracking-widest uppercase">Disp: {maxDisp}</span>}</span>
                         <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-1 rounded-lg">
                           <button onClick={()=>updateQty(key, -1)} className="bg-white dark:bg-slate-800 px-2 py-1 rounded text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white font-bold shadow-sm">-</button>
-                          <span className="w-6 text-center font-black text-slate-800 dark:text-white">{qty}</span>
+                          
+                          {/* CAMPO DE TEXTO MANUAL */}
+                          <input 
+                            type="number" 
+                            min="0" 
+                            value={qty === 0 ? '' : qty} 
+                            onChange={(e) => handleDirectInput(key, e.target.value)}
+                            className="w-12 text-center font-black text-slate-800 dark:text-white bg-transparent outline-none focus:ring-2 focus:ring-sky-500 rounded" 
+                            placeholder="0"
+                          />
+                          
                           <button onClick={()=>updateQty(key, 1)} className="bg-white dark:bg-slate-800 px-2 py-1 rounded text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold shadow-sm">+</button>
                         </div>
                       </div>
