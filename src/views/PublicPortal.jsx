@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud, Search, Percent } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud, Search, Percent, Image as ImageIcon } from 'lucide-react';
 import { collection, addDoc } from 'firebase/firestore';
 import { BRAND_LOGO } from '../config/constants';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
@@ -123,7 +123,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
     }
   };
 
-  // LIMPIEZA DE CÓDIGO MALICIOSO
   const limpiarTexto = (str) => str ? str.replace(/[<>]/g, "") : "";
 
   const confirmarPedido = async (e) => {
@@ -258,13 +257,9 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {cat.productos.map(prod => (
                   <div key={prod.nombre} className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 hover:shadow-lg transition-all hover:-translate-y-1 flex flex-col">
-                    {prod.imagen ? (
-                      <div className="aspect-square bg-slate-50 dark:bg-slate-900 rounded-2xl mb-4 overflow-hidden"><img src={prod.imagen} alt={prod.nombre} className="w-full h-full object-cover" /></div>
-                    ) : (
-                      <div className="aspect-square bg-sky-50 dark:bg-sky-900/10 rounded-2xl mb-4 flex items-center justify-center text-sky-200 dark:text-sky-800"><Package size={64} /></div>
-                    )}
-                    <h3 className="font-black text-lg mb-4 leading-tight flex-1">{prod.nombre}</h3>
-                    <div className="space-y-3">
+                    <h3 className="font-black text-lg mb-4 leading-tight border-b dark:border-slate-700 pb-3">{prod.nombre}</h3>
+                    
+                    <div className="space-y-4">
                       {prod.presentaciones.map((pres, i) => {
                         const key = `${prod.nombre}|${pres}`;
                         const qty = carrito[key] || 0;
@@ -273,28 +268,50 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                         const originalPrice = prod.precios[i];
                         const discountedPrice = originalPrice * (1 - globalDiscountPercent / 100);
 
+                        // AQUÍ LEEMOS LA IMAGEN DESDE EL ARREGLO
+                        const imgUrl = prod.imagenes && prod.imagenes[i] ? prod.imagenes[i] : null;
+
                         return (
-                          <div key={pres} className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl">
-                            <div>
-                              <div className="text-xs font-bold text-slate-500 uppercase">{pres}</div>
-                              {isGlobalDiscountActive ? (
-                                <div className="flex items-baseline gap-2">
-                                  <span className="font-black text-pink-600 dark:text-pink-400">${discountedPrice.toFixed(2)}</span>
-                                  <span className="text-xs font-bold text-slate-400 line-through">${originalPrice}</span>
-                                </div>
+                          <div key={pres} className="flex flex-col gap-3 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border dark:border-slate-700 transition-colors">
+                            <div className="flex gap-4 items-center">
+                               {imgUrl ? (
+                                  <div className="w-16 h-16 rounded-xl overflow-hidden shadow-sm shrink-0 border border-slate-200 dark:border-slate-600">
+                                     <img src={imgUrl} alt={pres} className="w-full h-full object-cover" />
+                                  </div>
+                               ) : (
+                                  <div className="w-16 h-16 rounded-xl bg-slate-200 dark:bg-slate-800 flex items-center justify-center shrink-0 border border-slate-300 dark:border-slate-700">
+                                     <ImageIcon className="text-slate-400" size={24}/>
+                                  </div>
+                               )}
+                               
+                               <div className="flex-1">
+                                 <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">{pres}</div>
+                                 {isGlobalDiscountActive ? (
+                                   <div className="flex items-baseline gap-2 mt-1">
+                                     <span className="font-black text-pink-600 dark:text-pink-400 text-xl leading-none">${discountedPrice.toFixed(2)}</span>
+                                     <span className="text-xs font-bold text-slate-400 line-through">${originalPrice}</span>
+                                   </div>
+                                 ) : (
+                                   <div className="font-black text-emerald-600 dark:text-emerald-400 text-xl leading-none mt-1">${originalPrice}</div>
+                                 )}
+                               </div>
+                            </div>
+                            
+                            <div className="flex justify-between items-center border-t border-slate-200 dark:border-slate-800 pt-3">
+                              {disp > 0 ? (
+                                <span className="text-[10px] font-black text-emerald-600 bg-emerald-100 px-2 py-1 rounded uppercase tracking-wider">Disp: {disp}</span>
                               ) : (
-                                <div className="font-black text-emerald-600 dark:text-emerald-400">${originalPrice}</div>
+                                <span className="text-[10px] font-black text-red-500 bg-red-50 px-2 py-1 rounded uppercase tracking-wider">Agotado</span>
+                              )}
+
+                              {disp > 0 && (
+                                <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 shadow-sm">
+                                  <button onClick={() => updateQty(key, -1)} className="w-8 h-8 flex items-center justify-center font-black text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors">-</button>
+                                  <span className="w-6 text-center font-black text-base">{qty}</span>
+                                  <button onClick={() => updateQty(key, 1)} className="w-8 h-8 flex items-center justify-center font-black text-sky-600 hover:text-sky-800 dark:hover:text-sky-300 transition-colors">+</button>
+                                </div>
                               )}
                             </div>
-                            {disp > 0 ? (
-                              <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-1">
-                                <button onClick={() => updateQty(key, -1)} className="w-8 h-8 flex items-center justify-center font-black text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors">-</button>
-                                <span className="w-4 text-center font-black text-sm">{qty}</span>
-                                <button onClick={() => updateQty(key, 1)} className="w-8 h-8 flex items-center justify-center font-black text-sky-600 hover:text-sky-800 dark:hover:text-sky-300 transition-colors">+</button>
-                              </div>
-                            ) : (
-                              <span className="text-[10px] font-black text-red-500 bg-red-50 px-2 py-1 rounded uppercase tracking-wider">Agotado</span>
-                            )}
                           </div>
                         )
                       })}
