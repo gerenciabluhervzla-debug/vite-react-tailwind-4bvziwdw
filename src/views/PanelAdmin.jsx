@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, Trash2, MessageSquare, Database, DownloadCloud } from 'lucide-react';
+import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, Trash2, MessageSquare, Database, DownloadCloud, Upload } from 'lucide-react';
 import { StatusBadge, InputDark } from '../components/ui';
 import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
@@ -73,7 +73,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             if(isAuto) { loggear('BACKUP_AUTO', 'Respaldo automático del día guardado en Drive.'); } 
             else {
                 loggear('BACKUP_MANUAL', 'El administrador generó un respaldo manual.');
-                dialogs.alert("El respaldo del sistema completo ha sido comprimido y enviado a tu Google Drive exitosamente.", "Backup Completado");
+                dialogs.alert("El respaldo del sistema ha sido comprimido y enviado a tu Google Drive exitosamente.", "Backup Completado");
             }
             if(!isAuto) setBackupLoading(false);
         };
@@ -88,6 +88,67 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         triggerBackup(true); 
     }
   }, [esAdminSupremo, config?.ultimaFechaBackup, hoyStr]);
+
+  // --- LÓGICA DE RESTAURACIÓN DE BACKUP DESDE EL SISTEMA ---
+  const handleRestaurarBackup = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    dialogs.prompt("⚠️ ADVERTENCIA CRÍTICA:\nEstás a punto de sobrescribir toda la base de datos actual con este archivo de respaldo. Se borrará la información reciente.\n\nEscribe la palabra 'RESTAURAR' para confirmar:", async (textoConfirmacion) => {
+        if (textoConfirmacion !== 'RESTAURAR') {
+            dialogs.alert("Palabra de seguridad incorrecta. Operación cancelada por seguridad.");
+            return;
+        }
+
+        setBackupLoading(true);
+        try {
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+               try {
+                   const data = JSON.parse(event.target.result);
+
+                   // Restaurar Colecciones
+                   const colecciones = ['pedidos', 'cierres_inventario', 'movimientos', 'logs', 'users'];
+                   for (const col of colecciones) {
+                       if (data[col]) {
+                           for (const docData of data[col]) {
+                               const { id, ...resto } = docData;
+                               await setDoc(doc(db, 'artifacts', appId, 'public', 'data', col, id), resto);
+                           }
+                       }
+                   }
+
+                   // Restaurar Inventario
+                   if (data.inventario) {
+                       if (data.inventario.catalogo) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), data.inventario.catalogo);
+                       if (data.inventario.stock) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), data.inventario.stock);
+                       if (data.inventario.notas) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), data.inventario.notas);
+                   }
+
+                   // Restaurar Configuración
+                   if (data.config) {
+                       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), data.config);
+                   }
+
+                   loggear('BACKUP_RESTAURADO', 'Se ejecutó una restauración de base de datos desde un archivo local.');
+                   dialogs.alert("Restauración completada con éxito. Por favor recarga la página para ver los cambios.", "Éxito");
+               } catch (err) {
+                   console.error(err);
+                   dialogs.alert("El archivo seleccionado no es válido o está corrupto.", "Error");
+               } finally {
+                   setBackupLoading(false);
+               }
+            };
+            reader.readAsText(file);
+        } catch (err) {
+            setBackupLoading(false);
+            dialogs.alert("Error leyendo el archivo.");
+        }
+    }, "Confirmación Requerida");
+    
+    // Reseteamos el input file para que permita volver a seleccionar el mismo archivo si es necesario
+    e.target.value = '';
+  };
   // ------------------------------------------------
 
   const pendientes = pedidos.filter(p => p.status === 'Pendiente');
@@ -278,10 +339,15 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
               {isGlobalDiscountActiveStatus ? (
                 <div className="relative z-10 flex flex-col sm:flex-row justify-between items-center gap-4 mt-2 bg-white/10 p-5 rounded-2xl backdrop-blur-sm border border-white/20">
                    <div>
+                     <div className="text-sm font-semibold opacity-90">Descuento aplicado en tienda:</div>
                      <div className="text-3xl font-black">{config?.descuentoGlobalPorcentaje}% OFF</div>
-                     <div className="text-[10px] font-bold mt-1 bg-black/20 inline-block px-2 py-1 rounded uppercase tracking-wider">Hasta {config?.descuentoGlobalFin}</div>
+                     <div className="text-[10px] font-bold mt-1 bg-black/20 inline-block px-2 py-1 rounded uppercase tracking-wider">
+                       Del {config?.descuentoGlobalInicio} al {config?.descuentoGlobalFin}
+                     </div>
                    </div>
-                   <button onClick={apagarDescuento} className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg transition-transform hover:-translate-y-0.5 w-full sm:w-auto justify-center"><PowerOff size={18}/> Detener</button>
+                   <button onClick={apagarDescuento} className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg transition-transform hover:-translate-y-0.5 w-full sm:w-auto justify-center">
+                     <PowerOff size={18}/> Detener Campaña
+                   </button>
                 </div>
               ) : (
                 <form onSubmit={guardarDescuento} className="relative z-10 grid grid-cols-2 gap-3">
@@ -294,14 +360,14 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
            </div>
          )}
 
-         {/* NUEVO BLOQUE: RESPALDOS AUTOMÁTICOS DEL SISTEMA */}
+         {/* BLOQUE: RESPALDOS Y RESTAURACIÓN DEL SISTEMA */}
          {esAdminSupremo && (
            <div className="bg-slate-900 text-white p-8 rounded-[2rem] shadow-xl relative overflow-hidden border-4 border-slate-700 flex flex-col justify-center h-full">
               <Database size={120} className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none"/>
               <div className="flex justify-between items-start mb-4 relative z-10">
                  <div>
-                   <h3 className="text-xl font-black flex items-center gap-2">Respaldo Seguro</h3>
-                   <p className="text-xs font-medium opacity-80 mt-1">Backup automático en Google Drive.</p>
+                   <h3 className="text-xl font-black flex items-center gap-2">Base de Datos</h3>
+                   <p className="text-xs font-medium opacity-80 mt-1">Backup seguro en Google Drive.</p>
                  </div>
                  {config?.ultimaFechaBackup === hoyStr && (
                    <span className="bg-emerald-500/30 text-emerald-300 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-emerald-400/30 flex items-center gap-1"><CheckCircle size={12}/> Al día</span>
@@ -310,13 +376,21 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
               
               <div className="relative z-10 flex flex-col bg-white/5 p-5 rounded-2xl border border-white/10 mt-auto">
                  <div className="mb-4">
-                   <div className="text-xs font-semibold text-slate-400">Último backup validado:</div>
-                   <div className="text-lg font-black">{config?.ultimaFechaBackup === hoyStr ? 'Hoy, base de datos protegida.' : (config?.ultimaFechaBackup || 'Nunca')}</div>
+                   <div className="text-xs font-semibold text-slate-400">Último backup exportado:</div>
+                   <div className="text-base font-black">{config?.ultimaFechaBackup === hoyStr ? 'Hoy, sistema respaldado.' : (config?.ultimaFechaBackup || 'Nunca')}</div>
                  </div>
-                 <button onClick={()=>triggerBackup(false)} disabled={backupLoading} className="bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all w-full disabled:opacity-50 disabled:cursor-not-allowed">
-                   {backupLoading ? <Loader2 size={18} className="animate-spin"/> : <DownloadCloud size={18}/>} 
-                   {backupLoading ? 'Generando Archivo...' : 'Forzar Backup Ahora'}
-                 </button>
+                 <div className="flex gap-2">
+                    <button onClick={()=>triggerBackup(false)} disabled={backupLoading} className="bg-sky-500 hover:bg-sky-600 text-white font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 shadow-md transition-all flex-1 text-xs disabled:opacity-50">
+                      {backupLoading ? <Loader2 size={16} className="animate-spin"/> : <DownloadCloud size={16}/>} 
+                      {backupLoading ? 'Generando...' : 'Forzar Backup'}
+                    </button>
+
+                    <label className="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 shadow-md transition-all flex-1 cursor-pointer text-xs">
+                      {backupLoading ? <Loader2 size={16} className="animate-spin"/> : <Upload size={16}/>} 
+                      {backupLoading ? 'Cargando...' : 'Restaurar'}
+                      <input type="file" accept=".json" className="hidden" onChange={handleRestaurarBackup} disabled={backupLoading} />
+                    </label>
+                 </div>
               </div>
            </div>
          )}
@@ -335,7 +409,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           </div>
         </div>
 
-        {/* FILTRO DE FECHA PARA HISTORIAL */}
+        {/* FILTRO DE FECHAS EN HISTORIAL */}
         {vistaAdmin === 'historial' && (
           <div className="flex flex-col sm:flex-row gap-4 mb-8 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
             <div className="flex-1">
@@ -348,7 +422,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             </div>
             <div className="flex items-end pb-1 w-full sm:w-auto">
                {(fechaInicio !== hoyStr || fechaFin !== hoyStr) && (
-                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 py-3 px-4 rounded-xl w-full">Ver Solo Hoy</button>
+                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 py-3 px-4 rounded-xl w-full">Limpiar (Ver Hoy)</button>
                )}
             </div>
           </div>
@@ -478,6 +552,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           </div>
         )}
 
+        {/* Pestaña de Auditoría Diaria */}
         {vistaAdmin === 'auditoria' && (
           <div className="space-y-6 animate-in fade-in">
              {diasAuditoria.map(dia => (
@@ -559,11 +634,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                           <p className="text-xs mt-1 opacity-70">Para pegar la captura del banco desde tu portapapeles</p>
                        </div>
                     )}
-                    <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={(e)=>{
-                       if(e.target.files[0]){
-                          setModalValidacion(prev=>({...prev, file: e.target.files[0], previewUrl: URL.createObjectURL(e.target.files[0])}))
-                       }
-                    }}/>
                  </div>
                  
                  <button onClick={procesarValidacionDefinitiva} disabled={modalValidacion.subiendo} className="w-full bg-[#003366] hover:bg-[#002244] dark:bg-sky-600 dark:hover:bg-sky-700 text-white font-black py-4 rounded-xl mt-6 shadow-xl transition-transform hover:-translate-y-0.5 disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest">
