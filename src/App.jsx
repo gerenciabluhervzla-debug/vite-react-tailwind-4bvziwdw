@@ -336,7 +336,19 @@ export default function App() {
                 {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
                 {activeTab === 'logs' && showLogs && <PanelLogs logs={logs} />}
               </div>
-              <VistaImpresion pedidos={pedidos.filter(p => p.status === 'Validado' && p.fechaDespacho === todayStrApp)} />
+              <VistaImpresion pedidos={pedidos.filter(p => {
+    if (p.status !== 'Validado') return false;
+    if (!p.fechaDespacho || p.fechaDespacho === 'Sin Fecha') return false;
+    const parts = p.fechaDespacho.split('/');
+    if (parts.length !== 3) return false;
+    const timeDespacho = new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+    
+    const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const tDateApp = getVeneziaTimeApp();
+    const timeHoy = new Date(tDateApp.getFullYear(), tDateApp.getMonth(), tDateApp.getDate()).getTime();
+    
+    return timeDespacho <= timeHoy;
+})} />
             </div>
           </main>
         </div>

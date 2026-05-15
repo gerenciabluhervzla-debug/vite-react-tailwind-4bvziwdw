@@ -6,8 +6,6 @@ import { compressImage } from '../utils/image';
 import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs, perfil }) {
-  
-  // CORRECCIÓN QA: Si es auditor, mandarlo directo al historial de cierres
   const esAuditor = [ROLES.AUDITORIA, ROLES.ADMIN].includes(perfil?.role);
   const esAuditorPuro = perfil?.role === ROLES.AUDITORIA;
   
@@ -59,7 +57,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         if (result.url) { 
            const dbField = field === 'link' ? 'linkGuia' : 'linkFotoProductos';
            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id), { [dbField]: result.url });
-           
            handleGuiaChange(id, field, result.url); 
            loggear('FOTO_PROCESADA', `Soporte en caché para el pedido ${id}`); 
         }
@@ -89,7 +86,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     const fotoFinal = inputData.fotoProductos !== undefined ? inputData.fotoProductos : pedido.linkFotoProductos;
 
     if (!guiaFinal || !linkFinal || !fotoFinal) {
-      return dialogs.alert("⚠️ Faltan datos.\n\nPara archivar el pedido debes tener:\n1. Número de Guía (o de seguimiento)\n2. Foto del recibo de Guía (Ya cubierta si es ML)\n3. Foto del paquete armado", "Información Incompleta");
+      return dialogs.alert("⚠️ Faltan datos.\n\nPara archivar el pedido debes tener:\n1. Número de Guía\n2. Foto del recibo de Guía (Ya cubierta si es ML)\n3. Foto del paquete armado", "Información Incompleta");
     }
     
     try {
@@ -146,7 +143,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     setConteoFisico(prev => ({ ...prev, [key]: isNaN(num) ? 0 : num }));
   };
 
-  // --- LÓGICA DE AUDITORÍA Y DESCARGAS DE CIERRES ---
   const auditarCierreRapido = async (cierre) => {
     if(!esAuditor) return;
     try {
@@ -215,17 +211,13 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           .ok { color: #166534; font-weight: bold; }
           .faltante { color: #dc2626; font-weight: bold; }
           .sobrante { color: #ea580c; font-weight: bold; }
-          @media print {
-            body { padding: 0; }
-            .no-print { display: none; }
-          }
+          @media print { body { padding: 0; } .no-print { display: none; } }
         </style>
       </head>
       <body>
         <div class="no-print" style="margin-bottom: 20px; background: #fffbeb; color: #b45309; padding: 15px; border-radius: 8px; border: 1px solid #fde68a; font-weight: bold; text-align: center;">
            Para guardarlo en tu computadora, elige "Guardar como PDF" (Save as PDF) en el menú de impresión que acaba de aparecer.
         </div>
-
         <div class="header">
           <div>
             <h1>Reporte de Cierre de Inventario</h1>
@@ -233,52 +225,31 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           </div>
           <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
         </div>
-        
         <div class="meta-info">
-           <div class="meta-box">
-              <p><strong>Fecha del Cierre:</strong> ${cierre.fecha}</p>
-              <p><strong>Realizado por:</strong> ${cierre.creadoPor}</p>
-           </div>
+           <div class="meta-box"><p><strong>Fecha del Cierre:</strong> ${cierre.fecha}</p><p><strong>Realizado por:</strong> ${cierre.creadoPor}</p></div>
            <div class="meta-box" style="text-align: right;">
               <p><strong>Items Auditados:</strong> ${cierre.totalItemsAuditados}</p>
               <p><strong>Anomalías:</strong> 
-                 <span class="badge ${cierre.anomaliasDetectadas === 0 ? 'badge-ok' : 'badge-warn'}">
-                    ${cierre.anomaliasDetectadas === 0 ? 'Sin Anomalías' : cierre.anomaliasDetectadas + ' Diferencias detectadas'}
-                 </span>
+                 <span class="badge ${cierre.anomaliasDetectadas === 0 ? 'badge-ok' : 'badge-warn'}">${cierre.anomaliasDetectadas === 0 ? 'Sin Anomalías' : cierre.anomaliasDetectadas + ' Diferencias detectadas'}</span>
               </p>
            </div>
         </div>
-
         <div class="status-box" style="background: ${cierre.auditado ? '#dcfce7' : '#fffbeb'}; color: ${cierre.auditado ? '#166534' : '#b45309'};">
            ${cierre.auditado ? 'AUDITORÍA VALIDADA POR: ' + cierre.auditadoPor.toUpperCase() : 'CIERRE PENDIENTE DE AUDITORÍA OFICIAL'}
         </div>
-
         <table>
-          <thead>
-            <tr><th>Categoría</th><th>Producto</th><th>Sistema</th><th>Físico</th><th>Diferencia</th><th>Notas Relevantes</th></tr>
-          </thead>
+          <thead><tr><th>Categoría</th><th>Producto</th><th>Sistema</th><th>Físico</th><th>Diferencia</th><th>Notas Relevantes</th></tr></thead>
           <tbody>
     `;
-
     cierre.productos.forEach(p => {
        const claseDif = p.diferencia === 0 ? 'ok' : (p.diferencia < 0 ? 'faltante' : 'sobrante');
        const textDif = p.diferencia === 0 ? 'OK' : (p.diferencia > 0 ? '+'+p.diferencia : p.diferencia);
-       html += `<tr>
-         <td>${p.categoria}</td>
-         <td><strong>${p.nombre}</strong><br><span style="color:#64748b; font-size:11px;">${p.presentacion}</span></td>
-         <td style="text-align:center;">${p.sistema}</td>
-         <td style="text-align:center; font-weight:bold;">${p.fisico}</td>
-         <td class="${claseDif}" style="text-align:center;">${textDif}</td>
-         <td><i>${p.nota || '-'}</i></td>
-       </tr>`;
+       html += `<tr><td>${p.categoria}</td><td><strong>${p.nombre}</strong><br><span style="color:#64748b; font-size:11px;">${p.presentacion}</span></td><td style="text-align:center;">${p.sistema}</td><td style="text-align:center; font-weight:bold;">${p.fisico}</td><td class="${claseDif}" style="text-align:center;">${textDif}</td><td><i>${p.nota || '-'}</i></td></tr>`;
     });
-
     html += `</tbody></table>
       <div style="margin-top: 50px; border-top: 1px dashed #cbd5e1; padding-top: 20px; color: #94a3b8; font-size: 11px; text-align: center;">
          Documento generado automáticamente por el Sistema de Gestión Bluher el ${new Date().toLocaleString('es-VE')}
-      </div>
-    </body></html>`;
-    
+      </div></body></html>`;
     printWindow.document.write(html);
     printWindow.document.close();
     setTimeout(() => { printWindow.print(); }, 1000);
@@ -288,7 +259,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     dialogs.confirm("¿Estás seguro de registrar el cierre de inventario de hoy?", async () => {
       const productosCierre = [];
       let totalDiferencias = 0;
-
       catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
         const key = `${p.nombre}|${pres}`;
         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
@@ -298,23 +268,12 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         productosCierre.push({ categoria: c.categoria, nombre: p.nombre, presentacion: pres, sistema, fisico, diferencia, nota: notasConteo[key] || '' });
       })));
 
-      const nuevoCierre = {
-        fecha: new Date().toLocaleDateString('es-VE'),
-        timestamp: Date.now(),
-        creadoPor: perfil?.nombre || 'Despachador',
-        totalItemsAuditados: productosCierre.length,
-        anomaliasDetectadas: totalDiferencias,
-        productos: productosCierre,
-        auditado: false
-      };
-
+      const nuevoCierre = { fecha: new Date().toLocaleDateString('es-VE'), timestamp: Date.now(), creadoPor: perfil?.nombre || 'Despachador', totalItemsAuditados: productosCierre.length, anomaliasDetectadas: totalDiferencias, productos: productosCierre, auditado: false };
       try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario'), nuevoCierre);
         loggear('CIERRE_INVENTARIO', `Cierre registrado con ${totalDiferencias} diferencias.`);
         setConteoActivo(false);
-        dialogs.confirm("Cierre guardado con éxito. ¿Deseas descargar el reporte en PDF ahora?", () => {
-           imprimirPDF(nuevoCierre);
-        }, "Reporte Listo");
+        dialogs.confirm("Cierre guardado con éxito. ¿Deseas descargar el reporte en PDF ahora?", () => { imprimirPDF(nuevoCierre); }, "Reporte Listo");
       } catch (error) { console.error(error); }
     }, "Confirmar Cierre");
   };
@@ -326,52 +285,63 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return fechaFiltro.toLocaleDateString('es-VE') === fechaCierre.toLocaleDateString('es-VE');
   });
 
-  const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
-  
   const todayStr = useMemo(() => {
     const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     const tDate = getVeneziaTime();
-    const dd = String(tDate.getDate()).padStart(2, '0');
-    const mm = String(tDate.getMonth() + 1).padStart(2, '0');
-    const yyyy = tDate.getFullYear();
-    return `${dd}/${mm}/${yyyy}`;
+    return `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
   }, []);
+
+  // --- LÓGICA DE FECHAS (ATRASADO VS FUTURO) ---
+  const parseDateVzla = (dateStr) => {
+     if (!dateStr || dateStr === 'Sin Fecha') return 0;
+     const parts = dateStr.split('/');
+     return parts.length === 3 ? new Date(parts[2], parts[1] - 1, parts[0]).getTime() : 0;
+  };
 
   const numeracionDiaria = useMemo(() => {
     const map = {};
     const agrupados = {};
-    
     pedidos.forEach(p => {
        const fecha = p.fechaDespacho || 'Sin Fecha';
        if (!agrupados[fecha]) agrupados[fecha] = [];
        agrupados[fecha].push(p);
     });
-    
     Object.keys(agrupados).forEach(fecha => {
        agrupados[fecha].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
-       agrupados[fecha].forEach((p, index) => {
-          map[p.id] = index + 1;
-       });
+       agrupados[fecha].forEach((p, index) => { map[p.id] = index + 1; });
     });
     return map;
   }, [pedidos]);
+
+  // --- ORDENAMIENTO ASCENDENTE (1, 2, 3...) ---
+  const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
+  
+  const pedidosOrdenados = useMemo(() => {
+     return [...pedidosAMostrar].sort((a, b) => {
+        const numA = numeracionDiaria[a.id] || 999999;
+        const numB = numeracionDiaria[b.id] || 999999;
+        return numA - numB;
+     });
+  }, [pedidosAMostrar, numeracionDiaria]);
 
   return (
     <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
       
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end mb-8 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
-        <div>
-          <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><Truck className="text-sky-600"/> Logística de Envíos</h2>
-          <div className="flex flex-wrap gap-2 mt-4 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-max">
-            {!esAuditorPuro && <button onClick={() => setVistaDespacho('pendientes')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Por Empacar ({pedidosValidados.length})</button>}
-            {!esAuditorPuro && <button onClick={() => setVistaDespacho('historial')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Enviados</button>}
-            {!esAuditorPuro && <button onClick={() => setVistaDespacho('inventario')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'inventario' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Cierre Físico</button>}
-            <button onClick={() => setVistaDespacho('historial_cierres')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${vistaDespacho === 'historial_cierres' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>{esAuditorPuro ? 'Auditar Cierres' : 'Historial de Cierres'}</button>
+        <div className="w-full xl:w-auto">
+          <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3 mb-4"><Truck className="text-sky-600"/> Logística de Envíos</h2>
+          
+          {/* CORRECCIÓN MENÚ MÓVIL: Contenedor deslizable */}
+          <div className="flex bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl w-full md:w-max overflow-x-auto scrollbar-hide">
+            {!esAuditorPuro && <button onClick={() => setVistaDespacho('pendientes')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Por Empacar ({pedidosValidados.length})</button>}
+            {!esAuditorPuro && <button onClick={() => setVistaDespacho('historial')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Enviados</button>}
+            {!esAuditorPuro && <button onClick={() => setVistaDespacho('inventario')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'inventario' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Cierre Físico</button>}
+            <button onClick={() => setVistaDespacho('historial_cierres')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'historial_cierres' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>{esAuditorPuro ? 'Auditar Cierres' : 'Historial de Cierres'}</button>
           </div>
         </div>
         {['pendientes', 'historial'].includes(vistaDespacho) && (
-          <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm w-full md:w-auto justify-center">
-            <Printer size={18} /> Imprimir Etiquetas (Solo {todayStr})
+          <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm w-full md:w-auto justify-center shrink-0">
+            <Printer size={18} /> Imprimir Etiquetas ({todayStr})
           </button>
         )}
       </div>
@@ -388,11 +358,11 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
       {['pendientes', 'historial'].includes(vistaDespacho) && (
         <div className="flex flex-col gap-8 w-full">
-          {pedidosAMostrar.length === 0 ? (
+          {pedidosOrdenados.length === 0 ? (
             <div className="p-10 text-center text-slate-400 italic font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl">
               No hay envíos en esta vista.
             </div>
-          ) : pedidosAMostrar.map(p => {
+          ) : pedidosOrdenados.map(p => {
             
             const valorGuia = guiasInput[p.id]?.guia !== undefined ? guiasInput[p.id].guia : (p.guia || '');
             const valorLinkFoto = guiasInput[p.id]?.fotoProductos !== undefined ? guiasInput[p.id].fotoProductos : (p.linkFotoProductos || '');
@@ -400,9 +370,17 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
             const isLinkML = p.esMercadoLibre && !!p.linkGuiaML;
             const valorLinkGuia = isLinkML ? p.linkGuiaML : (guiasInput[p.id]?.link !== undefined ? guiasInput[p.id].link : (p.linkGuia || ''));
 
-            const esParaManana = p.fechaDespacho !== todayStr;
+            // CORRECCIÓN LOGICA FECHAS
+            const timeDespacho = parseDateVzla(p.fechaDespacho);
+            const timeHoy = parseDateVzla(todayStr);
+
+            const esParaManana = timeDespacho > timeHoy;
+            const esAtrasado = timeDespacho > 0 && timeDespacho < timeHoy;
+
             const cardClass = esParaManana && vistaDespacho === 'pendientes' 
                 ? "bg-red-50/80 dark:bg-red-900/20 border-red-300 dark:border-red-800" 
+                : esAtrasado && vistaDespacho === 'pendientes'
+                ? "bg-amber-50/80 dark:bg-amber-900/20 border-amber-300 dark:border-amber-800"
                 : "bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 hover:border-sky-400";
 
             return (
@@ -417,8 +395,11 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                   <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-2">{p.courier}</div>
                   <div className="text-xs font-semibold text-slate-500 mt-2">Tel: {p.clienteTelefono}</div>
                   
-                  <div className={`text-[11px] font-bold uppercase tracking-wider mt-3 p-2 rounded-lg inline-block w-max ${esParaManana && vistaDespacho === 'pendientes' ? 'bg-red-100 text-red-700 border border-red-200' : 'text-slate-500 bg-slate-100 dark:bg-slate-900'}`}>
-                    Sale: {p.fechaDespacho} {esParaManana && vistaDespacho === 'pendientes' && '(NO IMPRIMIR HOY)'}
+                  {/* CORRECCIÓN VISUAL "NO IMPRIMIR" Y "ATRASADO" */}
+                  <div className={`text-[11px] font-bold uppercase tracking-wider mt-3 p-2 rounded-lg inline-block w-auto max-w-full break-words ${esParaManana && vistaDespacho === 'pendientes' ? 'bg-red-100 text-red-700 border border-red-200' : esAtrasado && vistaDespacho === 'pendientes' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'text-slate-500 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
+                    Sale: {p.fechaDespacho} 
+                    {esParaManana && vistaDespacho === 'pendientes' && <span className="block sm:inline sm:ml-1 mt-1 sm:mt-0">(NO IMPRIMIR HOY)</span>}
+                    {esAtrasado && vistaDespacho === 'pendientes' && <span className="block sm:inline sm:ml-1 mt-1 sm:mt-0">(ATRASADO - ENVIAR HOY)</span>}
                   </div>
 
                   {esParaManana && vistaDespacho === 'pendientes' && [ROLES.ADMIN].includes(perfil?.role) && (
@@ -627,15 +608,18 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                       </div>
                       
                       {cierre.notasAuditoria && cierre.notasAuditoria.length > 0 && (
-                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800">
-                          <div className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-1.5 flex items-center gap-1">
-                            <MessageSquare size={12}/> Observaciones de Auditoría:
+                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
+                          <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-2 flex items-center gap-1">
+                            <MessageSquare size={12}/> Hilo de Comentarios:
+                          </span>
+                          <div className="space-y-2">
+                            {cierre.notasAuditoria.map((n, i) => (
+                               <div key={i} className="text-[11px] text-amber-900 dark:text-amber-200 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-amber-100 dark:border-amber-800/50">
+                                  <div className="font-bold mb-0.5 opacity-80">{n.autor} <span className="font-normal text-[9px]">({new Date(n.fecha).toLocaleDateString()})</span>:</div>
+                                  <div className="italic leading-snug">"{n.texto}"</div>
+                               </div>
+                            ))}
                           </div>
-                          {cierre.notasAuditoria.map((n, i) => (
-                             <div key={i} className="text-xs text-amber-800 dark:text-amber-300 italic mb-1 last:mb-0">
-                                "{n.texto}" <span className="font-bold opacity-70">- {n.autor}</span>
-                             </div>
-                          ))}
                         </div>
                       )}
                     </div>
@@ -650,15 +634,17 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                          </button>
                        </div>
 
-                       {/* BOTONES DE AUDITORÍA */}
-                       {esAuditor && !cierre.auditado && (
+                       {esAuditor && (
                           <div className="flex gap-2 mt-2">
-                             <button onClick={()=>auditarCierreRapido(cierre)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl flex items-center justify-center shadow-md transition-colors font-bold text-xs"><CheckCircle size={16} className="mr-1.5"/> Aprobar Rápido</button>
-                             <button onClick={()=>auditarCierreConNota(cierre)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 py-2.5 rounded-xl flex items-center justify-center transition-colors font-bold text-xs"><Eye size={16} className="mr-1.5"/> Con Nota</button>
+                             {!cierre.auditado && (
+                                <button onClick={()=>auditarCierreRapido(cierre)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl flex items-center justify-center shadow-md transition-colors font-bold text-xs"><CheckCircle size={16} className="mr-1.5"/> Aprobar Rápido</button>
+                             )}
+                             <button onClick={()=>auditarCierreConNota(cierre)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 py-2.5 rounded-xl flex items-center justify-center transition-colors font-bold text-xs">
+                                <MessageSquare size={16} className="mr-1.5"/> {cierre.notasAuditoria?.length > 0 ? 'Responder' : 'Añadir Nota'}
+                             </button>
                           </div>
                        )}
 
-                       {/* SELLO DE AUDITORÍA */}
                        {cierre.auditado && (
                           <div className="text-center font-black text-emerald-700 dark:text-emerald-400 uppercase text-[10px] tracking-widest mt-2 bg-emerald-50 dark:bg-emerald-900/20 py-2.5 rounded-lg border border-emerald-200 dark:border-emerald-800 flex items-center justify-center gap-1.5">
                              <ShieldCheck size={14}/> Cierre Validado por {cierre.auditadoPor}
