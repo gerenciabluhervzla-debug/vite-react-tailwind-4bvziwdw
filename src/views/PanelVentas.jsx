@@ -11,7 +11,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
   
-  // AÑADIDO: pagoEnvio por defecto a 'COD'
   const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', pagoEnvio: 'COD', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '', montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false, descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' };
   
   const [formData, setFormData] = useState(defaultForm);
@@ -53,7 +52,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     setFormData(prev => ({ 
       ...prev, 
       montoPago: final.toFixed(2), 
-      moneda: 'USD', 
+      moneda: prev.moneda === 'ZELLE' ? 'ZELLE' : 'USD', 
       tasa: prev.tasa || config.tasaDia 
     }));
   }, [formData.carritoObj, formData.descuentoPorcentaje, config.tasaDia, catalogo, globalDiscountPercent]);
@@ -79,7 +78,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       const llavesCatalogo = catalogo.flatMap(c => c.productos.flatMap(p => p.presentaciones.map(pres => `${p.nombre}|${pres}`))).join(', ');
       
       const prompt = `Analiza este WhatsApp y extrae JSON: Nombre, Teléfono, Cédula, courier (ZOOM, MRW, Tealca, Domesa), Dirección, Productos, montoPago, Tipo de envío (si dice "MercadoLibre", esMercadoLibre=true), asesora. 
-      La variable "moneda" DEBE ser estrictamente "USD" o "VES". Si habla de dólares o $ es "USD", si habla de bolívares o Bs es "VES".
+      La variable "moneda" DEBE ser "USD", "VES" o "ZELLE". Si habla de Zelle es "ZELLE", si es dólares en efectivo es "USD", si es bolívares o Bs es "VES".
       La variable "pagoEnvio" DEBE ser "COD" (cobro en destino) o "PAGADO" (envío pagado). Por defecto usa "COD".
       productosCrudos: texto exacto.
       carrito: mapea cantidades a estas llaves: [${llavesCatalogo}].
@@ -120,7 +119,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
          let monedaSanitizada = result.moneda;
          if (typeof monedaSanitizada === 'string') {
             const m = monedaSanitizada.toUpperCase();
-            if (m.includes('BS') || m.includes('VES') || m.includes('BOL')) monedaSanitizada = 'VES';
+            if (m.includes('ZELLE')) monedaSanitizada = 'ZELLE';
+            else if (m.includes('BS') || m.includes('VES') || m.includes('BOL')) monedaSanitizada = 'VES';
             else monedaSanitizada = 'USD';
          } else {
             monedaSanitizada = 'USD';
@@ -130,7 +130,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
            ...prev, 
            ...result, 
            tasa: result.tasa || prev.tasa,
-           moneda: Object.keys(nuevoCarritoObj).length > 0 ? 'USD' : monedaSanitizada,
+           moneda: Object.keys(nuevoCarritoObj).length > 0 && monedaSanitizada !== 'ZELLE' ? 'USD' : monedaSanitizada,
            esMercadoLibre: result.esMercadoLibre || false,
            pagoEnvio: result.pagoEnvio || 'COD',
            productos: txtFormat || prev.productos, 
@@ -240,7 +240,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
     let calculo = { usd: 0, ves: 0 };
     if (!formData.esRegalo) {
-       calculo = formData.moneda === 'USD' ? { usd: montoNum, ves: montoNum * tasa } : { ves: montoNum, usd: tasa > 0 ? montoNum / tasa : 0 };
+       if (formData.moneda === 'ZELLE') {
+           calculo.usd = montoNum; // Se guarda en USD para inventario general
+           calculo.ves = 0; // Zelle no tiene equivalente en Bs
+       } else if (formData.moneda === 'USD') {
+           calculo.usd = montoNum;
+           calculo.ves = montoNum * tasa;
+       } else {
+           calculo.ves = montoNum;
+           calculo.usd = tasa > 0 ? montoNum / tasa : 0;
+       }
     }
 
     let finalCarrito = { ...formData.carritoObj };
@@ -310,7 +319,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-3xl border dark:border-slate-700 transition-colors shadow-sm">
+    <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-3xl border dark:border-slate-700 shadow-sm">
       <div className="flex flex-wrap gap-4 mb-8 border-b dark:border-slate-700 pb-2 overflow-x-auto">
         {puedeCrear && <button onClick={() => { setVista('nuevo'); if(editId) cancelarEdicion(); }} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'nuevo' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ShoppingCart size={18} className="inline mr-1" /> {editId ? 'Corrigiendo' : 'Registrar'}</button>}
         
@@ -452,11 +461,14 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
              </div>
 
              <div className={`md:col-span-2 p-8 rounded-3xl shadow-inner grid grid-cols-1 md:grid-cols-4 gap-6 transition-colors ${formData.esRegalo ? 'bg-purple-900/20 border-2 border-purple-500 text-purple-300' : 'bg-[#003366] dark:bg-slate-950 text-white'}`}>
-               <div className="flex flex-col"><InputDark disabled={formData.esRegalo} type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 45.20" /></div>
+               <div className="flex flex-col"><InputDark disabled={formData.esRegalo || formData.moneda === 'ZELLE'} type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 45.20" /></div>
                <div className="flex flex-col">
                  <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2 transition-colors">Moneda de Pago</label>
                  <select disabled={formData.esRegalo} value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} required={!formData.esRegalo} className={`p-3.5 border-2 rounded-2xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold cursor-pointer disabled:opacity-50 shadow-inner ${!formData.moneda && !formData.esRegalo ? 'border-amber-500 text-slate-400' : 'border-slate-700 text-white'}`}>
-                   <option value="" disabled>Seleccionar...</option> <option value="USD">Dólares (USD)</option> <option value="VES">Bolívares (VES)</option>
+                   <option value="" disabled>Seleccionar...</option> 
+                   <option value="USD">Dólares (Efectivo / Panamá)</option> 
+                   <option value="ZELLE">Zelle (USD Directo)</option>
+                   <option value="VES">Bolívares (Pago Móvil / Transf)</option>
                  </select>
                </div>
                <div className="flex flex-col relative">
@@ -464,7 +476,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                   
                   {!formData.esRegalo && formData.tasa && formData.montoPago && formData.moneda && (
                     <span className="text-xs text-sky-400 font-bold absolute -bottom-5 left-2">
-                       {formData.moneda === 'USD' 
+                       {formData.moneda === 'ZELLE' 
+                          ? 'Pago directo vía Zelle (Sin Bs)'
+                          : formData.moneda === 'USD' 
                           ? `Equivale: Bs. ${((parseFloat(formData.montoPago)||0) * parseFloat(formData.tasa)).toFixed(2)}` 
                           : `Equivale: $${((parseFloat(formData.montoPago)||0) / parseFloat(formData.tasa)).toFixed(2)}`
                        }
@@ -508,7 +522,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                      {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
                   </div>
                   
-                  {/* CORRECCIÓN QA: MOSTRAR COURIER Y SI ES PAGO/COD */}
                   <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1.5 flex items-center gap-2">
                      {p.courier} 
                      <span className={`px-1.5 py-0.5 rounded text-[9px] border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/50 dark:text-orange-400'}`}>
@@ -526,6 +539,11 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                   <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monto a pagar:</span>
                   {p.esRegalo ? (
                      <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1"><Gift size={14}/> REGALO VIP</div>
+                  ) : p.moneda === 'ZELLE' ? (
+                     <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800/50">
+                        <div className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">ZELLE</div>
+                        <div className="font-black text-purple-800 dark:text-purple-300 text-xl">${(p.montoUsd||0).toFixed(2)}</div>
+                     </div>
                   ) : (
                      <>
                       <div className="font-black text-slate-800 dark:text-slate-100 text-xl">${(p.montoUsd||0).toFixed(2)}</div>
@@ -633,7 +651,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
             ...prev, 
             productos: prev.productos ? `${prev.productos}\n${txt}` : txt, 
             carritoObj: { ...(prev.carritoObj || {}), ...obj },
-            moneda: 'USD' 
+            moneda: prev.moneda === 'ZELLE' ? 'ZELLE' : 'USD' 
           })); 
           setIsCatalogOpen(false);
         }}

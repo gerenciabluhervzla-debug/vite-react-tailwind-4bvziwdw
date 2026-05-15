@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput } from 'lucide-react';
+import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users } from 'lucide-react';
 import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
@@ -50,7 +50,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   }, [validados]);
 
   const metricas = useMemo(() => {
-    let ventasUSD = 0; let ventasVES = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
+    let ventasUSD = 0; let ventasVES = 0; let ventasZelle = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
 
     pedidosFiltrados.forEach(p => {
       let valorOriginalUsd = 0;
@@ -69,8 +69,13 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       if (p.esRegalo) {
         regalosUSD += valorOriginalUsd;
       } else {
-        ventasUSD += (p.montoUsd || 0);
-        ventasVES += (p.montoVes || 0);
+        // --- SEPARACIÓN DEL ZELLE ---
+        if (p.moneda === 'ZELLE') {
+           ventasZelle += (p.montoUsd || 0);
+        } else {
+           ventasUSD += (p.montoUsd || 0);
+           ventasVES += (p.montoVes || 0);
+        }
 
         if (p.esMercadoLibre) { mlUSD += (p.montoUsd || 0); mlVES += (p.montoVes || 0); }
 
@@ -79,8 +84,33 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       }
     });
 
-    return { ventasUSD, ventasVES, mlUSD, mlVES, regalosUSD, descuentosUSD };
+    return { ventasUSD, ventasVES, ventasZelle, mlUSD, mlVES, regalosUSD, descuentosUSD };
   }, [pedidosFiltrados, catalogo]);
+
+  const ventasPorAsesora = useMemo(() => {
+      const map = {};
+      pedidosFiltrados.forEach(p => {
+         if(p.esRegalo) return; 
+         const as = p.asesora || 'Sin Asignar';
+         if (!map[as]) map[as] = { nombre: as, totalUsd: 0, totalVes: 0, totalZelle: 0, clientes: [] };
+         
+         if (p.moneda === 'ZELLE') {
+             map[as].totalZelle += (p.montoUsd || 0);
+         } else {
+             map[as].totalUsd += (p.montoUsd || 0);
+             map[as].totalVes += (p.montoVes || 0);
+         }
+         
+         map[as].clientes.push({
+             nombre: p.clienteNombre,
+             telefono: p.clienteTelefono,
+             montoUsd: p.montoUsd || 0,
+             montoVes: p.montoVes || 0,
+             moneda: p.moneda
+         });
+      });
+      return Object.values(map).sort((a,b) => (b.totalUsd + b.totalZelle) - (a.totalUsd + a.totalZelle));
+  }, [pedidosFiltrados]);
 
   const totalValInventario = useMemo(() => {
     let t = 0;
@@ -122,7 +152,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     const printWindow = window.open('', '_blank');
     if(!printWindow) return alert("Por favor permite las ventanas emergentes (Pop-ups) para generar el PDF.");
 
-    // --- LÓGICA DE ETIQUETA DE PERIODO MEJORADA ---
     let periodoEtiqueta = '';
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -151,19 +180,22 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           .logo { height: 60px; object-fit: contain; }
           h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; text-transform: uppercase; }
           
-          .kpi-container { display: flex; gap: 20px; margin-bottom: 30px; }
-          .kpi-box { flex: 1; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; }
+          .kpi-container { display: flex; gap: 15px; margin-bottom: 30px; }
+          .kpi-box { flex: 1; background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; }
           .kpi-box.main { background: #0f172a; color: white; border: none; }
-          .kpi-box h3 { margin: 0 0 10px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
-          .kpi-box.main h3 { color: #38bdf8; }
-          .kpi-box p { margin: 0; font-size: 24px; font-weight: 900; }
-          .kpi-box.main p { font-size: 32px; }
+          .kpi-box.zelle { background: #581c87; color: white; border: none; }
+          .kpi-box h3 { margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
+          .kpi-box.main h3, .kpi-box.zelle h3 { color: #38bdf8; }
+          .kpi-box.zelle h3 { color: #d8b4fe; }
+          .kpi-box p { margin: 0; font-size: 20px; font-weight: 900; }
+          .kpi-box.main p, .kpi-box.zelle p { font-size: 26px; }
           
           h2 { font-size: 16px; font-weight: 900; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-top: 40px;}
           table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
           th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 8px; text-align: left; vertical-align: top; }
           th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
           .products-list { color: #475569; line-height: 1.5; }
+          .zelle-tag { background: #f3e8ff; color: #6b21a8; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 9px; }
           
           @media print { body { padding: 0; } .no-print { display: none; } }
         </style>
@@ -183,26 +215,60 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
         <div class="kpi-container">
            <div class="kpi-box">
-              <h3>Ventas del Período (Bs)</h3>
+              <h3>Ventas en Bs.</h3>
               <p>Bs. ${metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
            </div>
            <div class="kpi-box main">
-              <h3>Ventas del Período (USD)</h3>
+              <h3>Ventas Efect/Transf ($)</h3>
               <p>$${metricas.ventasUSD.toFixed(2)}</p>
            </div>
+           <div class="kpi-box zelle">
+              <h3>Ventas ZELLE ($)</h3>
+              <p>$${metricas.ventasZelle.toFixed(2)}</p>
+           </div>
            <div class="kpi-box" style="border-color: #c084fc; background: #faf5ff;">
-              <h3 style="color: #9333ea;">Ventas Acum. del Mes</h3>
+              <h3 style="color: #9333ea;">Acum. General Mes ($)</h3>
               <p style="color: #7e22ce;">$${ventasMesUsdPDF.toFixed(2)}</p>
            </div>
         </div>
 
-        <h2>Detalle de Clientes</h2>
+        <h2>Rendimiento por Asesora</h2>
+    `;
+    
+    ventasPorAsesora.forEach(asesora => {
+       html += `
+         <div style="background: #f8fafc; padding: 15px; margin-top: 15px; border-radius: 8px; border-left: 4px solid #0ea5e9;">
+            <h3 style="margin: 0 0 10px 0; font-size: 14px;">${asesora.nombre.toUpperCase()}</h3>
+            <p style="margin: 0; font-size: 12px; font-weight: bold; color: #475569;">
+               Efectivo: <span style="color:#0f172a;">$${asesora.totalUsd.toFixed(2)}</span> | 
+               Zelle: <span style="color:#6b21a8;">$${asesora.totalZelle.toFixed(2)}</span> | 
+               Bolívares: <span style="color:#059669;">Bs. ${asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+            </p>
+         </div>
+         <table>
+            <thead><tr><th style="width:30%;">Cliente Atendido</th><th style="width:25%;">Teléfono</th><th style="width:20%; text-align:right;">Monto Bs</th><th style="width:25%; text-align:right;">Monto USD / Zelle</th></tr></thead>
+            <tbody>
+       `;
+       asesora.clientes.forEach(c => {
+          const isZelle = c.moneda === 'ZELLE';
+          html += `<tr>
+             <td><strong>${c.nombre}</strong></td>
+             <td>${c.telefono}</td>
+             <td style="text-align:right; color:#059669;">${isZelle ? '-' : c.montoVes.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+             <td style="text-align:right; font-weight:bold;">$${c.montoUsd.toFixed(2)} ${isZelle ? '<span class="zelle-tag">ZELLE</span>' : ''}</td>
+          </tr>`;
+       });
+       html += `</tbody></table>`;
+    });
+
+    html += `
+        <h2 style="margin-top: 50px;">Detalle Histórico Global (Todas las Órdenes)</h2>
         <table>
           <thead>
             <tr>
-              <th style="width: 25%;">Cliente</th>
-              <th style="width: 20%;">Ref. Bancaria</th>
-              <th style="width: 35%;">Productos Facturados</th>
+              <th style="width: 20%;">Cliente</th>
+              <th style="width: 15%;">Ref. Bancaria</th>
+              <th style="width: 45%;">Productos Facturados</th>
               <th style="text-align:right; width: 10%;">Bs</th>
               <th style="text-align:right; width: 10%;">USD</th>
             </tr>
@@ -212,12 +278,13 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
     pedidosFiltrados.forEach(p => {
        const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
+       const isZelle = p.moneda === 'ZELLE';
        html += `<tr>
          <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${new Date(p.fechaCreacion).toLocaleDateString('es-VE')}</span></td>
          <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia || 'N/A'}</span></td>
          <td class="products-list">${prodsFormat}</td>
-         <td style="text-align:right; font-weight:bold; color:#059669;">${(p.montoVes || 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-         <td style="text-align:right; font-weight:900; font-size:13px;">$${(p.montoUsd || 0).toFixed(2)}</td>
+         <td style="text-align:right; font-weight:bold; color:#059669;">${isZelle ? '-' : (p.montoVes || 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+         <td style="text-align:right; font-weight:900; font-size:13px;">$${(p.montoUsd || 0).toFixed(2)} ${isZelle ? '<br><span class="zelle-tag">ZELLE</span>' : ''}</td>
        </tr>`;
     });
 
@@ -270,21 +337,30 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       </div>
 
       {(verDinero || verTotalInventario) && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
            {verDinero && (
              <>
-               <div className="bg-[#003366] text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-sky-600 relative overflow-hidden">
+               <div className="bg-[#003366] text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-sky-600 relative overflow-hidden">
                   <div className="relative z-10">
-                    <div className="text-[11px] uppercase font-black tracking-widest opacity-70 mb-2">Ventas Netas ($)</div>
-                    <div className="text-4xl lg:text-5xl font-black">${metricas.ventasUSD.toFixed(2)}</div>
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Efectivo / Transf ($)</div>
+                    <div className="text-3xl lg:text-4xl font-black">${metricas.ventasUSD.toFixed(2)}</div>
+                  </div>
+                  <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+               </div>
+
+               {/* NUEVO BLOQUE ZELLE */}
+               <div className="bg-purple-800 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-purple-950 relative overflow-hidden">
+                  <div className="relative z-10">
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-purple-200 mb-1">Ventas ZELLE ($)</div>
+                    <div className="text-3xl lg:text-4xl font-black">${metricas.ventasZelle.toFixed(2)}</div>
                   </div>
                   <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
                </div>
                
-               <div className="bg-emerald-600 text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-emerald-800 relative overflow-hidden">
+               <div className="bg-emerald-600 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-emerald-800 relative overflow-hidden">
                   <div className="relative z-10">
-                    <div className="text-[11px] uppercase font-black tracking-widest opacity-70 mb-2">Ventas Netas (Bs)</div>
-                    <div className="text-4xl lg:text-5xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Ventas Netas (Bs)</div>
+                    <div className="text-2xl lg:text-3xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                   </div>
                   <TrendingUp size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
                </div>
@@ -292,11 +368,10 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            )}
 
            {verTotalInventario && (
-             <div className="bg-purple-700 text-white p-8 rounded-[2rem] shadow-xl flex items-center justify-between transition-transform hover:scale-105 border-b-4 border-purple-900 relative overflow-hidden">
+             <div className="bg-slate-800 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-slate-950 relative overflow-hidden">
                 <div className="relative z-10">
-                  <div className="text-[11px] uppercase font-black tracking-widest text-purple-200 mb-2">Inventario Físico ($)</div>
-                  <div className="text-4xl lg:text-5xl font-black">${totalValInventario.toFixed(2)}</div>
-                  <div className="text-[10px] font-bold text-purple-300 mt-2 bg-purple-800/50 w-max px-2 py-1 rounded">No se afecta por filtro de fecha</div>
+                  <div className="text-[10px] uppercase font-black tracking-widest text-slate-300 mb-1">Inventario Físico ($)</div>
+                  <div className="text-3xl lg:text-4xl font-black">${totalValInventario.toFixed(2)}</div>
                 </div>
                 <Archive size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
              </div>
@@ -341,10 +416,54 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
+      {/* NUEVA SECCIÓN: RENDIMIENTO POR ASESORAS */}
+      {verDinero && (
+        <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+           <div className="flex items-center gap-2 mb-6">
+             <Users className="text-sky-600"/>
+             <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">Control de Ventas por Asesoras</h3>
+           </div>
+           
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {ventasPorAsesora.length === 0 ? (
+                 <div className="col-span-full p-8 text-center text-slate-400 font-bold italic">No hay ventas de asesoras en este periodo.</div>
+              ) : ventasPorAsesora.map(asesora => (
+                 <div key={asesora.nombre} className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
+                    <div className="font-black text-lg text-slate-800 dark:text-slate-100 mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
+                       {asesora.nombre.toUpperCase()}
+                    </div>
+                    <div className="space-y-2 mb-4">
+                       <div className="flex justify-between text-sm">
+                          <span className="text-slate-500 font-medium">En Dólares:</span>
+                          <span className="font-black text-slate-800 dark:text-white">${asesora.totalUsd.toFixed(2)}</span>
+                       </div>
+                       <div className="flex justify-between text-sm">
+                          <span className="text-purple-600 font-medium">Por Zelle:</span>
+                          <span className="font-black text-purple-700 dark:text-purple-400">${asesora.totalZelle.toFixed(2)}</span>
+                       </div>
+                       <div className="flex justify-between text-sm">
+                          <span className="text-emerald-600 font-medium">En Bolívares:</span>
+                          <span className="font-bold text-emerald-700 dark:text-emerald-400">Bs. {asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2})}</span>
+                       </div>
+                    </div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Clientes Atendidos ({asesora.clientes.length}):</div>
+                    <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                       {asesora.clientes.map((c, i) => (
+                          <div key={i} className="flex justify-between items-center text-xs bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700/50">
+                             <span className="font-semibold truncate pr-2">{c.nombre}</span>
+                             <span className={`font-black ${c.moneda==='ZELLE' ? 'text-purple-600' : 'text-sky-600'}`}>${c.montoUsd.toFixed(2)}</span>
+                          </div>
+                       ))}
+                    </div>
+                 </div>
+              ))}
+           </div>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
            <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><Sparkles className="text-sky-600"/> Top 10 Productos Más Vendidos</h3>
-           <span className="text-xs font-bold text-sky-600 bg-sky-50 dark:bg-sky-900/30 px-3 py-1 rounded-lg uppercase tracking-wider">En periodo seleccionado</span>
          </div>
          
          <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-700/50">

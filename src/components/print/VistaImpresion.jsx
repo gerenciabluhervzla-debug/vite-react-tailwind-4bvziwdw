@@ -26,6 +26,9 @@ export default function VistaImpresion({ pedidos }) {
                  <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-white text-black border-black'}`}>
                    {p.pagoEnvio === 'PAGADO' ? 'PAGADO' : 'COBRO EN DESTINO'}
                  </span>
+                 {p.moneda === 'ZELLE' && (
+                   <span className="text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest border bg-purple-100 text-purple-800 border-purple-300">ZELLE</span>
+                 )}
               </div>
               <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-300">Salida: {p.fechaDespacho}</span>
             </div>

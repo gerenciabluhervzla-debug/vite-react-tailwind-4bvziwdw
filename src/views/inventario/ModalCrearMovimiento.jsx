@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import { ArrowRightLeft, PlusCircle, X, Camera, Loader2, CheckCircle } from 'lucide-react';
-import { addDoc, collection, doc, updateDoc, increment } from 'firebase/firestore'; 
+import { ArrowRightLeft, PlusCircle, X, Camera, Loader2 } from 'lucide-react';
+import { addDoc, collection, doc, setDoc, increment } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../../config/firebase';
 import { compressImage } from '../../utils/image';
 
 export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId, loggear, perfil, dialogs, onClose }) {
   const [carrito, setCarrito] = useState({});
-  // AHORA GUARDAMOS UN ARREGLO DE FOTOS
   const [fotosUrls, setFotosUrls] = useState([]);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
   const isTransfer = tipo === 'TRANSFERENCIA';
@@ -69,7 +68,6 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
         });
         const result = await response.json();
         if (result.url) { 
-           // AGREGAMOS LA NUEVA FOTO AL ARREGLO
            setFotosUrls(prev => [...prev, result.url]); 
         } 
         else { throw new Error("No se recibió URL válida"); }
@@ -84,7 +82,8 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
 
   const handleSubmit = async () => {
     if (Object.keys(carrito).length === 0) return dialogs.alert("No has seleccionado ningún producto.", "Carrito Vacío");
-    if (isTransfer && fotosUrls.length === 0) return dialogs.alert("Debes incluir al menos una foto como soporte físico.", "Soporte Obligatorio");
+    // FOTO OBLIGATORIA PARA AMBOS (INGRESO Y TRANSFERENCIA)
+    if (fotosUrls.length === 0) return dialogs.alert("Debes incluir al menos una foto como soporte físico de la operación.", "Soporte Obligatorio");
     
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), {
@@ -96,16 +95,13 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
       const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
       const updates = {};
 
+      // CORRECCIÓN QA: Actualización Segura de Inventario (Soporta puntos decimales como "1.5L")
       Object.entries(carrito).forEach(([key, qty]) => {
-         if (tipo === 'INGRESO') {
-           updates[`${key}.envios`] = increment(qty);
-         } else if (tipo === 'TRANSFERENCIA') {
-           updates[`${key}.envios`] = increment(-qty);
-         }
+         updates[key] = { envios: increment(tipo === 'INGRESO' ? qty : -qty) };
       });
       
       if(Object.keys(updates).length > 0){
-         await updateDoc(stockRef, updates);
+         await setDoc(stockRef, updates, { merge: true });
       }
 
       loggear(`MOVIMIENTO_${tipo}`, `${perfil.nombre} generó un(a) ${tipo} de ${Object.keys(carrito).length} items.`);
@@ -159,35 +155,35 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
         </div>
 
         <div className="p-6 border-t dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col gap-6">
-          {isTransfer && (
-            <div className="bg-purple-50 dark:bg-purple-900/20 p-4 border border-purple-100 dark:border-purple-800 rounded-2xl flex flex-col gap-3">
-              <label className="text-xs font-bold uppercase tracking-widest text-purple-800 dark:text-purple-400 block">
-                Evidencias Fotográficas Obligatorias (Mínimo 1)
-              </label>
-              
-              <div className="flex gap-3 flex-wrap items-center">
-                 {fotosUrls.map((url, idx) => (
-                    <div key={idx} className="relative group">
-                       <a href={url} target="_blank" rel="noreferrer" className="w-14 h-14 bg-white dark:bg-slate-800 border-2 border-emerald-400 dark:border-emerald-600 rounded-xl flex items-center justify-center text-emerald-500 shadow-sm hover:scale-105 transition-transform" title="Ver foto">
-                          <Camera size={20} />
-                       </a>
-                       <button onClick={() => removeFoto(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-md" title="Eliminar foto">
-                          <X size={12} />
-                       </button>
-                    </div>
-                 ))}
-                 
-                 <label className={`w-14 h-14 text-white rounded-xl cursor-pointer flex items-center justify-center shadow-md transition-colors ${fotosUrls.length > 0 ? 'bg-purple-400 hover:bg-purple-500' : 'bg-purple-600 hover:bg-purple-700 animate-pulse'}`} title="Añadir otra foto">
-                   {subiendoFoto ? <Loader2 size={20} className="animate-spin" /> : <PlusCircle size={24}/>} 
-                   <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileUpload} disabled={subiendoFoto}/>
-                 </label>
-              </div>
-              <p className="text-[10px] font-semibold text-purple-600 dark:text-purple-400">Puedes subir varias fotos si son muchas cajas o el soporte no entra en una sola toma.</p>
+          
+          {/* GALERÍA DE FOTOS (OBLIGATORIA PARA INGRESO Y TRANSFERENCIA) */}
+          <div className={`${isTransfer ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-100 dark:border-purple-800' : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800'} p-4 border rounded-2xl flex flex-col gap-3 transition-colors`}>
+            <label className={`text-xs font-bold uppercase tracking-widest block ${isTransfer ? 'text-purple-800 dark:text-purple-400' : 'text-emerald-800 dark:text-emerald-400'}`}>
+              Evidencias Fotográficas Obligatorias (Mínimo 1)
+            </label>
+            
+            <div className="flex gap-3 flex-wrap items-center">
+               {fotosUrls.map((url, idx) => (
+                  <div key={idx} className="relative group">
+                     <a href={url} target="_blank" rel="noreferrer" className={`w-14 h-14 bg-white dark:bg-slate-800 border-2 rounded-xl flex items-center justify-center shadow-sm hover:scale-105 transition-transform ${isTransfer ? 'border-purple-400 dark:border-purple-600 text-purple-500' : 'border-emerald-400 dark:border-emerald-600 text-emerald-500'}`} title="Ver foto">
+                        <Camera size={20} />
+                     </a>
+                     <button onClick={() => removeFoto(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-md" title="Eliminar foto">
+                        <X size={12} />
+                     </button>
+                  </div>
+               ))}
+               
+               <label className={`w-14 h-14 text-white rounded-xl cursor-pointer flex items-center justify-center shadow-md transition-colors ${fotosUrls.length > 0 ? (isTransfer ? 'bg-purple-400 hover:bg-purple-500' : 'bg-emerald-400 hover:bg-emerald-500') : (isTransfer ? 'bg-purple-600 hover:bg-purple-700 animate-pulse' : 'bg-emerald-600 hover:bg-emerald-700 animate-pulse')}`} title="Añadir foto">
+                 {subiendoFoto ? <Loader2 size={20} className="animate-spin" /> : <PlusCircle size={24}/>} 
+                 <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileUpload} disabled={subiendoFoto}/>
+               </label>
             </div>
-          )}
+            <p className={`text-[10px] font-semibold ${isTransfer ? 'text-purple-600 dark:text-purple-400' : 'text-emerald-600 dark:text-emerald-400'}`}>Sube las fotos necesarias del soporte de la transacción.</p>
+          </div>
           
           <div className="flex justify-between items-center">
-            <div className="font-bold text-slate-500 dark:text-slate-400 text-lg">Total de Items: <span className="text-2xl text-slate-800 dark:text-white ml-2">{Object.values(carrito).reduce((a,b)=>a+b,0)}</span></div>
+            <div className="font-bold text-slate-500 dark:text-slate-400 text-lg">Total Items: <span className="text-2xl text-slate-800 dark:text-white ml-2">{Object.values(carrito).reduce((a,b)=>a+b,0)}</span></div>
             <button onClick={handleSubmit} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-4 px-8 rounded-xl shadow-lg transition-all hover:-translate-y-0.5 text-lg">{isTransfer ? 'Confirmar Transferencia' : 'Aprobar Ingreso Stock'}</button>
           </div>
         </div>

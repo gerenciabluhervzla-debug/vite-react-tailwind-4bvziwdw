@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PlusCircle, ArrowRightLeft, FileText, CheckCircle, AlertTriangle, Trash2 } from 'lucide-react';
-import { doc, updateDoc, increment, deleteDoc } from 'firebase/firestore'; 
+import { doc, updateDoc, deleteDoc, setDoc, increment } from 'firebase/firestore'; 
 import ModalCrearMovimiento from './ModalCrearMovimiento';
 import { ROLES } from '../../config/constants';
 
@@ -18,9 +18,15 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
       try {
         const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
         const updates = {};
-        Object.entries(mov.items).forEach(([key, qty]) => { updates[`${key}.recepcion`] = increment(qty); });
         
-        if(Object.keys(updates).length > 0){ await updateDoc(stockRef, updates); }
+        // CORRECCIÓN QA: Actualización Segura (Permite puntos decimales en el nombre)
+        Object.entries(mov.items).forEach(([key, qty]) => { 
+           updates[key] = { recepcion: increment(qty) }; 
+        });
+        
+        if(Object.keys(updates).length > 0){ 
+           await setDoc(stockRef, updates, { merge: true }); 
+        }
 
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'movimientos', mov.id), { status: 'COMPLETADO', fechaAprobacion: Date.now(), aprobadoPor: perfil.nombre });
         loggear('TRANSFERENCIA_APROBADA', `Recepción aprobó entrada de transferencia enviada por ${mov.creadoPor}`);
