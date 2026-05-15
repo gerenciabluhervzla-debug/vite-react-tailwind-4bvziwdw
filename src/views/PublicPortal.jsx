@@ -275,7 +275,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                           <div key={pres} className="flex flex-col gap-3 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border dark:border-slate-700 transition-colors">
                             <div className="flex gap-4 items-center">
                                {imgUrl ? (
-                                  <div className="w-16 h-16 rounded-xl overflow-hidden shadow-sm shrink-0 border border-slate-200 dark:border-slate-600">
+                                  <div className="w-16 h-16 rounded-xl overflow-hidden shadow-sm shrink-0 border border-slate-200 dark:border-slate-600 bg-white">
                                      <img src={imgUrl} alt={pres} className="w-full h-full object-cover" />
                                   </div>
                                ) : (

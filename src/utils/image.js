@@ -1,31 +1,42 @@
-export const compressImage = (file, maxWidth = 800, quality = 0.7) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = (event) => {
-        const img = new Image();
-        img.src = event.target.result;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-  
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
-  
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-  
-          // Google Script espera solo la data en base64, sin el prefijo
-          const base64String = canvas.toDataURL('image/jpeg', quality).split(',')[1];
-          resolve(base64String);
-        };
-        img.onerror = (error) => reject(error);
+export const compressImage = (file, maxWidth, quality) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = (maxWidth / width) * height;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // CORRECCIÓN: Detectar si es PNG para mantener transparencia o usar el formato original
+        const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const dataUrl = canvas.toDataURL(mimeType, quality);
+        resolve(dataUrl.split(',')[1]); // Retorna solo la data base64
       };
-      reader.onerror = (error) => reject(error);
-    });
-  };
+      img.onerror = reject;
+    };
+    reader.onerror = reject;
+  });
+};
+
+// Función auxiliar para archivos que NO son imágenes (como PDF)
+export const fileToBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = error => reject(error);
+  });
+};

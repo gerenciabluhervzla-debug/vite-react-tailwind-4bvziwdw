@@ -1,17 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, UploadCloud } from 'lucide-react';
+import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, UploadCloud, FileType } from 'lucide-react';
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
-import { updateDoc, doc, addDoc, collection, setDoc } from 'firebase/firestore';
+import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
 import { WORKER_GEMINI_URL, URL_GOOGLE_SCRIPT } from '../config/firebase'; 
-import { compressImage } from '../utils/image';
+import { compressImage, fileToBase64 } from '../utils/image';
 import { ROLES } from '../config/constants';
 
 export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
   const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
   const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial'); 
   
-  const defaultForm = { clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', pagoEnvio: 'COD', direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '', montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false, descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' };
+  const defaultForm = { 
+    clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', pagoEnvio: 'COD', origenPedido: '',
+    direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '', 
+    montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false, 
+    descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' 
+  };
   
   const [formData, setFormData] = useState(defaultForm);
   const [editId, setEditId] = useState(null); 
@@ -26,7 +31,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
 
   const fechaHoy = new Date().toLocaleDateString('es-VE');
-  const tasaActualizadaHoy = config.ultimaActualizacion === fechaHoy;
+  const tasaActualizadaHoy = config?.ultimaActualizacion === fechaHoy;
 
   const hoyTimestamp = new Date().getTime();
   const isGlobalDiscountActive = config?.descuentoGlobalActivo &&
@@ -55,7 +60,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       moneda: prev.moneda === 'ZELLE' ? 'ZELLE' : 'USD', 
       tasa: prev.tasa || config.tasaDia 
     }));
-  }, [formData.carritoObj, formData.descuentoPorcentaje, config.tasaDia, catalogo, globalDiscountPercent]);
+  }, [formData.carritoObj, formData.descuentoPorcentaje, config?.tasaDia, catalogo, globalDiscountPercent]);
 
   const copiarLinkTienda = () => {
     const linkTienda = `${window.location.origin}${window.location.pathname}#tienda`;
@@ -154,7 +159,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
   const cargarPedidoParaEditar = (pedido) => {
     setFormData({
-      clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, pagoEnvio: pedido.pagoEnvio || 'COD', direccion: pedido.direccion,
+      clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, pagoEnvio: pedido.pagoEnvio || 'COD', origenPedido: pedido.origenPedido || '', direccion: pedido.direccion,
       productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD', 
       montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: ''
     });
@@ -176,13 +181,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
     setSubiendoML(true);
     try {
-      const base64Data = await compressImage(file, 800, 0.7);
+      let base64Data;
+      let mimeType = file.type;
+
+      if (mimeType === 'application/pdf') {
+        base64Data = await fileToBase64(file);
+      } else {
+        base64Data = await compressImage(file, 1000, 0.8);
+      }
+
       const response = await fetch(URL_GOOGLE_SCRIPT, {
         method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ 
            tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
-           fileName: `GuiaML_${Date.now()}.jpg`, 
-           mimeType: 'image/jpeg', 
+           fileName: `GuiaML_${Date.now()}.${mimeType === 'application/pdf' ? 'pdf' : 'jpg'}`, 
+           mimeType: mimeType, 
            data: base64Data 
         })
       });
@@ -191,7 +204,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       setSubiendoML(false);
     } catch (error) {
       console.error(error);
-      dialogs.alert("Error subiendo la guía de MercadoLibre. Revisa tu conexión.", "Fallo de Red");
+      dialogs.alert("Error subiendo el archivo. Revisa tu conexión.", "Fallo de Red");
       setSubiendoML(false);
     }
   };
@@ -201,9 +214,10 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     if (!tasaActualizadaHoy && !editId) return dialogs.alert("NO puedes registrar ventas nuevas porque la Tasa del Día no ha sido actualizada hoy por Administración.", "Tasa Desactualizada");
     if (!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) return dialogs.alert("Debes seleccionar productos del Catálogo Visual.", "Carrito Vacío");
     if (!formData.courier) return dialogs.alert("Por favor selecciona la Empresa de Envío.", "Falta Agencia");
+    if (!formData.origenPedido) return dialogs.alert("Por favor selecciona de dónde viene el pedido.", "Falta Origen");
     if (!formData.esRegalo && (!formData.tasa || parseFloat(formData.tasa) <= 0)) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
     if (!formData.esRegalo && !formData.moneda) return dialogs.alert("Por favor selecciona la moneda de pago.", "Falta Moneda");
-    if (formData.esMercadoLibre && !formData.linkGuiaML) return dialogs.alert("Si es un envío de MercadoLibre, debes adjuntar la imagen de la guía antes de procesar la orden.", "Falta Guía ML");
+    if (formData.esMercadoLibre && !formData.linkGuiaML) return dialogs.alert("Si es un envío de MercadoLibre, debes adjuntar el PDF o Imagen de la guía antes de procesar.", "Falta Guía ML");
     
     let sinStock = false;
     let itemsFaltantes = [];
@@ -313,28 +327,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   };
 
   const enviarWhatsApp = (pedido) => {
-    // 1. Mensaje limpio: Solo se incluye la Guía y el Recibo (omitimos la foto del empaque)
     const mensaje = `Hola ${pedido.clienteNombre}, tu pedido Bluher ha sido enviado por *${pedido.courier}*.%0A%0A*Guía:* ${pedido.guia}%0A%0A${pedido.linkGuia ? `Recibo: ${pedido.linkGuia}%0A` : ''}%0A¡Gracias por tu compra!`;
+    let cleanPhone = String(pedido.clienteTelefono).replace(/\D/g, '');
     
-    // 2. Formateo estricto del teléfono
-    let cleanPhone = String(pedido.clienteTelefono).replace(/\D/g, ''); // Quitamos todo lo que no sea número
-    
-    // Si empieza por 0 (ej. 0414...), se lo quitamos
     if (cleanPhone.startsWith('0')) {
         cleanPhone = cleanPhone.substring(1);
     }
-    
-    // Si no empieza por 58, le agregamos el código de Venezuela
     if (!cleanPhone.startsWith('58')) {
         cleanPhone = '58' + cleanPhone;
     }
 
-    // 3. Abrimos WhatsApp
     window.open(`https://wa.me/${cleanPhone}?text=${mensaje}`, '_blank');
   };
 
   return (
-    <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-3xl border dark:border-slate-700 shadow-sm">
+    <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-3xl border dark:border-slate-700 shadow-sm transition-colors">
       <div className="flex flex-wrap gap-4 mb-8 border-b dark:border-slate-700 pb-2 overflow-x-auto">
         {puedeCrear && <button onClick={() => { setVista('nuevo'); if(editId) cancelarEdicion(); }} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'nuevo' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ShoppingCart size={18} className="inline mr-1" /> {editId ? 'Corrigiendo' : 'Registrar'}</button>}
         
@@ -407,11 +414,27 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
              <Input label="Nombre de Asesora" name="asesora" value={formData.asesora} onChange={(e)=>setFormData({...formData, asesora: e.target.value})} required />
+             
+             <div className="flex flex-col">
+               <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Origen del Pedido</label>
+               <select name="origenPedido" value={formData.origenPedido} onChange={(e)=>setFormData({...formData, origenPedido: e.target.value})} required className="p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm">
+                 <option value="" disabled>Seleccionar origen...</option>
+                 <option value="CADENITA DIA MADRE">CADENITA DIA MADRE</option>
+                 <option value="CADENITA 15% DESCUENTO">CADENITA 15% DESCUENTO</option>
+                 <option value="CADENITA 30% DESCUENTO">CADENITA 30% DESCUENTO</option>
+                 <option value="PAUTA">PAUTA</option>
+                 <option value="PAGINA WEB">PAGINA WEB</option>
+                 <option value="RECOMPRA">RECOMPRA</option>
+               </select>
+             </div>
+
              <Input label="Nombre del Cliente" name="clienteNombre" value={formData.clienteNombre} onChange={(e)=>setFormData({...formData, clienteNombre: e.target.value})} required />
              <Input label="Cédula/RIF" name="clienteCedula" value={formData.clienteCedula} onChange={(e)=>setFormData({...formData, clienteCedula: e.target.value})} required />
              
-             {/* AVISO IMPORTANTE: FORMATO DEL TELÉFONO */}
-             <Input label="Teléfono (Ej: 4141234567, sin el 0)" name="clienteTelefono" value={formData.clienteTelefono} onChange={(e)=>setFormData({...formData, clienteTelefono: e.target.value})} required placeholder="Ej: 4141234567" />
+             <div className="md:col-span-2">
+                 <Input label="Teléfono (Ej: 4141234567, sin el 0)" name="clienteTelefono" value={formData.clienteTelefono} onChange={(e)=>setFormData({...formData, clienteTelefono: e.target.value})} required placeholder="Ej: 4141234567" />
+                 <p className="text-[10px] text-slate-400 mt-1 ml-2 font-bold italic">NOTA: Ingresa el número sin el 0 inicial (Ej. 4141234567). El sistema le agregará el +58 automáticamente.</p>
+             </div>
              
              <div className="flex flex-col">
                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Empresa de Envío</label>
@@ -431,15 +454,15 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
              <div className="md:col-span-2 flex flex-wrap items-center gap-6 mt-2 mb-2">
                <div className="flex items-center gap-3">
                  <input type="checkbox" id="ml-check" checked={formData.esMercadoLibre} onChange={(e) => setFormData({...formData, esMercadoLibre: e.target.checked})} className="w-5 h-5 accent-sky-600 cursor-pointer rounded" />
-                 <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Es envío de MercadoLibre</label>
+                 <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Envío MercadoLibre (PDF/Imagen)</label>
                </div>
                
                {formData.esMercadoLibre && (
                  <div className="animate-in fade-in slide-in-from-top-2 ml-8 mb-2">
-                    <label className={`flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-xs ${formData.linkGuiaML ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-sky-300 dark:border-sky-700 text-sky-600 hover:border-sky-500 hover:bg-sky-50 dark:hover:bg-sky-900/20'}`}>
-                       {subiendoML ? <Loader2 size={16} className="animate-spin"/> : (formData.linkGuiaML ? <CheckCircle size={16}/> : <UploadCloud size={16}/>)}
-                       {formData.linkGuiaML ? 'Guía ML Cargada y Lista' : 'Adjuntar Imagen de Guía ML'}
-                       <input type="file" accept="image/*" className="hidden" onChange={handleFileUploadML} disabled={subiendoML}/>
+                    <label className={`flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-xs ${formData.linkGuiaML ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-sky-300 dark:border-sky-700 text-sky-600 hover:border-sky-50 dark:hover:bg-sky-900/20'}`}>
+                       {subiendoML ? <Loader2 size={16} className="animate-spin"/> : (formData.linkGuiaML ? <CheckCircle size={16}/> : <FileType size={16}/>)}
+                       {formData.linkGuiaML ? 'Archivo Cargado y Listo' : 'Adjuntar Guía PDF o Imagen'}
+                       <input type="file" accept="image/*,application/pdf" className="hidden" onChange={handleFileUploadML} disabled={subiendoML}/>
                     </label>
                  </div>
                )}
@@ -539,11 +562,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                      {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
                   </div>
                   
-                  <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1.5 flex items-center gap-2">
+                  <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1.5 flex flex-wrap items-center gap-2">
                      {p.courier} 
                      <span className={`px-1.5 py-0.5 rounded text-[9px] border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/50 dark:text-orange-400'}`}>
                         {p.pagoEnvio === 'PAGADO' ? 'PAGADO' : 'COD'}
                      </span>
+                     {p.origenPedido && (
+                        <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-1.5 py-0.5 rounded text-[9px] border border-indigo-200 dark:border-indigo-800">
+                           {p.origenPedido}
+                        </span>
+                     )}
                   </div>
 
                   <div className="text-xs font-semibold text-slate-400 mt-1">{new Date(p.fechaCreacion).toLocaleDateString()}</div>
@@ -606,6 +634,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         </div>
       )}
 
+      {/* ... (Las vistas de 'espera' y 'web' se mantienen igual) ... */}
       {vista === 'espera' && puedeCrear && (
         <div className="animate-in fade-in bg-amber-50 dark:bg-amber-900/10 p-6 rounded-xl border border-amber-200 dark:border-amber-800">
            <h3 className="font-bold text-amber-800 dark:text-amber-500 mb-4 flex items-center gap-2"><Clock/> Clientes en Espera (Sin Stock)</h3>
