@@ -15,7 +15,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const [descForm, setDescForm] = useState({ porcentaje: '', inicio: '', fin: '' });
   const [modalValidacion, setModalValidacion] = useState(null);
 
-  // --- FILTRO DE FECHAS AUTOMÁTICO (HOY EN CARACAS) ---
   const getVeneziaDate = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -37,7 +36,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
   const pendientes = pedidos.filter(p => p.status === 'Pendiente');
   
-  // APLICA FILTRO DE FECHAS SOLO AL HISTORIAL
   const historialFiltrado = useMemo(() => {
     const todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
     if (!fechaInicio || !fechaFin) return todosHistorial;
@@ -50,39 +48,24 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     dialogs.prompt("Ingresa la nueva tasa del día en Bolívares (Bs/$):", async (nuevaTasa) => {
       const tasaSanitizada = nuevaTasa.replace(',', '.');
       const tasaNum = parseFloat(tasaSanitizada);
-      
-      if (isNaN(tasaNum) || tasaNum <= 0) {
-        setTimeout(() => dialogs.alert("Ingresa un número válido."), 150);
-        return;
-      }
-      
+      if (isNaN(tasaNum) || tasaNum <= 0) { setTimeout(() => dialogs.alert("Ingresa un número válido."), 150); return; }
       try {
         const hoy = new Date().toLocaleDateString('es-VE');
         const hist = config.historialTasas || [];
         const nuevoHistorial = [{ fecha: hoy, tasa: tasaNum }, ...hist].filter((v,i,a)=>a.findIndex(t=>(t.fecha === v.fecha))===i).slice(0, 15);
-        
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { 
-          tasaDia: tasaNum, 
-          ultimaActualizacion: hoy,
-          historialTasas: nuevoHistorial
-        }, { merge: true });
-        
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { tasaDia: tasaNum, ultimaActualizacion: hoy, historialTasas: nuevoHistorial }, { merge: true });
         loggear('ACTUALIZACION_TASA', `Se cambió la tasa del día a: ${tasaNum} Bs/$`);
         setTimeout(() => dialogs.alert(`Tasa actualizada correctamente a ${tasaNum} Bs/$.`, "Éxito"), 150);
-      } catch(e) { 
-        setTimeout(() => dialogs.alert("Error actualizando tasa.", "Error"), 150); 
-      }
+      } catch(e) { setTimeout(() => dialogs.alert("Error actualizando tasa.", "Error"), 150); }
     }, "Ajustar Tasa del Día");
   };
 
   const guardarDescuento = async (e) => {
     e.preventDefault();
-    if (!descForm.porcentaje || !descForm.inicio || !descForm.fin) return dialogs.alert("Datos incompletos.");
-    dialogs.confirm(`¿Estás seguro de activar un ${descForm.porcentaje}% de descuento en TODO EL SISTEMA?`, async () => {
+    if (!descForm.porcentaje || !descForm.inicio || !descForm.fin) return dialogs.alert("Debes llenar el porcentaje y ambas fechas para activar la campaña.", "Datos incompletos");
+    dialogs.confirm(`¿Estás seguro de activar un ${descForm.porcentaje}% de descuento en TODO EL SISTEMA desde el ${descForm.inicio} hasta el ${descForm.fin}?`, async () => {
       try {
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { 
-          descuentoGlobalPorcentaje: parseFloat(descForm.porcentaje), descuentoGlobalInicio: descForm.inicio, descuentoGlobalFin: descForm.fin, descuentoGlobalActivo: true
-        }, { merge: true });
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { descuentoGlobalPorcentaje: parseFloat(descForm.porcentaje), descuentoGlobalInicio: descForm.inicio, descuentoGlobalFin: descForm.fin, descuentoGlobalActivo: true }, { merge: true });
         loggear('DESCUENTO_ACTIVADO', `Campaña del ${descForm.porcentaje}% iniciada.`);
         setTimeout(() => dialogs.alert("La campaña de descuento global se ha activado exitosamente.", "Campaña Activa"), 150);
       } catch(error) { console.error(error); }
@@ -90,49 +73,16 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   };
 
   const apagarDescuento = async () => {
-    dialogs.confirm("¿Deseas APAGAR INMEDIATAMENTE la campaña de descuento?", async () => {
+    dialogs.confirm("¿Deseas APAGAR INMEDIATAMENTE la campaña de descuento actual? Los precios volverán a la normalidad.", async () => {
       try {
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { descuentoGlobalActivo: false }, { merge: true });
-        loggear('DESCUENTO_APAGADO', `Campaña detenida manualmente.`);
+        loggear('DESCUENTO_APAGADO', `Campaña de descuento detenida manualmente.`);
         setTimeout(() => dialogs.alert("La campaña ha sido apagada.", "Campaña Detenida"), 150);
       } catch(error) { console.error(error); }
     }, "Apagar Campaña");
   };
 
-  // --- ELIMINACIÓN PERMANENTE (SOLO ADMIN SUPREMO) ---
-  const eliminarPedidoPermanente = (id, cliente) => {
-    dialogs.confirm(`¿ESTÁS SEGURO? Eliminarás permanentemente el pedido de ${cliente}. Esta acción no se puede deshacer y borrará el historial.`, async () => {
-      try {
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id));
-        loggear('PEDIDO_ELIMINADO', `Administrador borró pedido de ${cliente}`);
-        dialogs.alert("Pedido eliminado del sistema exitosamente.");
-      } catch (e) { console.error(e); }
-    }, "Confirmar Borrado");
-  };
-
-  // --- REVISIÓN RÁPIDA DE AUDITORÍA ---
-  const revisionRapida = async (p) => {
-    if (!esAuditor) return;
-    try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', p.id), { auditado: true });
-      loggear('AUDITORIA_RAPIDA', `Revisión rápida aprobada para ${p.clienteNombre}`);
-    } catch (e) { console.error(e); }
-  };
-
-  const marcarAuditoriaConNota = async (pedido) => {
-    if (!esAuditor) return;
-    dialogs.prompt("Escribe una nota de auditoría (opcional):", async (nota) => {
-       if(!nota) return;
-       try {
-          const notasExistentes = pedido.notasAuditoria || [];
-          const nuevasNotas = [...notasExistentes, { fecha: Date.now(), texto: nota, autor: perfil.nombre }];
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { auditado: true, notasAuditoria: nuevasNotas });
-          loggear('AUDITORIA_NOTA', `Aprobó con nota: ${pedido.clienteNombre}`);
-       } catch(e) { console.error(e); }
-    }, "Validar Auditoría");
-  };
-
-  const abrirModalValidacion = (pedido) => setModalValidacion({ pedido, sobrante: '', file: null, previewUrl: '', subiendo: false });
+  const abrirModalValidacion = (pedido) => setModalValidacion({ pedido: pedido, sobrante: '', file: null, previewUrl: '', subiendo: false });
 
   const handlePasteComprobante = (e) => {
     const items = e.clipboardData?.items;
@@ -161,11 +111,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         const result = await response.json();
         if (result.url) urlComprobanteAdmin = result.url;
       }
-      
+
       const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
       const updates = {};
       
-      // CORRECCIÓN BUG INVENTARIO: SetDoc previene errores si el nombre tiene puntos decimales (Ej: 1.5L)
       Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { 
           updates[itemKey] = { envios: increment(-qty) }; 
       });
@@ -181,27 +130,54 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       loggear('PAGO_VALIDADO', `Aprobación y descuento de stock: ${pedido.clienteNombre}`);
       dialogs.alert("El pago fue aprobado, el extracto guardado y el inventario descontado exitosamente.", "Pago Validado");
       setModalValidacion(null);
-    } catch(e) { 
-      console.error(e); 
-      dialogs.alert("Ocurrió un error al validar el pago o subir el archivo.", "Error"); 
-      setModalValidacion(prev => ({ ...prev, subiendo: false })); 
-    }
+    } catch(e) { console.error(e); dialogs.alert("Ocurrió un error al validar el pago o subir el archivo.", "Error"); setModalValidacion(prev => ({ ...prev, subiendo: false })); }
   };
 
   const rechazarPago = (pedido) => {
-    dialogs.prompt(`Motivo de devolución a Ventas:`, async (motivo) => {
+    dialogs.prompt(`Escribe el motivo de devolución a Ventas:\n(Ej: Falta dinero, Capture falso, Sin stock)`, async (motivo) => {
       if (!motivo) return;
       setTimeout(() => {
-        dialogs.prompt("¿Monto FALTANTE ($)? (Deja 0 si no aplica)", async (valF) => {
+        dialogs.prompt("¿Cuánto dinero FALTÓ en el pago?\n\nIngresa el monto en dólares ($). Deja 0 si devuelves por otra razón.", async (valFaltante) => {
           let faltanteUsd = parseFloat(valFaltante.replace(',', '.')) || 0;
           try {
             await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Rechazado', motivoRechazo: motivo, faltanteUsd });
-            loggear('PAGO_RECHAZADO', `Devolución: ${pedido.clienteNombre}`);
+            loggear('PAGO_RECHAZADO', `Devolución: ${pedido.clienteNombre} (Faltante: $${faltanteUsd})`);
             setTimeout(() => dialogs.alert("El pedido ha sido devuelto a ventas.", "Pedido Devuelto"), 150);
           } catch(e) { console.error(e); }
         }, "Monto Faltante");
       }, 150);
     }, "Devolver Pedido");
+  };
+
+  const eliminarPedidoPermanente = (id, cliente) => {
+    dialogs.confirm(`¿ESTÁS SEGURO? Eliminarás permanentemente el pedido de ${cliente}. Esta acción no se puede deshacer.`, async () => {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id));
+        loggear('PEDIDO_ELIMINADO', `Administrador borró el pedido de ${cliente}`);
+        dialogs.alert("Pedido eliminado exitosamente.", "Completado");
+      } catch (e) { console.error(e); dialogs.alert("Error eliminando pedido."); }
+    }, "Confirmar Borrado");
+  };
+
+  const revisionRapida = async (p) => {
+    if (!esAuditor) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', p.id), { auditado: true });
+      loggear('AUDITORIA_RAPIDA', `Revisión rápida aprobada para ${p.clienteNombre}`);
+    } catch (e) { console.error(e); }
+  };
+
+  const marcarAuditoriaConNota = async (pedido) => {
+    if (!esAuditor) return;
+    dialogs.prompt("Escribe un comentario o nota de auditoría para este pedido:", async (nota) => {
+       if(!nota) return;
+       try {
+          const notasExistentes = pedido.notasAuditoria || [];
+          const nuevasNotas = [...notasExistentes, { fecha: Date.now(), texto: nota, autor: perfil.nombre }];
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { auditado: true, notasAuditoria: nuevasNotas });
+          loggear('AUDITORIA_NOTA', `Añadió comentario a: ${pedido.clienteNombre}`);
+       } catch(e) { console.error(e); }
+    }, "Nuevo Comentario");
   };
 
   const diasAuditoria = useMemo(() => {
@@ -236,17 +212,19 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           </div>
 
           {esAdminSupremo && (
-            <div className={`p-8 rounded-[2rem] shadow-xl relative overflow-hidden border-4 flex flex-col justify-center ${config?.descuentoGlobalActivo ? 'bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400/30 text-white' : 'bg-gradient-to-r from-pink-600 to-purple-700 border-pink-400/30 text-white'}`}>
+            <div className={`p-8 rounded-[2rem] shadow-xl relative overflow-hidden border-4 flex flex-col justify-center ${isGlobalDiscountActiveStatus ? 'bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400/30 text-white' : 'bg-gradient-to-r from-pink-600 to-purple-700 border-pink-400/30 text-white'}`}>
               <Percent size={120} className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none"/>
               <div className="flex justify-between items-start mb-4 relative z-10">
                  <div>
                    <h3 className="text-xl font-black flex items-center gap-2">Campaña Global</h3>
                    <p className="text-xs font-medium opacity-80 mt-1">Rebaja en toda la tienda.</p>
                  </div>
-                 {config?.descuentoGlobalActivo && <span className="bg-emerald-800/50 text-emerald-100 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-emerald-400/30 flex items-center gap-1 animate-pulse"><Power size={12}/> Activa</span>}
+                 {isGlobalDiscountActiveStatus && (
+                   <span className="bg-emerald-800/50 text-emerald-100 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-emerald-400/30 flex items-center gap-1 animate-pulse"><Power size={12}/> Activa</span>
+                 )}
               </div>
 
-              {config?.descuentoGlobalActivo ? (
+              {isGlobalDiscountActiveStatus ? (
                 <div className="relative z-10 flex flex-col sm:flex-row justify-between items-center gap-4 mt-2 bg-white/10 p-5 rounded-2xl backdrop-blur-sm border border-white/20">
                    <div>
                      <div className="text-3xl font-black">{config?.descuentoGlobalPorcentaje}% OFF</div>
@@ -256,7 +234,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                 </div>
               ) : (
                 <form onSubmit={guardarDescuento} className="relative z-10 grid grid-cols-3 gap-3">
-                   <div className="col-span-3 sm:col-span-1 flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">%</label><input type="number" required value={descForm.porcentaje} onChange={e=>setDescForm({...descForm, porcentaje: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold" /></div>
+                   <div className="col-span-3 sm:col-span-1 flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">%</label><input type="number" min="1" max="99" required value={descForm.porcentaje} onChange={e=>setDescForm({...descForm, porcentaje: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-sm" placeholder="Ej: 15" /></div>
                    <div className="col-span-3 sm:col-span-1 flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Inicio</label><input type="date" required value={descForm.inicio} onChange={e=>setDescForm({...descForm, inicio: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-sm" /></div>
                    <div className="col-span-3 sm:col-span-1 flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Fin</label><input type="date" required value={descForm.fin} onChange={e=>setDescForm({...descForm, fin: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-sm" /></div>
                    <div className="col-span-3 mt-2"><button type="submit" className="w-full bg-white text-purple-700 font-black py-3 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 text-sm uppercase tracking-widest">Activar Campaña</button></div>
@@ -279,7 +257,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           </div>
         </div>
 
-        {/* FILTRO DE FECHA PARA HISTORIAL */}
         {vistaAdmin === 'historial' && (
           <div className="flex flex-col sm:flex-row gap-4 mb-8 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
             <div className="flex-1">
@@ -292,7 +269,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             </div>
             <div className="flex items-end pb-1 w-full sm:w-auto">
                {(fechaInicio !== hoyStr || fechaFin !== hoyStr) && (
-                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 py-3 px-4 rounded-xl w-full">Ver Solo Hoy</button>
+                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 py-3 px-4 rounded-xl w-full">Limpiar (Ver Hoy)</button>
                )}
             </div>
           </div>
@@ -307,7 +284,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  
                  <div className="absolute top-5 right-6"><StatusBadge status={p.status}/></div>
 
-                 {/* Columna 1: Pedido */}
                  <div className="lg:col-span-5 flex flex-col justify-start">
                    <div className="font-bold text-xl text-slate-800 dark:text-slate-100 pr-24 leading-tight">{p.clienteNombre}</div>
                    <div className="text-[11px] font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1 mb-3">
@@ -324,12 +300,21 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    </div>
                  </div>
 
-                 {/* Columna 2: Pagos */}
                  <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0">
                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-100 dark:border-slate-700 pb-2">Análisis Financiero</span>
                    
                    {p.esRegalo ? (
                       <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl"><Gift size={20}/> REGALO VIP</div>
+                   ) : p.moneda === 'ZELLE' ? (
+                      <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl border border-purple-200 dark:border-purple-800 mb-4">
+                        <div className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">Pago Vía Zelle</div>
+                        <div className="font-black text-purple-800 dark:text-purple-300 text-3xl">${(p.montoUsd||0).toFixed(2)}</div>
+                        
+                        <div className="flex flex-wrap gap-2 mt-3">
+                           {p.sobranteUsd > 0 && <span className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/30 px-2.5 py-1 rounded-lg">+ Sobrante: ${p.sobranteUsd}</span>}
+                           {p.faltanteUsd > 0 && <span className="text-xs font-bold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30 px-2.5 py-1 rounded-lg">- Faltante: ${p.faltanteUsd}</span>}
+                        </div>
+                      </div>
                    ) : (
                       <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-4">
                         <div className="font-black text-slate-800 dark:text-slate-100 text-3xl">${(p.montoUsd||0).toFixed(2)}</div>
@@ -350,26 +335,23 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    </div>
                    
                    <div className="flex flex-col gap-2">
-                      {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-sky-100 dark:border-sky-800/50"><FileText size={16}/> Capture (Cliente/Ventas)</a>}
-                      {p.linkComprobanteAdmin && <a href={p.linkComprobanteAdmin} target="_blank" rel="noreferrer" className="text-xs text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-purple-100 dark:border-purple-800/50"><ImageIcon size={16}/> Extracto Banco (Admin)</a>}
+                      {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-sky-100 dark:border-sky-800/50"><FileText size={16}/> Capture Cliente</a>}
+                      {p.linkComprobanteAdmin && <a href={p.linkComprobanteAdmin} target="_blank" rel="noreferrer" className="text-xs text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-purple-100 dark:border-purple-800/50"><ImageIcon size={16}/> Extracto Banco</a>}
                    </div>
                  </div>
 
-                 {/* Columna 3: Acciones */}
                  <div className="lg:col-span-3 flex flex-col items-stretch justify-start mt-6 lg:mt-0 pt-6 lg:pt-0 border-t border-slate-100 dark:border-slate-700 lg:border-none h-full relative">
                      
-                     {/* BOTONES ADMINISTRACIÓN (Cobros) */}
                      {esAdmin && p.status === 'Pendiente' && (
                        <div className="flex flex-col gap-3 w-full mt-auto">
                          <button onClick={()=>abrirModalValidacion(p)} className="bg-sky-600 text-white py-3.5 rounded-xl font-black text-sm shadow-lg hover:bg-sky-700 hover:-translate-y-0.5 transition-all w-full uppercase tracking-wider">Validar Pago</button>
-                         <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-200 text-red-600 py-3 rounded-xl font-bold text-sm hover:bg-red-50 transition-colors w-full">Devolver a Ventas</button>
+                         <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-200 text-red-600 py-3 rounded-xl font-bold text-sm hover:bg-red-50 transition-colors w-full">Devolver Pedido</button>
                        </div>
                      )}
                      
-                     {/* HILO DE COMENTARIOS DE AUDITORÍA */}
                      {p.status !== 'Pendiente' && p.notasAuditoria && p.notasAuditoria.length > 0 && (
                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
-                         <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><MessageSquare size={12}/> Hilo de Comentarios:</span>
+                         <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><MessageSquare size={12}/> Comentarios:</span>
                          <div className="space-y-2">
                            {p.notasAuditoria.map((n, i) => (
                              <div key={i} className="text-[11px] text-amber-900 dark:text-amber-200 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-amber-100 dark:border-amber-800/50">
@@ -381,19 +363,17 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        </div>
                      )}
 
-                     {/* BOTONES AUDITORÍA (MANTENER VISIBLE "AÑADIR NOTA" SIEMPRE) */}
                      {esAuditor && p.status !== 'Pendiente' && (
                        <div className="flex flex-col gap-3 w-full mt-auto">
                          {!p.auditado && (
                             <button onClick={()=>revisionRapida(p)} className="bg-emerald-50 hover:bg-emerald-100 border-2 border-emerald-200 text-emerald-700 py-3 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-colors shadow-sm"><CheckCircle size={18}/> Aprobación Rápida</button>
                          )}
                          <button onClick={()=>marcarAuditoriaConNota(p)} className="bg-white hover:bg-slate-50 border-2 border-slate-200 text-slate-600 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm">
-                            <MessageSquare size={16}/> {p.notasAuditoria?.length > 0 ? 'Responder / Añadir Nota' : 'Revisar con Nota'}
+                            <MessageSquare size={16}/> {p.notasAuditoria?.length > 0 ? 'Responder / Nota' : 'Revisar con Nota'}
                          </button>
                        </div>
                      )}
                      
-                     {/* LABELS DE ESTADO AUDITORÍA */}
                      {p.auditado && (
                        <div className="bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 py-4 rounded-2xl shadow-sm mt-4"><ShieldCheck size={20}/> Auditado</div>
                      )}
@@ -402,7 +382,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        <div className="text-[10px] font-black uppercase text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 w-full lg:w-max mt-4 border border-amber-200"><AlertTriangle size={14}/> Sin Auditar</div>
                      )}
 
-                     {/* ELIMINAR REGISTRO (Solo Admin Supremo) */}
                      {vistaAdmin === 'historial' && esAdminSupremo && (
                        <button onClick={()=>eliminarPedidoPermanente(p.id, p.clienteNombre)} className="mt-4 pt-4 text-red-400 hover:text-red-600 text-[11px] font-bold flex items-center justify-center gap-1 opacity-50 hover:opacity-100 transition-opacity uppercase tracking-widest border-t border-slate-100 dark:border-slate-700"><Trash2 size={14}/> Borrar Registro</button>
                      )}

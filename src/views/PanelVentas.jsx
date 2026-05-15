@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, UploadCloud } from 'lucide-react';
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
-import { updateDoc, doc, addDoc, collection, deleteDoc } from 'firebase/firestore';
+import { updateDoc, doc, addDoc, collection, setDoc } from 'firebase/firestore';
 import { WORKER_GEMINI_URL, URL_GOOGLE_SCRIPT } from '../config/firebase'; 
 import { compressImage } from '../utils/image';
 import { ROLES } from '../config/constants';
@@ -241,8 +241,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     let calculo = { usd: 0, ves: 0 };
     if (!formData.esRegalo) {
        if (formData.moneda === 'ZELLE') {
-           calculo.usd = montoNum; // Se guarda en USD para inventario general
-           calculo.ves = 0; // Zelle no tiene equivalente en Bs
+           calculo.usd = montoNum; 
+           calculo.ves = 0; 
        } else if (formData.moneda === 'USD') {
            calculo.usd = montoNum;
            calculo.ves = montoNum * tasa;
@@ -313,8 +313,23 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   };
 
   const enviarWhatsApp = (pedido) => {
-    const mensaje = `Hola ${pedido.clienteNombre}, tu pedido Bluher ha sido enviado por *${pedido.courier}*.%0A%0A*Guía:* ${pedido.guia}%0A%0A${pedido.linkGuia ? `Recibo: ${pedido.linkGuia}%0A` : ''}${pedido.linkFotoProductos ? `Paquete: ${pedido.linkFotoProductos}%0A` : ''}%0A¡Gracias por tu compra!`;
-    const cleanPhone = String(pedido.clienteTelefono).replace(/\D/g, '');
+    // 1. Mensaje limpio: Solo se incluye la Guía y el Recibo (omitimos la foto del empaque)
+    const mensaje = `Hola ${pedido.clienteNombre}, tu pedido Bluher ha sido enviado por *${pedido.courier}*.%0A%0A*Guía:* ${pedido.guia}%0A%0A${pedido.linkGuia ? `Recibo: ${pedido.linkGuia}%0A` : ''}%0A¡Gracias por tu compra!`;
+    
+    // 2. Formateo estricto del teléfono
+    let cleanPhone = String(pedido.clienteTelefono).replace(/\D/g, ''); // Quitamos todo lo que no sea número
+    
+    // Si empieza por 0 (ej. 0414...), se lo quitamos
+    if (cleanPhone.startsWith('0')) {
+        cleanPhone = cleanPhone.substring(1);
+    }
+    
+    // Si no empieza por 58, le agregamos el código de Venezuela
+    if (!cleanPhone.startsWith('58')) {
+        cleanPhone = '58' + cleanPhone;
+    }
+
+    // 3. Abrimos WhatsApp
     window.open(`https://wa.me/${cleanPhone}?text=${mensaje}`, '_blank');
   };
 
@@ -394,7 +409,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
              <Input label="Nombre de Asesora" name="asesora" value={formData.asesora} onChange={(e)=>setFormData({...formData, asesora: e.target.value})} required />
              <Input label="Nombre del Cliente" name="clienteNombre" value={formData.clienteNombre} onChange={(e)=>setFormData({...formData, clienteNombre: e.target.value})} required />
              <Input label="Cédula/RIF" name="clienteCedula" value={formData.clienteCedula} onChange={(e)=>setFormData({...formData, clienteCedula: e.target.value})} required />
-             <Input label="Teléfono de Contacto" name="clienteTelefono" value={formData.clienteTelefono} onChange={(e)=>setFormData({...formData, clienteTelefono: e.target.value})} required />
+             
+             {/* AVISO IMPORTANTE: FORMATO DEL TELÉFONO */}
+             <Input label="Teléfono (Ej: 4141234567, sin el 0)" name="clienteTelefono" value={formData.clienteTelefono} onChange={(e)=>setFormData({...formData, clienteTelefono: e.target.value})} required placeholder="Ej: 4141234567" />
              
              <div className="flex flex-col">
                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Empresa de Envío</label>
