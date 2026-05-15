@@ -11,14 +11,19 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
   const [modoEdicion, setModoEdicion] = useState(null); 
   const [subiendoIdx, setSubiendoIdx] = useState(null);
 
-  // FUNCIÓN PARA RENDERIZAR IMÁGENES DE DRIVE DIRECTAMENTE
+  // FUNCIÓN MAESTRA PARA SALTAR EL BLOQUEO DE GOOGLE DRIVE
   const getDirectUrl = (url) => {
     if (!url) return null;
-    if (url.includes('drive.google.com/file/d/')) {
+    let id = null;
+    if (url.includes('/d/')) {
       const match = url.match(/\/d\/(.+?)\//);
-      if (match && match[1]) {
-        return `https://drive.google.com/uc?export=view&id=${match[1]}`;
-      }
+      if (match && match[1]) id = match[1];
+    } else if (url.includes('id=')) {
+      const match = url.match(/[?&]id=([^&]+)/);
+      if (match && match[1]) id = match[1];
+    }
+    if (id) {
+      return `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
     }
     return url;
   };
@@ -97,9 +102,12 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
     e.preventDefault();
     const catName = form.categoria === 'OTRA' ? form.nuevoCat : form.categoria;
     const presentacionesArr = form.presentaciones.split(',').map(s=>s.trim()).filter(Boolean);
-    const preciosArr = form.precios ? form.precios.split(',').map(s=>parseFloat(s.trim()) || 0) : presentacionesArr.map(()=>0);
     
     if(!catName || !form.nombre || presentacionesArr.length === 0) return dialogs.alert("Por favor completa todos los campos requeridos.", "Información Incompleta");
+
+    // BLINDAJE: Garantiza que los precios SIEMPRE coincidan con la cantidad de presentaciones
+    const rawPrecios = form.precios ? form.precios.split(',').map(s=>parseFloat(s.trim()) || 0) : [];
+    const preciosArr = presentacionesArr.map((_, i) => rawPrecios[i] || 0);
 
     let newCatalogo = JSON.parse(JSON.stringify(catalogo)); 
     

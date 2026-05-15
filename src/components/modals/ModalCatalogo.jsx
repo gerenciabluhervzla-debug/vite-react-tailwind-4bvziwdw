@@ -8,14 +8,19 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
 
-  // FUNCIÓN PARA RENDERIZAR IMÁGENES DE DRIVE DIRECTAMENTE
+  // FUNCIÓN MAESTRA
   const getDirectUrl = (url) => {
     if (!url) return null;
-    if (url.includes('drive.google.com/file/d/')) {
+    let id = null;
+    if (url.includes('/d/')) {
       const match = url.match(/\/d\/(.+?)\//);
-      if (match && match[1]) {
-        return `https://drive.google.com/uc?export=view&id=${match[1]}`;
-      }
+      if (match && match[1]) id = match[1];
+    } else if (url.includes('id=')) {
+      const match = url.match(/[?&]id=([^&]+)/);
+      if (match && match[1]) id = match[1];
+    }
+    if (id) {
+      return `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
     }
     return url;
   };
@@ -62,7 +67,8 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
       catalogo.forEach(c => c.productos.forEach(p => {
         if(p.nombre === nombre) {
           const presIndex = p.presentaciones.indexOf(pres);
-          if (presIndex >= 0 && p.precios) pPrecio = p.precios[presIndex] || 0;
+          // BLINDAJE DE PRECIOS
+          if (presIndex >= 0 && p.precios && p.precios[presIndex] !== undefined) pPrecio = p.precios[presIndex];
         }
       }));
       total += (pPrecio * qty);
@@ -80,7 +86,7 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
       catalogo.forEach(c => c.productos.forEach(p => {
         if(p.nombre === prod) {
           const presIndex = p.presentaciones.indexOf(pres);
-          if (presIndex >= 0 && p.precios) pPrecio = p.precios[presIndex] || 0;
+          if (presIndex >= 0 && p.precios && p.precios[presIndex] !== undefined) pPrecio = p.precios[presIndex];
         }
       }));
       
@@ -167,11 +173,10 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
                           const k = `${p.nombre}|${pres}`; const q = carrito[k] || 0;
                           const disp = stock ? (typeof stock[k] === 'object' ? stock[k].envios : (stock[k]||0)) : 0;
                           
-                          // APLICANDO LA TRANSFORMACIÓN DEL ENLACE DE DRIVE
                           const rawUrl = (p.imagenes && p.imagenes[i]) ? p.imagenes[i] : (i === 0 && p.imagen ? p.imagen : null);
                           const imageUrl = getDirectUrl(rawUrl);
                           
-                          const originalPrice = p.precios[i] || 0;
+                          const originalPrice = p.precios && p.precios[i] !== undefined ? p.precios[i] : 0;
                           const discountedPrice = originalPrice * (1 - globalDiscountPercent / 100);
 
                           return (

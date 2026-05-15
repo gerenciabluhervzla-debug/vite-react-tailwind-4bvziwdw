@@ -16,6 +16,22 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [showPaymentInfo, setShowPaymentInfo] = useState(false);
 
+  const getDirectUrl = (url) => {
+    if (!url) return null;
+    let id = null;
+    if (url.includes('/d/')) {
+      const match = url.match(/\/d\/(.+?)\//);
+      if (match && match[1]) id = match[1];
+    } else if (url.includes('id=')) {
+      const match = url.match(/[?&]id=([^&]+)/);
+      if (match && match[1]) id = match[1];
+    }
+    if (id) {
+      return `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
+    }
+    return url;
+  };
+
   const [form, setForm] = useState({
     nombre: '', cedula: '', telefono: '', agencia: '', direccion: '', referencia: '', comprobanteUrl: '', metodoPago: 'pago_movil'
   });
@@ -30,18 +46,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
      hoyTimestamp <= new Date(config.descuentoGlobalFin + 'T23:59:59').getTime();
 
   const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
-
-  // FUNCIÓN PARA RENDERIZAR IMÁGENES DE DRIVE DIRECTAMENTE
-  const getDirectUrl = (url) => {
-    if (!url) return null;
-    if (url.includes('drive.google.com/file/d/')) {
-      const match = url.match(/\/d\/(.+?)\//);
-      if (match && match[1]) {
-        return `https://drive.google.com/uc?export=view&id=${match[1]}`;
-      }
-    }
-    return url;
-  };
 
   const updateQty = (key, delta) => {
     setCarrito(prev => {
@@ -110,7 +114,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       catalogo.forEach(c => c.productos.forEach(p => {
         if (p.nombre === nombre) {
           const idx = p.presentaciones.indexOf(pres);
-          if (idx >= 0 && p.precios) usd += (p.precios[idx] * qty);
+          if (idx >= 0 && p.precios && p.precios[idx] !== undefined) usd += (p.precios[idx] * qty);
         }
       }));
     });
@@ -210,9 +214,9 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         moneda: isZelle ? 'ZELLE' : 'VES', 
         monto: subtotalUsd,
         montoUsd: subtotalUsd,
-        montoVes: isZelle ? 0 : totalVes, // Si es Zelle no tiene equivalente en Bs
+        montoVes: isZelle ? 0 : totalVes,
         tasaAplicada: tasa,
-        referencia: form.referencia, // Para Zelle este campo guarda el correo/nombre
+        referencia: form.referencia,
         linkComprobantePago: form.comprobanteUrl,
         productos: productosString,
         carritoObj: finalCarrito,
@@ -320,7 +324,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                         const qty = carrito[key] || 0;
                         const disp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
                         
-                        const originalPrice = prod.precios[i];
+                        const originalPrice = prod.precios && prod.precios[i] !== undefined ? prod.precios[i] : 0;
                         const discountedPrice = originalPrice * (1 - globalDiscountPercent / 100);
 
                         const rawUrl = (prod.imagenes && prod.imagenes[i]) ? prod.imagenes[i] : (i === 0 && prod.imagen ? prod.imagen : null);
@@ -344,7 +348,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                                  {isGlobalDiscountActive ? (
                                    <div className="flex items-baseline gap-2 mt-1">
                                      <span className="font-black text-pink-600 dark:text-pink-400 text-xl leading-none">${discountedPrice.toFixed(2)}</span>
-                                     <span className="text-xs font-bold text-slate-400 line-through">${originalPrice}</span>
+                                     <span className="text-[10px] font-bold text-slate-400 line-through">${originalPrice}</span>
                                    </div>
                                  ) : (
                                    <div className="font-black text-emerald-600 dark:text-emerald-400 text-xl leading-none mt-1">${originalPrice}</div>
@@ -459,7 +463,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
                      <h3 className="text-xs font-black uppercase text-slate-400 mt-6 mb-2 border-b dark:border-slate-700 pb-2">Información de Pago (Obligatorio)</h3>
                      
-                     {/* SELECTOR DE MÉTODO DE PAGO */}
                      <div className="flex flex-col sm:flex-row gap-3 mb-4 mt-2">
                        <label className={`flex-1 flex items-center justify-center text-center gap-2 p-3 border-2 rounded-xl cursor-pointer font-bold text-sm transition-colors ${form.metodoPago === 'pago_movil' ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:border-sky-500 dark:text-sky-400' : 'border-slate-200 dark:border-slate-700 text-slate-500'}`}>
                          <input type="radio" name="metodoPago" value="pago_movil" checked={form.metodoPago === 'pago_movil'} onChange={e=>setForm({...form, metodoPago: e.target.value, referencia: ''})} className="hidden"/>
@@ -471,7 +474,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                        </label>
                      </div>
 
-                     {/* INFO DE PAGO DINÁMICA */}
                      {form.metodoPago === 'pago_movil' ? (
                        <button type="button" onClick={() => setShowPaymentInfo(true)} className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-400 py-3 rounded-xl font-bold text-xs transition-colors mb-4 flex items-center justify-center gap-2 border border-indigo-200 dark:border-indigo-800">
                           <CheckCircle size={16} /> Ver Datos para Pago Móvil / Transferencia
@@ -487,7 +489,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                        </div>
                      )}
 
-                     {/* INPUT DE REFERENCIA DINÁMICO */}
                      {darkMode ? (
                        <InputDark 
                          label={form.metodoPago === 'zelle' ? "Correo o Número (Titular Zelle)" : "Referencia Bancaria"} 
@@ -533,7 +534,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                  </div>
                </div>
                
-               {/* Mostrar equivalencia en Bs solo si es Pago Movil */}
                <div className="text-right text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-6 h-5">
                  {form.metodoPago === 'pago_movil' && `Equivale a: Bs. ${totalVes.toFixed(2)}`}
                </div>
@@ -546,7 +546,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         </div>
       )}
 
-      {/* MODAL DE DATOS DE PAGO MOVIL */}
       {showPaymentInfo && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-in fade-in">
            <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 border border-slate-200 dark:border-slate-700">
