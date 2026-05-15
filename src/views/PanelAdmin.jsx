@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, Trash2, MessageSquare, Database, DownloadCloud, Upload } from 'lucide-react';
+import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban } from 'lucide-react';
 import { StatusBadge, InputDark } from '../components/ui';
 import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
@@ -15,7 +15,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const [descForm, setDescForm] = useState({ porcentaje: '', inicio: '', fin: '' });
   const [modalValidacion, setModalValidacion] = useState(null);
   const [backupLoading, setBackupLoading] = useState(false);
-  const [showModalTasas, setShowModalTasas] = useState(false); // NUEVO ESTADO PARA EL HISTORIAL
 
   const getVeneziaDate = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -90,7 +89,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }
   }, [esAdminSupremo, config?.ultimaFechaBackup, hoyStr]);
 
-  // --- LÓGICA DE RESTAURACIÓN DE BACKUP DESDE EL SISTEMA ---
   const handleRestaurarBackup = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -247,14 +245,24 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Devolver Pedido");
   };
 
-  const eliminarPedidoPermanente = (id, cliente) => {
-    dialogs.confirm(`¿ESTÁS SEGURO? Eliminarás permanentemente el pedido de ${cliente}. Esta acción no se puede deshacer.`, async () => {
+  // --- NUEVA LÓGICA: ANULAR PEDIDO EN LUGAR DE BORRAR FÍSICAMENTE ---
+  const anularPedido = (pedido) => {
+    dialogs.prompt(`Estás a punto de ANULAR el pedido de ${pedido.clienteNombre}.\n\nEsta operación mantendrá el registro pero lo excluirá de los reportes financieros.\n\nEscribe el motivo de la anulación (Obligatorio):`, async (motivo) => {
+      if (!motivo) return;
       try {
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id));
-        loggear('PEDIDO_ELIMINADO', `Administrador borró el pedido de ${cliente}`);
-        dialogs.alert("Pedido eliminado exitosamente.", "Completado");
-      } catch (e) { console.error(e); dialogs.alert("Error eliminando pedido."); }
-    }, "Confirmar Borrado");
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { 
+           status: 'Anulado', 
+           motivoAnulacion: motivo,
+           anuladoPor: perfil.nombre,
+           fechaAnulacion: Date.now(),
+           // Se establecen montos a cero para que no interfieran en futuros reportes si se modifica la lógica
+           montoUsd: 0, montoVes: 0, 
+           notasAuditoria: [...(pedido.notasAuditoria || []), { fecha: Date.now(), texto: `ORDEN ANULADA: ${motivo}`, autor: 'SISTEMA' }]
+        });
+        loggear('PEDIDO_ANULADO', `Administrador anuló el pedido de ${pedido.clienteNombre} por: ${motivo}`);
+        dialogs.alert("Pedido anulado exitosamente.", "Completado");
+      } catch (e) { console.error(e); dialogs.alert("Error anulando pedido."); }
+    }, "Confirmar Anulación");
   };
 
   const revisionRapida = async (p) => {
@@ -285,7 +293,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
        if (!dias[d]) dias[d] = { fecha: d, total: 0, auditados: 0, fallas: 0, pedidos: [] };
        dias[d].total++;
        if (p.auditado) dias[d].auditados++;
-       if (p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado') dias[d].fallas++;
+       if (p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado' || p.status === 'Anulado') dias[d].fallas++;
        dias[d].pedidos.push(p);
     });
     return Object.values(dias).sort((a,b) => b.fecha.localeCompare(a.fecha)); 
@@ -299,20 +307,14 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   return (
     <div className="space-y-6 animate-in fade-in relative">
        
-       {/* CORRECCIÓN VISUAL DE LAS TARJETAS: Se usa items-start para que no se alarguen */}
-       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 items-start">
-          
+       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           <div className="bg-[#003366] text-white p-6 rounded-[2rem] border-4 border-sky-400/20 shadow-xl flex flex-col relative overflow-hidden h-full">
              <div className="relative z-10 mb-4">
                 <div className="text-xs font-black uppercase tracking-widest opacity-60 mb-1">Tasa Bluher</div>
                 <h2 className="text-4xl font-black">{config?.tasaDia || 1} <span className="text-lg">Bs/$</span></h2>
                 {!tasaActualizadaHoy && <div className="mt-2 text-[10px] font-bold text-yellow-300 bg-yellow-900/30 px-3 py-1.5 rounded-lg border border-yellow-400 inline-block uppercase tracking-wider">⚠️ Actualiza la tasa de hoy.</div>}
              </div>
-             
-             <div className="relative z-10 flex flex-col gap-2 mt-auto">
-                {esAdmin && <button onClick={actualizarTasa} className="bg-sky-500 hover:bg-sky-400 px-6 py-3 rounded-xl font-bold text-sm shadow-md transition-colors w-full">Ajustar Tasa</button>}
-                <button onClick={() => setShowModalTasas(true)} className="bg-white/10 hover:bg-white/20 px-6 py-3 rounded-xl font-bold text-xs transition-colors w-full flex items-center justify-center gap-2">Ver Historial de Tasas</button>
-             </div>
+             {esAdmin && <button onClick={actualizarTasa} className="mt-auto bg-sky-500 hover:bg-sky-400 px-6 py-3 rounded-xl font-bold text-sm shadow-md transition-colors w-full relative z-10">Ajustar Tasa</button>}
           </div>
 
           {esAdminSupremo && (
@@ -386,7 +388,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
       <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-sm">
         
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-6 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
           <div>
             <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><CheckSquare className="text-sky-600"/> Validación y Auditoría</h2>
           </div>
@@ -398,7 +400,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           </div>
         </div>
 
-        {/* FILTRO DE FECHAS EN HISTORIAL */}
         {vistaAdmin === 'historial' && (
           <div className="flex flex-col sm:flex-row gap-4 mb-8 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
             <div className="flex-1 w-full">
@@ -422,7 +423,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             {listado.length === 0 ? (
               <div className="p-12 text-center text-slate-400 font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl">No hay pedidos para mostrar en esta vista/fecha.</div>
             ) : listado.map(p => (
-              <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-6 p-6 md:p-8 transition-all border-2 rounded-[2rem] shadow-sm bg-white dark:bg-slate-800 ${vistaAdmin === 'historial' && !p.auditado ? 'border-amber-300 dark:border-amber-700' : 'border-slate-200 dark:border-slate-600 hover:border-sky-300'}`}>
+              <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-6 p-6 md:p-8 transition-all border-2 rounded-[2rem] shadow-sm bg-white dark:bg-slate-800 ${vistaAdmin === 'historial' && !p.auditado && p.status !== 'Anulado' ? 'border-amber-300 dark:border-amber-700' : 'border-slate-200 dark:border-slate-600 hover:border-sky-300'}`}>
                  
                  <div className="absolute top-5 right-6"><StatusBadge status={p.status}/></div>
 
@@ -445,8 +446,13 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0">
                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-100 dark:border-slate-700 pb-2">Análisis Financiero</span>
                    
-                   {/* NUEVA LÓGICA DE VISUALIZACIÓN ZELLE */}
-                   {p.esRegalo ? (
+                   {p.status === 'Anulado' ? (
+                       <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-xl border border-slate-300 dark:border-slate-600 mb-4 opacity-70">
+                         <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-1"><Ban size={12}/> ORDEN ANULADA</div>
+                         <div className="font-black text-slate-400 text-lg line-through">${(p.montoUsd||0).toFixed(2)}</div>
+                         <div className="text-xs text-red-500 font-bold mt-2 leading-tight">Motivo: {p.motivoAnulacion || 'Cancelado por el Administrador'}</div>
+                       </div>
+                   ) : p.esRegalo ? (
                       <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl"><Gift size={20}/> REGALO VIP</div>
                    ) : p.moneda === 'ZELLE' ? (
                       <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl border border-purple-200 dark:border-purple-800 mb-4">
@@ -478,8 +484,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    </div>
                    
                    <div className="flex flex-col gap-2">
-                      {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-sky-100 dark:border-sky-800/50"><FileText size={16}/> Capture Cliente</a>}
-                      {p.linkComprobanteAdmin && <a href={p.linkComprobanteAdmin} target="_blank" rel="noreferrer" className="text-xs text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-purple-100 dark:border-purple-800/50"><ImageIcon size={16}/> Extracto Banco</a>}
+                      {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-sky-100 dark:border-sky-800/50"><FileText size={16}/> Capture (Cliente/Ventas)</a>}
+                      {p.linkComprobanteAdmin && <a href={p.linkComprobanteAdmin} target="_blank" rel="noreferrer" className="text-xs text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-purple-100 dark:border-purple-800/50"><ImageIcon size={16}/> Extracto Banco (Admin)</a>}
                    </div>
                  </div>
 
@@ -494,7 +500,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                      
                      {p.status !== 'Pendiente' && p.notasAuditoria && p.notasAuditoria.length > 0 && (
                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
-                         <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><MessageSquare size={12}/> Comentarios:</span>
+                         <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><MessageSquare size={12}/> Hilo de Comentarios:</span>
                          <div className="space-y-2">
                            {p.notasAuditoria.map((n, i) => (
                              <div key={i} className="text-[11px] text-amber-900 dark:text-amber-200 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-amber-100 dark:border-amber-800/50">
@@ -506,27 +512,28 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        </div>
                      )}
 
-                     {esAuditor && p.status !== 'Pendiente' && (
+                     {esAuditor && p.status !== 'Pendiente' && p.status !== 'Anulado' && (
                        <div className="flex flex-col gap-3 w-full mt-auto">
                          {!p.auditado && (
                             <button onClick={()=>revisionRapida(p)} className="bg-emerald-50 hover:bg-emerald-100 border-2 border-emerald-200 text-emerald-700 py-3 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-colors shadow-sm"><CheckCircle size={18}/> Aprobación Rápida</button>
                          )}
                          <button onClick={()=>marcarAuditoriaConNota(p)} className="bg-white hover:bg-slate-50 border-2 border-slate-200 text-slate-600 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm">
-                            <MessageSquare size={16}/> {p.notasAuditoria?.length > 0 ? 'Responder / Nota' : 'Revisar con Nota'}
+                            <MessageSquare size={16}/> {p.notasAuditoria?.length > 0 ? 'Responder / Añadir Nota' : 'Revisar con Nota'}
                          </button>
                        </div>
                      )}
                      
-                     {p.auditado && (
+                     {p.auditado && p.status !== 'Anulado' && (
                        <div className="bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 py-4 rounded-2xl shadow-sm mt-4"><ShieldCheck size={20}/> Auditado</div>
                      )}
                      
-                     {vistaAdmin === 'historial' && !p.auditado && (
+                     {vistaAdmin === 'historial' && !p.auditado && p.status !== 'Anulado' && (
                        <div className="text-[10px] font-black uppercase text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 w-full lg:w-max mt-4 border border-amber-200"><AlertTriangle size={14}/> Sin Auditar</div>
                      )}
 
-                     {vistaAdmin === 'historial' && esAdminSupremo && (
-                       <button onClick={()=>eliminarPedidoPermanente(p.id, p.clienteNombre)} className="mt-4 pt-4 text-red-400 hover:text-red-600 text-[11px] font-bold flex items-center justify-center gap-1 opacity-50 hover:opacity-100 transition-opacity uppercase tracking-widest border-t border-slate-100 dark:border-slate-700"><Trash2 size={14}/> Borrar Registro</button>
+                     {/* BOTÓN SEGURO: ANULAR ORDEN */}
+                     {vistaAdmin === 'historial' && esAdminSupremo && p.status !== 'Anulado' && (
+                       <button onClick={()=>anularPedido(p)} className="mt-4 pt-4 text-slate-400 hover:text-red-500 text-[11px] font-bold flex items-center justify-center gap-1 opacity-60 hover:opacity-100 transition-opacity uppercase tracking-widest border-t border-slate-100 dark:border-slate-700"><Ban size={14}/> Anular Orden (Sin borrar historial)</button>
                      )}
                  </div>
               </div>
@@ -534,7 +541,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           </div>
         )}
 
-        {/* Pestaña de Auditoría Diaria */}
         {vistaAdmin === 'auditoria' && (
           <div className="space-y-6 animate-in fade-in">
              {diasAuditoria.map(dia => (
@@ -551,22 +557,23 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    </div>
                    
                    <div className="space-y-3">
-                      {dia.pedidos.filter(p => p.notasAuditoria?.length > 0 || p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado').map(p => (
+                      {dia.pedidos.filter(p => p.notasAuditoria?.length > 0 || p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado' || p.status === 'Anulado').map(p => (
                          <div key={p.id} className="text-sm bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
                             <div className="font-bold flex items-center justify-between">
-                              <span>{p.clienteNombre}</span>
-                              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-slate-500 uppercase">{p.status}</span>
+                              <span className={p.status === 'Anulado' ? 'line-through text-slate-400' : ''}>{p.clienteNombre}</span>
+                              <span className={`text-[10px] px-2 py-0.5 rounded uppercase ${p.status === 'Anulado' ? 'bg-slate-200 text-slate-600' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'}`}>{p.status}</span>
                             </div>
                             <div className="mt-2 space-y-1">
                               {p.sobranteUsd > 0 && <div className="text-xs text-purple-600 font-bold">• Sobrante reportado: ${p.sobranteUsd}</div>}
                               {p.faltanteUsd > 0 && <div className="text-xs text-red-600 font-bold">• Faltante reportado: ${p.faltanteUsd}</div>}
+                              {p.status === 'Anulado' && <div className="text-xs text-slate-600 font-bold mt-2 p-2 bg-slate-100 rounded">Motivo Anulación: {p.motivoAnulacion}</div>}
                               {p.notasAuditoria?.map((n, i) => (
                                  <div key={i} className="text-xs text-amber-600 mt-1 italic">- Nota ({n.autor}): "{n.texto}"</div>
                               ))}
                             </div>
                          </div>
                       ))}
-                      {dia.pedidos.filter(p => p.notasAuditoria?.length > 0 || p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado').length === 0 && (
+                      {dia.pedidos.filter(p => p.notasAuditoria?.length > 0 || p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado' || p.status === 'Anulado').length === 0 && (
                         <div className="text-xs text-slate-500 italic">No se detectaron notas ni anomalías financieras en los pedidos de este día.</div>
                       )}
                    </div>
@@ -616,37 +623,16 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                           <p className="text-xs mt-1 opacity-70">Para pegar la captura del banco desde tu portapapeles</p>
                        </div>
                     )}
+                    <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={(e)=>{
+                       if(e.target.files[0]){
+                          setModalValidacion(prev=>({...prev, file: e.target.files[0], previewUrl: URL.createObjectURL(e.target.files[0])}))
+                       }
+                    }}/>
                  </div>
                  
                  <button onClick={procesarValidacionDefinitiva} disabled={modalValidacion.subiendo} className="w-full bg-[#003366] hover:bg-[#002244] dark:bg-sky-600 dark:hover:bg-sky-700 text-white font-black py-4 rounded-xl mt-6 shadow-xl transition-transform hover:-translate-y-0.5 disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest">
                    {modalValidacion.subiendo ? <><Loader2 className="animate-spin"/> Guardando...</> : 'Aprobar y Descontar'}
                  </button>
-              </div>
-           </div>
-        </div>
-      )}
-
-      {/* --- MODAL DEL HISTORIAL DE TASAS --- */}
-      {showModalTasas && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in">
-           <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 border border-slate-200 dark:border-slate-700 flex flex-col max-h-[80vh]">
-              <div className="p-5 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
-                 <h3 className="text-lg font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">Historial de Tasas</h3>
-                 <button onClick={() => setShowModalTasas(false)} className="p-2 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={18}/></button>
-              </div>
-              <div className="p-5 overflow-y-auto">
-                 {(!config?.historialTasas || config.historialTasas.length === 0) ? (
-                    <div className="text-center text-slate-400 font-bold italic py-4 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl">No hay historial registrado.</div>
-                 ) : (
-                    <div className="space-y-3">
-                       {config.historialTasas.map((h, i) => (
-                          <div key={i} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
-                             <span className="font-bold text-slate-600 dark:text-slate-300 text-sm">{h.fecha}</span>
-                             <span className="font-black text-sky-600 dark:text-sky-400 text-xl">{h.tasa} <span className="text-xs">Bs</span></span>
-                          </div>
-                       ))}
-                    </div>
-                 )}
               </div>
            </div>
         </div>

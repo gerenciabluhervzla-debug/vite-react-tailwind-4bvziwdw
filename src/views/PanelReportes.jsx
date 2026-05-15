@@ -17,8 +17,9 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const verTotalInventario = rol === ROLES.ADMIN;
   const verDinero = rol !== ROLES.DESPACHO;
 
+  // CORRECCIÓN: Filtramos Rechazados Y Anulados
   const validados = useMemo(() => {
-    return pedidos.filter(p => p.status !== 'Rechazado' && !p.esPublico);
+    return pedidos.filter(p => p.status !== 'Rechazado' && p.status !== 'Anulado' && !p.esPublico);
   }, [pedidos]);
 
   const pedidosFiltrados = useMemo(() => {
@@ -304,9 +305,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
   return (
     <div className="space-y-8 animate-in fade-in">
-      <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col gap-6 transition-colors">
+      <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col gap-6 transition-colors">
         
-        {/* ENCABEZADO Y TABS OPTIMIZADOS PARA ESCRITORIO */}
         <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
           <div>
             <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-2"><CalendarDays className="text-sky-600"/> Período del Reporte</h2>
@@ -314,7 +314,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           </div>
           
           <div className="flex flex-col sm:flex-row gap-4 w-full xl:w-auto items-start sm:items-center">
-            {/* Contenedor Flex con Scroll Horizontal Oculto para evitar Wrap forzado */}
             <div className="flex overflow-x-auto scrollbar-hide gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full sm:w-max">
               <button onClick={()=>setRangoRango('hoy')} className={`px-5 py-2.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${rangoRango === 'hoy' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Hoy</button>
               <button onClick={()=>setRangoRango('mes')} className={`px-5 py-2.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${rangoRango === 'mes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Mes Actual</button>
@@ -331,7 +330,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           </div>
         </div>
 
-        {/* INPUTS DE FECHA INDEPENDIENTES PARA NO ROMPER EL MENÚ */}
         {rangoRango === 'custom' && (
           <div className="flex flex-col sm:flex-row gap-4 items-center w-full animate-in slide-in-from-top-4 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
              <div className="flex-1 w-full">

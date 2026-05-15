@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, FileOutput, MessageSquare, ShieldCheck, Eye, X } from 'lucide-react';
-import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, FileOutput, MessageSquare, ShieldCheck, Eye, X, Ban } from 'lucide-react';
+import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy, setDoc, increment } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image'; 
 import { ROLES, BRAND_LOGO } from '../config/constants';
@@ -8,6 +8,7 @@ import { ROLES, BRAND_LOGO } from '../config/constants';
 export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado, db, appId, loggear, dialogs, perfil }) {
   const esAuditor = [ROLES.AUDITORIA, ROLES.ADMIN].includes(perfil?.role);
   const esAuditorPuro = perfil?.role === ROLES.AUDITORIA;
+  const puedeAnular = [ROLES.ADMIN, ROLES.DESPACHO].includes(perfil?.role);
   
   const [vistaDespacho, setVistaDespacho] = useState(esAuditorPuro ? 'historial_cierres' : 'pendientes');
 
@@ -125,6 +126,38 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     } else {
       dialogs.alert("El asesor de ventas no adjuntó la guía de MercadoLibre para este pedido.", "Guía Faltante");
     }
+  };
+
+  const anularEnvio = (pedido) => {
+    dialogs.prompt(`Estás a punto de CANCELAR el envío de ${pedido.clienteNombre}.\n\nIMPORTANTE: Como esta orden ya estaba en preparación, el sistema DEVOLVERÁ automáticamente los productos al inventario.\n\nEscribe el motivo de la cancelación a última hora:`, async (motivo) => {
+      if (!motivo) return;
+      
+      try {
+        const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
+        const updates = {};
+        Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { 
+            updates[itemKey] = { envios: increment(qty) }; 
+        });
+        if (Object.keys(updates).length > 0) { 
+            await setDoc(stockRef, updates, { merge: true }); 
+        }
+
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { 
+          status: 'Anulado', 
+          motivoAnulacion: `Cancelado en Despacho: ${motivo}`,
+          anuladoPor: perfil.nombre,
+          fechaAnulacion: Date.now(),
+          montoUsd: 0, montoVes: 0, 
+          notasAuditoria: [...(pedido.notasAuditoria || []), { fecha: Date.now(), texto: `ENVÍO CANCELADO/DEVUELTO: ${motivo}`, autor: perfil.nombre }]
+        });
+
+        loggear('ENVIO_ANULADO', `Despacho canceló envío de ${pedido.clienteNombre}`);
+        dialogs.alert("El envío ha sido anulado y la mercancía se ha devuelto al inventario del sistema.", "Operación Completada");
+      } catch(e) { 
+        console.error(e); 
+        dialogs.alert("Ocurrió un error al intentar anular el envío.", "Error"); 
+      }
+    }, "Cancelar y Devolver Mercancía");
   };
 
   const iniciarConteo = () => {
@@ -291,7 +324,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
   }, []);
 
-  // --- LÓGICA DE FECHAS (ATRASADO VS FUTURO) ---
   const parseDateVzla = (dateStr) => {
      if (!dateStr || dateStr === 'Sin Fecha') return 0;
      const parts = dateStr.split('/');
@@ -313,7 +345,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return map;
   }, [pedidos]);
 
-  // --- ORDENAMIENTO ASCENDENTE (1, 2, 3...) ---
   const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
   
   const pedidosOrdenados = useMemo(() => {
@@ -331,7 +362,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         <div className="w-full xl:w-auto">
           <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3 mb-4"><Truck className="text-sky-600"/> Logística de Envíos</h2>
           
-          {/* CORRECCIÓN MENÚ MÓVIL: Contenedor deslizable */}
           <div className="flex bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl w-full md:w-max overflow-x-auto scrollbar-hide">
             {!esAuditorPuro && <button onClick={() => setVistaDespacho('pendientes')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Por Empacar ({pedidosValidados.length})</button>}
             {!esAuditorPuro && <button onClick={() => setVistaDespacho('historial')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Enviados</button>}
@@ -370,7 +400,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
             const isLinkML = p.esMercadoLibre && !!p.linkGuiaML;
             const valorLinkGuia = isLinkML ? p.linkGuiaML : (guiasInput[p.id]?.link !== undefined ? guiasInput[p.id].link : (p.linkGuia || ''));
 
-            // CORRECCIÓN LOGICA FECHAS
             const timeDespacho = parseDateVzla(p.fechaDespacho);
             const timeHoy = parseDateVzla(todayStr);
 
@@ -395,7 +424,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                   <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-2">{p.courier}</div>
                   <div className="text-xs font-semibold text-slate-500 mt-2">Tel: {p.clienteTelefono}</div>
                   
-                  {/* CORRECCIÓN VISUAL "NO IMPRIMIR" Y "ATRASADO" */}
                   <div className={`text-[11px] font-bold uppercase tracking-wider mt-3 p-2 rounded-lg inline-block w-auto max-w-full break-words ${esParaManana && vistaDespacho === 'pendientes' ? 'bg-red-100 text-red-700 border border-red-200' : esAtrasado && vistaDespacho === 'pendientes' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'text-slate-500 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
                     Sale: {p.fechaDespacho} 
                     {esParaManana && vistaDespacho === 'pendientes' && <span className="block sm:inline sm:ml-1 mt-1 sm:mt-0">(NO IMPRIMIR HOY)</span>}
@@ -431,14 +459,20 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
                 <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0 bg-slate-50/50 dark:bg-slate-900/30 p-4 lg:p-0 rounded-2xl lg:bg-transparent lg:rounded-none border border-slate-200 dark:border-slate-700 lg:border-none">
                   {p.status === 'Despachado' ? (
-                    <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm w-full">
+                    <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm w-full h-full flex flex-col">
                       <div className="text-sm mb-4"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100 text-lg break-all">{p.guia}</span></div>
                       <div className="flex flex-col gap-3 mb-5">
                         {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors truncate"><FileText size={16} className="shrink-0"/> Ver Recibo Digital</a>}
                         {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors truncate"><Camera size={16} className="shrink-0"/> Ver Foto del Paquete</a>}
                       </div>
-                      <div className="text-xs text-emerald-600 dark:text-emerald-400 font-black mb-3 uppercase tracking-widest flex items-center gap-1"><CheckCircle size={14}/> Despachado OK</div>
-                      <button onClick={() => cambiarEstado(p.id, 'Validado')} className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors">Corregir Información</button>
+                      <div className="text-xs text-emerald-600 dark:text-emerald-400 font-black mb-auto uppercase tracking-widest flex items-center gap-1"><CheckCircle size={14}/> Despachado OK</div>
+                      
+                      <div className="flex flex-col lg:flex-row gap-3 mt-4">
+                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="flex-1 text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors text-left lg:text-center">Corregir</button>
+                        {puedeAnular && (
+                           <button onClick={() => anularEnvio(p)} className="flex-1 text-red-400 hover:text-red-600 dark:hover:text-red-400 text-xs font-bold flex items-center justify-start lg:justify-end gap-1 transition-colors"><Ban size={14}/> Cancelar Envío</button>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm flex flex-col gap-3 w-full h-full justify-between">
@@ -460,13 +494,21 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                           </div>
                       </div>
 
-                      <div className="flex flex-col lg:flex-row gap-2 mt-2">
-                         <button onClick={() => guardarAvance(p)} className="flex-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                           <Save size={16}/> Guardar Avance
-                         </button>
-                         <button onClick={() => guardarGuia(p)} className="flex-1 bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white text-xs font-bold py-3 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
-                           <Truck size={16}/> Archivar
-                         </button>
+                      <div className="flex flex-col gap-2 mt-2">
+                         <div className="flex flex-col lg:flex-row gap-2">
+                           <button onClick={() => guardarAvance(p)} className="flex-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                             <Save size={16}/> Guardar Avance
+                           </button>
+                           <button onClick={() => guardarGuia(p)} className="flex-1 bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white text-xs font-bold py-3 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
+                             <Truck size={16}/> Archivar
+                           </button>
+                         </div>
+                         
+                         {puedeAnular && (
+                            <button onClick={() => anularEnvio(p)} className="w-full bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:hover:bg-red-900/40 dark:text-red-400 py-2.5 rounded-xl text-xs font-bold transition-colors border border-red-200 dark:border-red-800/50 flex justify-center items-center gap-1.5 mt-1">
+                               <Ban size={14}/> Cancelar Envío (Devolver Inventario)
+                            </button>
+                         )}
                       </div>
                     </div>
                   )}
