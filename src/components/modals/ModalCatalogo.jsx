@@ -8,6 +8,18 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
 
+  // FUNCIÓN PARA RENDERIZAR IMÁGENES DE DRIVE DIRECTAMENTE
+  const getDirectUrl = (url) => {
+    if (!url) return null;
+    if (url.includes('drive.google.com/file/d/')) {
+      const match = url.match(/\/d\/(.+?)\//);
+      if (match && match[1]) {
+        return `https://drive.google.com/uc?export=view&id=${match[1]}`;
+      }
+    }
+    return url;
+  };
+
   const updateQty = (key, delta) => { 
     setCarrito(prev => { 
       const actual = prev[key] || 0;
@@ -155,8 +167,9 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
                           const k = `${p.nombre}|${pres}`; const q = carrito[k] || 0;
                           const disp = stock ? (typeof stock[k] === 'object' ? stock[k].envios : (stock[k]||0)) : 0;
                           
-                          // MODO COMPATIBILIDAD: Busca en el arreglo nuevo, si no, busca en la variable vieja
-                          const imageUrl = (p.imagenes && p.imagenes[i]) ? p.imagenes[i] : (i === 0 && p.imagen ? p.imagen : null);
+                          // APLICANDO LA TRANSFORMACIÓN DEL ENLACE DE DRIVE
+                          const rawUrl = (p.imagenes && p.imagenes[i]) ? p.imagenes[i] : (i === 0 && p.imagen ? p.imagen : null);
+                          const imageUrl = getDirectUrl(rawUrl);
                           
                           const originalPrice = p.precios[i] || 0;
                           const discountedPrice = originalPrice * (1 - globalDiscountPercent / 100);

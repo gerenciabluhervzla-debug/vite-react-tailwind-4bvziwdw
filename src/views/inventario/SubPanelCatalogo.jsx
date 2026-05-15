@@ -11,6 +11,18 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
   const [modoEdicion, setModoEdicion] = useState(null); 
   const [subiendoIdx, setSubiendoIdx] = useState(null);
 
+  // FUNCIÓN PARA RENDERIZAR IMÁGENES DE DRIVE DIRECTAMENTE
+  const getDirectUrl = (url) => {
+    if (!url) return null;
+    if (url.includes('drive.google.com/file/d/')) {
+      const match = url.match(/\/d\/(.+?)\//);
+      if (match && match[1]) {
+        return `https://drive.google.com/uc?export=view&id=${match[1]}`;
+      }
+    }
+    return url;
+  };
+
   const cargarEdicion = (catNombre, prod) => {
     setForm({ 
       categoria: catNombre, 
@@ -150,7 +162,7 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
                          <span className="text-[10px] font-black uppercase text-slate-500 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded w-full text-center truncate">{pres}</span>
                          {form.imagenes && form.imagenes[idx] ? (
                             <div className="relative group">
-                               <img src={form.imagenes[idx]} className="h-20 w-20 object-cover rounded-xl shadow-md border-2 border-emerald-400" alt={pres} />
+                               <img src={getDirectUrl(form.imagenes[idx])} className="h-20 w-20 object-cover rounded-xl shadow-md border-2 border-emerald-400 bg-white" alt={pres} />
                                <button type="button" onClick={() => eliminarImagen(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"><Trash2 size={12}/></button>
                             </div>
                          ) : (
@@ -185,8 +197,8 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
                     <div className="font-bold text-slate-800 dark:text-slate-100 text-base">{p.nombre}</div>
                     <div className="flex flex-wrap gap-2 mt-3">
                        {p.presentaciones.map((pres, i) => {
-                         // MODO COMPATIBILIDAD AQUI TAMBIEN
-                         const imageUrl = (p.imagenes && p.imagenes[i]) ? p.imagenes[i] : (i === 0 && p.imagen ? p.imagen : null);
+                         const rawUrl = (p.imagenes && p.imagenes[i]) ? p.imagenes[i] : (i === 0 && p.imagen ? p.imagen : null);
+                         const imageUrl = getDirectUrl(rawUrl);
                          return (
                            <div key={pres} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 pr-3 rounded-lg shadow-sm overflow-hidden">
                              {imageUrl ? (

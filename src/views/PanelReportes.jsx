@@ -17,7 +17,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const verTotalInventario = rol === ROLES.ADMIN;
   const verDinero = rol !== ROLES.DESPACHO;
 
-  // CORRECCIÓN: Filtramos Rechazados Y Anulados
   const validados = useMemo(() => {
     return pedidos.filter(p => p.status !== 'Rechazado' && p.status !== 'Anulado' && !p.esPublico);
   }, [pedidos]);
@@ -106,7 +105,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              telefono: p.clienteTelefono,
              montoUsd: p.montoUsd || 0,
              montoVes: p.montoVes || 0,
-             moneda: p.moneda
+             moneda: p.moneda,
+             origen: p.origenPedido || 'Sin Origen'
          });
       });
       return Object.values(map).sort((a,b) => (b.totalUsd + b.totalZelle) - (a.totalUsd + a.totalZelle));
@@ -246,7 +246,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
             </p>
          </div>
          <table>
-            <thead><tr><th style="width:30%;">Cliente Atendido</th><th style="width:25%;">Teléfono</th><th style="width:20%; text-align:right;">Monto Bs</th><th style="width:25%; text-align:right;">Monto USD / Zelle</th></tr></thead>
+            <thead><tr><th style="width:25%;">Cliente Atendido</th><th style="width:20%;">Teléfono</th><th style="width:20%;">Origen Pedido</th><th style="width:15%; text-align:right;">Monto Bs</th><th style="width:20%; text-align:right;">Monto USD / Zelle</th></tr></thead>
             <tbody>
        `;
        asesora.clientes.forEach(c => {
@@ -254,6 +254,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           html += `<tr>
              <td><strong>${c.nombre}</strong></td>
              <td>${c.telefono}</td>
+             <td><span style="background: #eef2ff; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; color: #4338ca;">${c.origen}</span></td>
              <td style="text-align:right; color:#059669;">${isZelle ? '-' : c.montoVes.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
              <td style="text-align:right; font-weight:bold;">$${c.montoUsd.toFixed(2)} ${isZelle ? '<span class="zelle-tag">ZELLE</span>' : ''}</td>
           </tr>`;
@@ -266,8 +267,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         <table>
           <thead>
             <tr>
-              <th style="width: 20%;">Cliente</th>
-              <th style="width: 15%;">Ref. Bancaria</th>
+              <th style="width: 20%;">Cliente / Asesora</th>
+              <th style="width: 15%;">Ref. / Origen</th>
               <th style="width: 45%;">Productos Facturados</th>
               <th style="text-align:right; width: 10%;">Bs</th>
               <th style="text-align:right; width: 10%;">USD</th>
@@ -280,8 +281,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
        const isZelle = p.moneda === 'ZELLE';
        html += `<tr>
-         <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${new Date(p.fechaCreacion).toLocaleDateString('es-VE')}</span></td>
-         <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia || 'N/A'}</span></td>
+         <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${new Date(p.fechaCreacion).toLocaleDateString('es-VE')}</span><br><span style="font-size:10px; font-weight:bold;">Asesora: ${p.asesora}</span></td>
+         <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia || 'N/A'}</span><br><span style="font-size:9px; font-weight:bold; color:#4338ca; display:block; margin-top:4px;">${p.origenPedido || 'Sin Origen'}</span></td>
          <td class="products-list">${prodsFormat}</td>
          <td style="text-align:right; font-weight:bold; color:#059669;">${isZelle ? '-' : (p.montoVes || 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
          <td style="text-align:right; font-weight:900; font-size:13px;">$${(p.montoUsd || 0).toFixed(2)} ${isZelle ? '<br><span class="zelle-tag">ZELLE</span>' : ''}</td>
@@ -305,7 +306,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
   return (
     <div className="space-y-8 animate-in fade-in">
-      <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col gap-6 transition-colors">
+      <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col gap-6 transition-colors">
         
         <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
           <div>
@@ -423,6 +424,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
+      {/* NUEVA TABLA DE ASESORAS */}
       {verDinero && (
         <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
            <div className="flex items-center gap-2 mb-6">
@@ -430,39 +432,59 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">Control de Ventas por Asesoras</h3>
            </div>
            
-           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {ventasPorAsesora.length === 0 ? (
-                 <div className="col-span-full p-8 text-center text-slate-400 font-bold italic">No hay ventas de asesoras en este periodo.</div>
-              ) : ventasPorAsesora.map(asesora => (
-                 <div key={asesora.nombre} className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 shadow-sm">
-                    <div className="font-black text-lg text-slate-800 dark:text-slate-100 mb-4 pb-2 border-b border-slate-200 dark:border-slate-800">
-                       {asesora.nombre.toUpperCase()}
-                    </div>
-                    <div className="space-y-2 mb-4">
-                       <div className="flex justify-between text-sm">
-                          <span className="text-slate-500 font-medium">En Dólares:</span>
-                          <span className="font-black text-slate-800 dark:text-white">${asesora.totalUsd.toFixed(2)}</span>
-                       </div>
-                       <div className="flex justify-between text-sm">
-                          <span className="text-purple-600 font-medium">Por Zelle:</span>
-                          <span className="font-black text-purple-700 dark:text-purple-400">${asesora.totalZelle.toFixed(2)}</span>
-                       </div>
-                       <div className="flex justify-between text-sm">
-                          <span className="text-emerald-600 font-medium">En Bolívares:</span>
-                          <span className="font-bold text-emerald-700 dark:text-emerald-400">Bs. {asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2})}</span>
-                       </div>
-                    </div>
-                    <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Clientes Atendidos ({asesora.clientes.length}):</div>
-                    <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1 scrollbar-hide">
-                       {asesora.clientes.map((c, i) => (
-                          <div key={i} className="flex justify-between items-center text-xs bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700/50">
-                             <span className="font-semibold truncate pr-2">{c.nombre}</span>
-                             <span className={`font-black ${c.moneda==='ZELLE' ? 'text-purple-600' : 'text-sky-600'}`}>${c.montoUsd.toFixed(2)}</span>
-                          </div>
-                       ))}
-                    </div>
-                 </div>
-              ))}
+           <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+             <table className="w-full text-left text-sm border-collapse min-w-[800px]">
+                <thead>
+                  <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-b dark:border-slate-700">
+                    <th className="p-4 font-black tracking-wide">Cliente y Teléfono</th>
+                    <th className="p-4 font-black tracking-wide">Origen del Pedido</th>
+                    <th className="p-4 font-black tracking-wide text-right">Monto Bs</th>
+                    <th className="p-4 font-black tracking-wide text-right">Monto USD / Zelle</th>
+                  </tr>
+                </thead>
+                <tbody>
+                   {ventasPorAsesora.length === 0 ? (
+                      <tr><td colSpan="4" className="p-8 text-center text-slate-400 font-bold italic">No hay ventas registradas en este periodo.</td></tr>
+                   ) : ventasPorAsesora.map((asesora) => (
+                      <React.Fragment key={asesora.nombre}>
+                         <tr className="bg-sky-50 dark:bg-sky-900/30 border-y border-sky-100 dark:border-sky-800/50">
+                            <td colSpan="4" className="p-4">
+                               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                                  <span className="font-black text-lg text-sky-800 dark:text-sky-300 uppercase tracking-tighter">{asesora.nombre}</span>
+                                  <div className="flex flex-wrap gap-4 text-xs font-bold text-slate-600 dark:text-slate-300">
+                                     <span className="bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border dark:border-slate-700 shadow-sm">Efectivo: <span className="text-slate-900 dark:text-white">${asesora.totalUsd.toFixed(2)}</span></span>
+                                     <span className="bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-3 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800/50 shadow-sm">Zelle: ${asesora.totalZelle.toFixed(2)}</span>
+                                     <span className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800/50 shadow-sm">Bs. {asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2})}</span>
+                                  </div>
+                               </div>
+                            </td>
+                         </tr>
+                         {asesora.clientes.map((c, i) => (
+                            <tr key={i} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                               <td className="p-4">
+                                  <div className="font-bold text-slate-800 dark:text-slate-200">{c.nombre}</div>
+                                  <div className="text-xs text-slate-500 font-medium">{c.telefono}</div>
+                               </td>
+                               <td className="p-4">
+                                  <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest border border-indigo-200 dark:border-indigo-800">
+                                     {c.origen}
+                                  </span>
+                               </td>
+                               <td className="p-4 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                                  {c.moneda === 'ZELLE' ? '-' : `Bs. ${c.montoVes.toLocaleString('es-VE', {minimumFractionDigits:2})}`}
+                               </td>
+                               <td className="p-4 text-right">
+                                  <span className={`font-black text-base ${c.moneda==='ZELLE' ? 'text-purple-600 dark:text-purple-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                                     ${c.montoUsd.toFixed(2)}
+                                  </span>
+                                  {c.moneda === 'ZELLE' && <span className="ml-2 text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/50 px-1.5 py-0.5 rounded font-black border border-purple-200 dark:border-purple-800">ZELLE</span>}
+                               </td>
+                            </tr>
+                         ))}
+                      </React.Fragment>
+                   ))}
+                </tbody>
+             </table>
            </div>
         </div>
       )}

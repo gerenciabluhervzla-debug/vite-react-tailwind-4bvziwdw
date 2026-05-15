@@ -14,10 +14,10 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
-  const [showPaymentInfo, setShowPaymentInfo] = useState(false); // NUEVO ESTADO PARA EL MODAL
+  const [showPaymentInfo, setShowPaymentInfo] = useState(false);
 
   const [form, setForm] = useState({
-    nombre: '', cedula: '', telefono: '', agencia: '', direccion: '', referencia: '', comprobanteUrl: ''
+    nombre: '', cedula: '', telefono: '', agencia: '', direccion: '', referencia: '', comprobanteUrl: '', metodoPago: 'pago_movil'
   });
 
   const tasa = parseFloat(config?.tasaDia) || 1;
@@ -30,6 +30,18 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
      hoyTimestamp <= new Date(config.descuentoGlobalFin + 'T23:59:59').getTime();
 
   const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
+
+  // FUNCIÓN PARA RENDERIZAR IMÁGENES DE DRIVE DIRECTAMENTE
+  const getDirectUrl = (url) => {
+    if (!url) return null;
+    if (url.includes('drive.google.com/file/d/')) {
+      const match = url.match(/\/d\/(.+?)\//);
+      if (match && match[1]) {
+        return `https://drive.google.com/uc?export=view&id=${match[1]}`;
+      }
+    }
+    return url;
+  };
 
   const updateQty = (key, delta) => {
     setCarrito(prev => {
@@ -142,7 +154,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
   const limpiarTexto = (str) => str ? str.replace(/[<>]/g, "") : "";
 
-  // FUNCIÓN PARA COPIAR DATOS BANCARIOS AL PORTAPAPELES
   const copiarDatosPago = () => {
     const textoPago = "Banco: Banesco 0134\nTeléfono: 04241138092\nCédula: 19603402";
     if (navigator.clipboard && window.isSecureContext) {
@@ -161,7 +172,9 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       return dialogs.alert("Por favor, llena todos los datos obligatorios de envío.");
     }
     if (!form.referencia || !form.comprobanteUrl) {
-      return dialogs.alert("La referencia bancaria y la captura del comprobante son obligatorias para procesar el pedido.");
+      return dialogs.alert(form.metodoPago === 'zelle' 
+        ? "El correo del titular y la captura del comprobante Zelle son obligatorias."
+        : "La referencia bancaria y la captura del comprobante son obligatorias para procesar el pedido.");
     }
 
     setEnviando(true);
@@ -183,6 +196,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       }
 
       const productosString = lineas.join('\n');
+      const isZelle = form.metodoPago === 'zelle';
 
       const nuevoPedido = {
         clienteNombre: limpiarTexto(form.nombre),
@@ -193,12 +207,12 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         esMercadoLibre: false,
         esRegalo: false,
         asesora: 'Portal Web',
-        moneda: 'VES', 
+        moneda: isZelle ? 'ZELLE' : 'VES', 
         monto: subtotalUsd,
         montoUsd: subtotalUsd,
-        montoVes: totalVes,
+        montoVes: isZelle ? 0 : totalVes, // Si es Zelle no tiene equivalente en Bs
         tasaAplicada: tasa,
-        referencia: form.referencia,
+        referencia: form.referencia, // Para Zelle este campo guarda el correo/nombre
         linkComprobantePago: form.comprobanteUrl,
         productos: productosString,
         carritoObj: finalCarrito,
@@ -214,7 +228,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       dialogs.alert("¡Tu pedido y pago han sido enviados con éxito! Nuestro equipo lo procesará en breve.", "¡Gracias por tu compra!");
       setCarrito({});
       setIsCartOpen(false);
-      setForm({ nombre: '', cedula: '', telefono: '', agencia: '', direccion: '', referencia: '', comprobanteUrl: '' });
+      setForm({ nombre: '', cedula: '', telefono: '', agencia: '', direccion: '', referencia: '', comprobanteUrl: '', metodoPago: 'pago_movil' });
       
     } catch (error) {
       console.error(error);
@@ -309,7 +323,8 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                         const originalPrice = prod.precios[i];
                         const discountedPrice = originalPrice * (1 - globalDiscountPercent / 100);
 
-                        const imgUrl = prod.imagenes && prod.imagenes[i] ? prod.imagenes[i] : null;
+                        const rawUrl = (prod.imagenes && prod.imagenes[i]) ? prod.imagenes[i] : (i === 0 && prod.imagen ? prod.imagen : null);
+                        const imgUrl = getDirectUrl(rawUrl);
 
                         return (
                           <div key={pres} className="flex flex-col gap-3 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border dark:border-slate-700 transition-colors">
@@ -364,7 +379,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         )}
       </main>
 
-      {/* CARRITO FLOTANTE */}
       {isCartOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setIsCartOpen(false)}></div>
@@ -444,15 +458,53 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                      )}
 
                      <h3 className="text-xs font-black uppercase text-slate-400 mt-6 mb-2 border-b dark:border-slate-700 pb-2">Información de Pago (Obligatorio)</h3>
-                     <p className="text-[10px] text-slate-500 mb-3">Adjunta la referencia y captura del pago móvil o transferencia para procesar tu orden.</p>
                      
-                     {/* BOTÓN PARA ABRIR MODAL DE DATOS DE PAGO */}
-                     <button type="button" onClick={() => setShowPaymentInfo(true)} className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-400 py-3 rounded-xl font-bold text-xs transition-colors mb-4 flex items-center justify-center gap-2 border border-indigo-200 dark:border-indigo-800">
-                        <CheckCircle size={16} /> Ver Datos para el Pago
-                     </button>
+                     {/* SELECTOR DE MÉTODO DE PAGO */}
+                     <div className="flex flex-col sm:flex-row gap-3 mb-4 mt-2">
+                       <label className={`flex-1 flex items-center justify-center text-center gap-2 p-3 border-2 rounded-xl cursor-pointer font-bold text-sm transition-colors ${form.metodoPago === 'pago_movil' ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:border-sky-500 dark:text-sky-400' : 'border-slate-200 dark:border-slate-700 text-slate-500'}`}>
+                         <input type="radio" name="metodoPago" value="pago_movil" checked={form.metodoPago === 'pago_movil'} onChange={e=>setForm({...form, metodoPago: e.target.value, referencia: ''})} className="hidden"/>
+                         Pago Móvil / Transf.
+                       </label>
+                       <label className={`flex-1 flex items-center justify-center gap-2 p-3 border-2 rounded-xl cursor-pointer font-bold text-sm transition-colors ${form.metodoPago === 'zelle' ? 'border-purple-500 bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:border-purple-500 dark:text-purple-400' : 'border-slate-200 dark:border-slate-700 text-slate-500'}`}>
+                         <input type="radio" name="metodoPago" value="zelle" checked={form.metodoPago === 'zelle'} onChange={e=>setForm({...form, metodoPago: e.target.value, referencia: ''})} className="hidden"/>
+                         Zelle
+                       </label>
+                     </div>
 
-                     {darkMode ? <InputDark label="Referencia Bancaria" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} required placeholder="Ej: 1234 Banesco"/> 
-                               : <Input label="Referencia Bancaria" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} required placeholder="Ej: 1234 Banesco"/>}
+                     {/* INFO DE PAGO DINÁMICA */}
+                     {form.metodoPago === 'pago_movil' ? (
+                       <button type="button" onClick={() => setShowPaymentInfo(true)} className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-400 py-3 rounded-xl font-bold text-xs transition-colors mb-4 flex items-center justify-center gap-2 border border-indigo-200 dark:border-indigo-800">
+                          <CheckCircle size={16} /> Ver Datos para Pago Móvil / Transferencia
+                       </button>
+                     ) : (
+                       <div className="bg-purple-50 dark:bg-purple-900/20 p-5 rounded-xl border border-purple-200 dark:border-purple-800/50 mb-4">
+                          <div className="text-sm font-bold text-purple-800 dark:text-purple-300 mb-1">Nombre: <span className="font-black">Desiree Duque</span></div>
+                          <div className="text-sm font-bold text-purple-800 dark:text-purple-300 mb-3">Correo: <span className="font-black select-all">mianunovero25@gmail.com</span></div>
+                          <div className="text-[10px] text-purple-600 dark:text-purple-400 font-bold uppercase tracking-widest leading-relaxed">
+                             ⚠️ IMPORTANTE: La validación puede demorar hasta 24H.<br/>
+                             Por favor subir el comprobante abajo.
+                          </div>
+                       </div>
+                     )}
+
+                     {/* INPUT DE REFERENCIA DINÁMICO */}
+                     {darkMode ? (
+                       <InputDark 
+                         label={form.metodoPago === 'zelle' ? "Correo o Número (Titular Zelle)" : "Referencia Bancaria"} 
+                         value={form.referencia} 
+                         onChange={e=>setForm({...form, referencia: e.target.value})} 
+                         required 
+                         placeholder={form.metodoPago === 'zelle' ? "Ej: pedro@gmail.com" : "Ej: 1234 Banesco"}
+                       /> 
+                     ) : (
+                       <Input 
+                         label={form.metodoPago === 'zelle' ? "Correo o Número (Titular Zelle)" : "Referencia Bancaria"} 
+                         value={form.referencia} 
+                         onChange={e=>setForm({...form, referencia: e.target.value})} 
+                         required 
+                         placeholder={form.metodoPago === 'zelle' ? "Ej: pedro@gmail.com" : "Ej: 1234 Banesco"}
+                       />
+                     )}
                      
                      <div className="mt-2">
                         <label className={`flex items-center justify-center gap-2 w-full p-4 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-sm ${form.comprobanteUrl ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-slate-300 dark:border-slate-600 text-slate-500 hover:border-sky-500 hover:text-sky-600'}`}>
@@ -480,7 +532,11 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                    <span className="text-3xl font-black text-slate-800 dark:text-white">${subtotalUsd.toFixed(2)}</span>
                  </div>
                </div>
-               <div className="text-right text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-6">Equivale a: Bs. {totalVes.toFixed(2)}</div>
+               
+               {/* Mostrar equivalencia en Bs solo si es Pago Movil */}
+               <div className="text-right text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-6 h-5">
+                 {form.metodoPago === 'pago_movil' && `Equivale a: Bs. ${totalVes.toFixed(2)}`}
+               </div>
                
                <button form="checkout-form" type="submit" disabled={totalItems === 0 || enviando || subiendoFoto} className="w-full bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 disabled:bg-slate-400 dark:disabled:bg-slate-700 text-white font-black py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 uppercase tracking-widest transition-all hover:-translate-y-1 disabled:opacity-50 disabled:hover:translate-y-0">
                  {enviando ? <><Loader2 className="animate-spin"/> Procesando...</> : 'Enviar Pedido y Comprobante'}
@@ -490,7 +546,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         </div>
       )}
 
-      {/* MODAL DE DATOS DE PAGO */}
+      {/* MODAL DE DATOS DE PAGO MOVIL */}
       {showPaymentInfo && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-in fade-in">
            <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 border border-slate-200 dark:border-slate-700">
@@ -499,7 +555,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                  <button onClick={() => setShowPaymentInfo(false)} className="p-2 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={18}/></button>
               </div>
               <div className="p-6 flex flex-col items-center">
-                 <img src="/pago-movil.jpeg" alt="Datos de Pago" className="w-full max-w-[220px] h-auto object-contain rounded-xl shadow-sm mb-6 border border-slate-200 dark:border-slate-700" />
+                 <img src="/pago-movil.jpeg" alt="Datos de Pago" className="w-full max-w-[220px] h-auto object-contain rounded-xl shadow-sm mb-6 border border-slate-200 dark:border-slate-700 bg-white" />
                  
                  <div className="bg-slate-50 dark:bg-slate-900 p-5 rounded-xl w-full border border-slate-100 dark:border-slate-700 mb-5 text-center">
                     <div className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2">Banco: <span className="font-black text-slate-800 dark:text-white">Banesco 0134</span></div>
