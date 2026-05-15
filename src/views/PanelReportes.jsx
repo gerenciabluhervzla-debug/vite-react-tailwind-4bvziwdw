@@ -69,7 +69,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       if (p.esRegalo) {
         regalosUSD += valorOriginalUsd;
       } else {
-        // --- SEPARACIÓN DEL ZELLE ---
         if (p.moneda === 'ZELLE') {
            ventasZelle += (p.montoUsd || 0);
         } else {
@@ -305,33 +304,44 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
   return (
     <div className="space-y-8 animate-in fade-in">
-      <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 transition-colors">
-        <div>
-          <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-2"><CalendarDays className="text-sky-600"/> Período del Reporte</h2>
-          <p className="text-xs font-medium text-slate-500">Las métricas se recalcularán basadas en las fechas seleccionadas.</p>
-        </div>
+      <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col gap-6 transition-colors">
         
-        <div className="flex flex-col md:flex-row flex-wrap gap-4 w-full xl:w-auto items-start md:items-center">
-          <div className="flex flex-wrap gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full md:w-auto">
-            <button onClick={()=>setRangoRango('hoy')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'hoy' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Hoy</button>
-            <button onClick={()=>setRangoRango('mes')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'mes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Mes Actual</button>
-            <button onClick={()=>setRangoRango('año')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'año' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Este Año</button>
-            <button onClick={()=>setRangoRango('todo')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'todo' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Histórico Total</button>
-            <button onClick={()=>setRangoRango('custom')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${rangoRango === 'custom' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Personalizado</button>
+        {/* ENCABEZADO Y TABS OPTIMIZADOS PARA ESCRITORIO */}
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
+          <div>
+            <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-2"><CalendarDays className="text-sky-600"/> Período del Reporte</h2>
+            <p className="text-xs font-medium text-slate-500">Las métricas se recalcularán basadas en las fechas seleccionadas.</p>
           </div>
           
-          {verDinero && (
-            <button onClick={imprimirPDFVentas} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 text-xs shadow-md transition-colors w-full md:w-auto">
-               <FileOutput size={16}/> Exportar PDF
-            </button>
-          )}
+          <div className="flex flex-col sm:flex-row gap-4 w-full xl:w-auto items-start sm:items-center">
+            {/* Contenedor Flex con Scroll Horizontal Oculto para evitar Wrap forzado */}
+            <div className="flex overflow-x-auto scrollbar-hide gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full sm:w-max">
+              <button onClick={()=>setRangoRango('hoy')} className={`px-5 py-2.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${rangoRango === 'hoy' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Hoy</button>
+              <button onClick={()=>setRangoRango('mes')} className={`px-5 py-2.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${rangoRango === 'mes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Mes Actual</button>
+              <button onClick={()=>setRangoRango('año')} className={`px-5 py-2.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${rangoRango === 'año' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Este Año</button>
+              <button onClick={()=>setRangoRango('todo')} className={`px-5 py-2.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${rangoRango === 'todo' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Histórico Total</button>
+              <button onClick={()=>setRangoRango('custom')} className={`px-5 py-2.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${rangoRango === 'custom' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Personalizado</button>
+            </div>
+            
+            {verDinero && (
+              <button onClick={imprimirPDFVentas} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 text-xs shadow-md transition-colors w-full sm:w-auto shrink-0">
+                 <FileOutput size={16}/> Exportar PDF
+              </button>
+            )}
+          </div>
         </div>
 
+        {/* INPUTS DE FECHA INDEPENDIENTES PARA NO ROMPER EL MENÚ */}
         {rangoRango === 'custom' && (
-          <div className="flex gap-4 items-center w-full xl:w-auto animate-in slide-in-from-left-4">
-             <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="p-2.5 text-xs font-bold rounded-xl border-2 border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:border-sky-500" />
-             <span className="text-slate-400 font-black">a</span>
-             <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="p-2.5 text-xs font-bold rounded-xl border-2 border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:border-sky-500" />
+          <div className="flex flex-col sm:flex-row gap-4 items-center w-full animate-in slide-in-from-top-4 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
+             <div className="flex-1 w-full">
+               <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2 block">Desde (Fecha)</label>
+               <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="w-full p-3 text-sm font-bold rounded-xl border-2 border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:border-sky-500 transition-colors" />
+             </div>
+             <div className="flex-1 w-full">
+               <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2 block">Hasta (Fecha)</label>
+               <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="w-full p-3 text-sm font-bold rounded-xl border-2 border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:border-sky-500 transition-colors" />
+             </div>
           </div>
         )}
       </div>
@@ -348,7 +358,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                   <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
                </div>
 
-               {/* NUEVO BLOQUE ZELLE */}
                <div className="bg-purple-800 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-purple-950 relative overflow-hidden">
                   <div className="relative z-10">
                     <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-purple-200 mb-1">Ventas ZELLE ($)</div>
@@ -416,7 +425,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
-      {/* NUEVA SECCIÓN: RENDIMIENTO POR ASESORAS */}
       {verDinero && (
         <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
            <div className="flex items-center gap-2 mb-6">
@@ -447,7 +455,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                        </div>
                     </div>
                     <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Clientes Atendidos ({asesora.clientes.length}):</div>
-                    <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                    <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1 scrollbar-hide">
                        {asesora.clientes.map((c, i) => (
                           <div key={i} className="flex justify-between items-center text-xs bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700/50">
                              <span className="font-semibold truncate pr-2">{c.nombre}</span>

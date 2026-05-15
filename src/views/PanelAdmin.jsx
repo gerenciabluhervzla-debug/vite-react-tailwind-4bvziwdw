@@ -107,7 +107,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                try {
                    const data = JSON.parse(event.target.result);
 
-                   // Restaurar Colecciones
                    const colecciones = ['pedidos', 'cierres_inventario', 'movimientos', 'logs', 'users'];
                    for (const col of colecciones) {
                        if (data[col]) {
@@ -118,14 +117,12 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        }
                    }
 
-                   // Restaurar Inventario
                    if (data.inventario) {
                        if (data.inventario.catalogo) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), data.inventario.catalogo);
                        if (data.inventario.stock) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), data.inventario.stock);
                        if (data.inventario.notas) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), data.inventario.notas);
                    }
 
-                   // Restaurar Configuración
                    if (data.config) {
                        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), data.config);
                    }
@@ -146,7 +143,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         }
     }, "Confirmación Requerida");
     
-    // Reseteamos el input file para que permita volver a seleccionar el mismo archivo si es necesario
     e.target.value = '';
   };
   // ------------------------------------------------
@@ -360,7 +356,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
            </div>
          )}
 
-         {/* BLOQUE: RESPALDOS Y RESTAURACIÓN DEL SISTEMA */}
          {esAdminSupremo && (
            <div className="bg-slate-900 text-white p-8 rounded-[2rem] shadow-xl relative overflow-hidden border-4 border-slate-700 flex flex-col justify-center h-full">
               <Database size={120} className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none"/>
@@ -398,31 +393,33 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
       <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-sm">
         
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
+        {/* CORRECCIÓN VISUAL: ESTILOS OPTIMIZADOS PARA ESCRITORIO EN LAS TABS */}
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-6 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
           <div>
             <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><CheckSquare className="text-sky-600"/> Validación y Auditoría</h2>
           </div>
-          <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-full md:w-auto overflow-x-auto">
-            {esAdmin && <button onClick={() => setVistaAdmin('pendientes')} className={`px-5 py-2.5 font-bold rounded-lg text-sm whitespace-nowrap transition-colors ${vistaAdmin === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500'}`}>Pendientes ({pendientes.length})</button>}
-            <button onClick={() => setVistaAdmin('historial')} className={`px-5 py-2.5 font-bold rounded-lg text-sm whitespace-nowrap transition-colors ${vistaAdmin === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500'}`}>Historial General</button>
-            {esAuditor && <button onClick={() => setVistaAdmin('auditoria')} className={`px-5 py-2.5 font-bold rounded-lg text-sm whitespace-nowrap transition-colors ${vistaAdmin === 'auditoria' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500'}`}>Diario de Auditoría</button>}
+          
+          <div className="flex overflow-x-auto scrollbar-hide gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full sm:w-max">
+            {esAdmin && <button onClick={() => setVistaAdmin('pendientes')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Pendientes ({pendientes.length})</button>}
+            <button onClick={() => setVistaAdmin('historial')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial General</button>
+            {esAuditor && <button onClick={() => setVistaAdmin('auditoria')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'auditoria' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Diario de Auditoría</button>}
           </div>
         </div>
 
         {/* FILTRO DE FECHAS EN HISTORIAL */}
         {vistaAdmin === 'historial' && (
           <div className="flex flex-col sm:flex-row gap-4 mb-8 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
-            <div className="flex-1">
+            <div className="flex-1 w-full">
                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Desde (Fecha)</label>
-               <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm" />
+               <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors" />
             </div>
-            <div className="flex-1">
+            <div className="flex-1 w-full">
                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Hasta (Fecha)</label>
-               <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm" />
+               <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors" />
             </div>
             <div className="flex items-end pb-1 w-full sm:w-auto">
                {(fechaInicio !== hoyStr || fechaFin !== hoyStr) && (
-                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 py-3 px-4 rounded-xl w-full">Limpiar (Ver Hoy)</button>
+                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 py-3 px-6 rounded-xl w-full transition-colors">Ver Solo Hoy</button>
                )}
             </div>
           </div>
@@ -437,7 +434,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  
                  <div className="absolute top-5 right-6"><StatusBadge status={p.status}/></div>
 
-                 {/* Columna 1: Pedido */}
                  <div className="lg:col-span-5 flex flex-col justify-start">
                    <div className="font-bold text-xl text-slate-800 dark:text-slate-100 pr-24 leading-tight">{p.clienteNombre}</div>
                    <div className="text-[11px] font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1 mb-3">
@@ -454,7 +450,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    </div>
                  </div>
 
-                 {/* Columna 2: Pagos */}
                  <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0">
                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-100 dark:border-slate-700 pb-2">Análisis Financiero</span>
                    
@@ -495,10 +490,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    </div>
                  </div>
 
-                 {/* Columna 3: Acciones */}
                  <div className="lg:col-span-3 flex flex-col items-stretch justify-start mt-6 lg:mt-0 pt-6 lg:pt-0 border-t border-slate-100 dark:border-slate-700 lg:border-none h-full relative">
                      
-                     {/* BOTONES ADMINISTRACIÓN (Cobros) */}
                      {esAdmin && p.status === 'Pendiente' && (
                        <div className="flex flex-col gap-3 w-full mt-auto">
                          <button onClick={()=>abrirModalValidacion(p)} className="bg-sky-600 text-white py-3.5 rounded-xl font-black text-sm shadow-lg hover:bg-sky-700 hover:-translate-y-0.5 transition-all w-full uppercase tracking-wider">Validar Pago</button>
@@ -506,7 +499,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        </div>
                      )}
                      
-                     {/* HILO DE COMENTARIOS DE AUDITORÍA */}
                      {p.status !== 'Pendiente' && p.notasAuditoria && p.notasAuditoria.length > 0 && (
                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
                          <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><MessageSquare size={12}/> Hilo de Comentarios:</span>
@@ -521,7 +513,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        </div>
                      )}
 
-                     {/* BOTONES AUDITORÍA (MANTENER VISIBLE "AÑADIR NOTA" SIEMPRE) */}
                      {esAuditor && p.status !== 'Pendiente' && (
                        <div className="flex flex-col gap-3 w-full mt-auto">
                          {!p.auditado && (
@@ -533,7 +524,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        </div>
                      )}
                      
-                     {/* LABELS DE ESTADO AUDITORÍA */}
                      {p.auditado && (
                        <div className="bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 py-4 rounded-2xl shadow-sm mt-4"><ShieldCheck size={20}/> Auditado</div>
                      )}
@@ -542,7 +532,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        <div className="text-[10px] font-black uppercase text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 w-full lg:w-max mt-4 border border-amber-200"><AlertTriangle size={14}/> Sin Auditar</div>
                      )}
 
-                     {/* ELIMINAR REGISTRO (Solo Admin Supremo) */}
                      {vistaAdmin === 'historial' && esAdminSupremo && (
                        <button onClick={()=>eliminarPedidoPermanente(p.id, p.clienteNombre)} className="mt-4 pt-4 text-red-400 hover:text-red-600 text-[11px] font-bold flex items-center justify-center gap-1 opacity-50 hover:opacity-100 transition-opacity uppercase tracking-widest border-t border-slate-100 dark:border-slate-700"><Trash2 size={14}/> Borrar Registro</button>
                      )}
@@ -552,7 +541,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           </div>
         )}
 
-        {/* Pestaña de Auditoría Diaria */}
         {vistaAdmin === 'auditoria' && (
           <div className="space-y-6 animate-in fade-in">
              {diasAuditoria.map(dia => (
@@ -634,6 +622,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                           <p className="text-xs mt-1 opacity-70">Para pegar la captura del banco desde tu portapapeles</p>
                        </div>
                     )}
+                    <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={(e)=>{
+                       if(e.target.files[0]){
+                          setModalValidacion(prev=>({...prev, file: e.target.files[0], previewUrl: URL.createObjectURL(e.target.files[0])}))
+                       }
+                    }}/>
                  </div>
                  
                  <button onClick={procesarValidacionDefinitiva} disabled={modalValidacion.subiendo} className="w-full bg-[#003366] hover:bg-[#002244] dark:bg-sky-600 dark:hover:bg-sky-700 text-white font-black py-4 rounded-xl mt-6 shadow-xl transition-transform hover:-translate-y-0.5 disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest">
