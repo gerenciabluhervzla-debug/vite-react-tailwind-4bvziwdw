@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, Trash2, MessageSquare } from 'lucide-react';
+import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, Trash2, MessageSquare, Database, DownloadCloud } from 'lucide-react';
 import { StatusBadge, InputDark } from '../components/ui';
-import { setDoc, doc, updateDoc, increment, deleteDoc } from 'firebase/firestore'; 
+import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
 import { compressImage } from '../utils/image';
 import { ROLES } from '../config/constants';
@@ -14,6 +14,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
   const [descForm, setDescForm] = useState({ porcentaje: '', inicio: '', fin: '' });
   const [modalValidacion, setModalValidacion] = useState(null);
+  const [backupLoading, setBackupLoading] = useState(false);
 
   const getVeneziaDate = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -26,13 +27,68 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
   useEffect(() => {
     if (config) {
-      setDescForm({
-        porcentaje: config.descuentoGlobalPorcentaje || '',
-        inicio: config.descuentoGlobalInicio || '',
-        fin: config.descuentoGlobalFin || ''
-      });
+      setDescForm({ porcentaje: config.descuentoGlobalPorcentaje || '', inicio: config.descuentoGlobalInicio || '', fin: config.descuentoGlobalFin || '' });
     }
   }, [config]);
+
+  // --- LÓGICA DE BACKUP DIARIO A GOOGLE DRIVE ---
+  const recolectarDataBackup = async () => {
+    const data = { pedidos: [], cierres_inventario: [], movimientos: [], logs: [], users: [], inventario: {}, config: {} };
+    const cols = ['pedidos', 'cierres_inventario', 'movimientos', 'logs', 'users'];
+    for (const c of cols) {
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', c));
+        snap.forEach(d => data[c].push({ id: d.id, ...d.data() }));
+    }
+    const docs = ['catalogo', 'stock', 'notas'];
+    for (const d of docs) {
+        const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', d));
+        if (snap.exists()) data.inventario[d] = snap.data();
+    }
+    const snapConfig = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'));
+    if (snapConfig.exists()) data.config = snapConfig.data();
+    return data;
+  };
+
+  const triggerBackup = async (isAuto = false) => {
+    if(!URL_GOOGLE_SCRIPT) return;
+    if(!isAuto) setBackupLoading(true);
+    try {
+        const payload = await recolectarDataBackup();
+        const jsonStr = JSON.stringify(payload);
+        const fileBlob = new Blob([jsonStr], { type: 'application/json' });
+        const reader = new FileReader();
+        reader.readAsDataURL(fileBlob);
+        reader.onloadend = async () => {
+            const base64data = reader.result.split(',')[1];
+            await fetch(URL_GOOGLE_SCRIPT, {
+                method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ 
+                   tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
+                   fileName: `Backup_Bluher_${hoyStr.replace(/\//g,'-')}.json`, 
+                   mimeType: 'application/json', data: base64data 
+                })
+            });
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { ultimaFechaBackup: hoyStr }, { merge: true });
+            
+            if(isAuto) { loggear('BACKUP_AUTO', 'Respaldo automático del día guardado en Drive.'); } 
+            else {
+                loggear('BACKUP_MANUAL', 'El administrador generó un respaldo manual.');
+                dialogs.alert("El respaldo del sistema completo ha sido comprimido y enviado a tu Google Drive exitosamente.", "Backup Completado");
+            }
+            if(!isAuto) setBackupLoading(false);
+        };
+    } catch(e) { 
+        console.error(e); 
+        if(!isAuto) { dialogs.alert("Ocurrió un error al generar el respaldo.", "Error"); setBackupLoading(false); }
+    }
+  };
+
+  useEffect(() => {
+    if (esAdminSupremo && config && config.ultimaFechaBackup !== hoyStr && !backupLoading) {
+        triggerBackup(true); 
+    }
+  }, [esAdminSupremo, config?.ultimaFechaBackup, hoyStr]);
+  // ------------------------------------------------
 
   const pendientes = pedidos.filter(p => p.status === 'Pendiente');
   
@@ -114,13 +170,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
       const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
       const updates = {};
-      
-      Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { 
-          updates[itemKey] = { envios: increment(-qty) }; 
-      });
-      if (Object.keys(updates).length > 0) { 
-          await setDoc(stockRef, updates, { merge: true }); 
-      }
+      Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { updates[itemKey] = { envios: increment(-qty) }; });
+      if (Object.keys(updates).length > 0) { await setDoc(stockRef, updates, { merge: true }); }
 
       const sobranteUsd = parseFloat(sobrante.replace(',', '.')) || 0;
       const payloadPedido = { status: 'Validado', sobranteUsd };
@@ -201,18 +252,18 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   return (
     <div className="space-y-6 animate-in fade-in relative">
        
-       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
-          <div className="bg-[#003366] text-white p-8 rounded-[2rem] flex flex-col md:flex-row justify-between items-center border-4 border-sky-400/20 shadow-xl">
-             <div>
-                <div className="text-xs font-black uppercase opacity-60 mb-1">Tasa Bluher</div>
+       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+          <div className="bg-[#003366] text-white p-8 rounded-[2rem] flex flex-col justify-center border-4 border-sky-400/20 shadow-xl relative overflow-hidden h-full">
+             <div className="relative z-10">
+                <div className="text-xs font-black uppercase tracking-widest opacity-60 mb-1">Tasa Bluher</div>
                 <h2 className="text-4xl font-black">{config?.tasaDia || 1} <span className="text-lg">Bs/$</span></h2>
-                {!tasaActualizadaHoy && <div className="mt-2 text-[10px] font-bold text-yellow-300 bg-yellow-900/30 px-3 py-1.5 rounded-lg border border-yellow-400 uppercase tracking-wider">⚠️ Actualiza la tasa de hoy.</div>}
+                {!tasaActualizadaHoy && <div className="mt-2 text-[10px] font-bold text-yellow-300 bg-yellow-900/30 px-3 py-1.5 rounded-lg border border-yellow-400 inline-block uppercase tracking-wider">⚠️ Actualiza la tasa de hoy.</div>}
              </div>
-             {esAdmin && <button onClick={actualizarTasa} className="mt-4 md:mt-0 bg-sky-500 hover:bg-sky-400 px-6 py-3 rounded-xl font-bold shadow-md transition-colors w-full md:w-auto">Ajustar Tasa</button>}
+             {esAdmin && <button onClick={actualizarTasa} className="mt-5 bg-sky-500 hover:bg-sky-400 px-6 py-3 rounded-xl font-bold shadow-md transition-colors w-full relative z-10">Ajustar Tasa</button>}
           </div>
 
           {esAdminSupremo && (
-            <div className={`p-8 rounded-[2rem] shadow-xl relative overflow-hidden border-4 flex flex-col justify-center ${isGlobalDiscountActiveStatus ? 'bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400/30 text-white' : 'bg-gradient-to-r from-pink-600 to-purple-700 border-pink-400/30 text-white'}`}>
+            <div className={`p-8 rounded-[2rem] shadow-xl relative overflow-hidden border-4 flex flex-col justify-center h-full ${isGlobalDiscountActiveStatus ? 'bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400/30 text-white' : 'bg-gradient-to-r from-pink-600 to-purple-700 border-pink-400/30 text-white'}`}>
               <Percent size={120} className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none"/>
               <div className="flex justify-between items-start mb-4 relative z-10">
                  <div>
@@ -233,13 +284,40 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    <button onClick={apagarDescuento} className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg transition-transform hover:-translate-y-0.5 w-full sm:w-auto justify-center"><PowerOff size={18}/> Detener</button>
                 </div>
               ) : (
-                <form onSubmit={guardarDescuento} className="relative z-10 grid grid-cols-3 gap-3">
-                   <div className="col-span-3 sm:col-span-1 flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">%</label><input type="number" min="1" max="99" required value={descForm.porcentaje} onChange={e=>setDescForm({...descForm, porcentaje: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-sm" placeholder="Ej: 15" /></div>
-                   <div className="col-span-3 sm:col-span-1 flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Inicio</label><input type="date" required value={descForm.inicio} onChange={e=>setDescForm({...descForm, inicio: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-sm" /></div>
-                   <div className="col-span-3 sm:col-span-1 flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Fin</label><input type="date" required value={descForm.fin} onChange={e=>setDescForm({...descForm, fin: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-sm" /></div>
-                   <div className="col-span-3 mt-2"><button type="submit" className="w-full bg-white text-purple-700 font-black py-3 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 text-sm uppercase tracking-widest">Activar Campaña</button></div>
+                <form onSubmit={guardarDescuento} className="relative z-10 grid grid-cols-2 gap-3">
+                   <div className="col-span-2 flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Rebaja (%)</label><input type="number" min="1" max="99" required value={descForm.porcentaje} onChange={e=>setDescForm({...descForm, porcentaje: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-sm" placeholder="Ej: 15" /></div>
+                   <div className="flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Inicio</label><input type="date" required value={descForm.inicio} onChange={e=>setDescForm({...descForm, inicio: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-xs" /></div>
+                   <div className="flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Fin</label><input type="date" required value={descForm.fin} onChange={e=>setDescForm({...descForm, fin: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-xs" /></div>
+                   <div className="col-span-2 mt-2"><button type="submit" className="w-full bg-white text-purple-700 font-black py-3 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 text-sm uppercase tracking-widest">Activar Campaña</button></div>
                 </form>
               )}
+           </div>
+         )}
+
+         {/* NUEVO BLOQUE: RESPALDOS AUTOMÁTICOS DEL SISTEMA */}
+         {esAdminSupremo && (
+           <div className="bg-slate-900 text-white p-8 rounded-[2rem] shadow-xl relative overflow-hidden border-4 border-slate-700 flex flex-col justify-center h-full">
+              <Database size={120} className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none"/>
+              <div className="flex justify-between items-start mb-4 relative z-10">
+                 <div>
+                   <h3 className="text-xl font-black flex items-center gap-2">Respaldo Seguro</h3>
+                   <p className="text-xs font-medium opacity-80 mt-1">Backup automático en Google Drive.</p>
+                 </div>
+                 {config?.ultimaFechaBackup === hoyStr && (
+                   <span className="bg-emerald-500/30 text-emerald-300 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-emerald-400/30 flex items-center gap-1"><CheckCircle size={12}/> Al día</span>
+                 )}
+              </div>
+              
+              <div className="relative z-10 flex flex-col bg-white/5 p-5 rounded-2xl border border-white/10 mt-auto">
+                 <div className="mb-4">
+                   <div className="text-xs font-semibold text-slate-400">Último backup validado:</div>
+                   <div className="text-lg font-black">{config?.ultimaFechaBackup === hoyStr ? 'Hoy, base de datos protegida.' : (config?.ultimaFechaBackup || 'Nunca')}</div>
+                 </div>
+                 <button onClick={()=>triggerBackup(false)} disabled={backupLoading} className="bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all w-full disabled:opacity-50 disabled:cursor-not-allowed">
+                   {backupLoading ? <Loader2 size={18} className="animate-spin"/> : <DownloadCloud size={18}/>} 
+                   {backupLoading ? 'Generando Archivo...' : 'Forzar Backup Ahora'}
+                 </button>
+              </div>
            </div>
          )}
        </div>
@@ -257,6 +335,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           </div>
         </div>
 
+        {/* FILTRO DE FECHA PARA HISTORIAL */}
         {vistaAdmin === 'historial' && (
           <div className="flex flex-col sm:flex-row gap-4 mb-8 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
             <div className="flex-1">
@@ -269,7 +348,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             </div>
             <div className="flex items-end pb-1 w-full sm:w-auto">
                {(fechaInicio !== hoyStr || fechaFin !== hoyStr) && (
-                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 py-3 px-4 rounded-xl w-full">Limpiar (Ver Hoy)</button>
+                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 py-3 px-4 rounded-xl w-full">Ver Solo Hoy</button>
                )}
             </div>
           </div>
@@ -284,6 +363,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  
                  <div className="absolute top-5 right-6"><StatusBadge status={p.status}/></div>
 
+                 {/* Columna 1: Pedido */}
                  <div className="lg:col-span-5 flex flex-col justify-start">
                    <div className="font-bold text-xl text-slate-800 dark:text-slate-100 pr-24 leading-tight">{p.clienteNombre}</div>
                    <div className="text-[11px] font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1 mb-3">
@@ -300,6 +380,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    </div>
                  </div>
 
+                 {/* Columna 2: Pagos */}
                  <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0">
                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-100 dark:border-slate-700 pb-2">Análisis Financiero</span>
                    
@@ -335,23 +416,26 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    </div>
                    
                    <div className="flex flex-col gap-2">
-                      {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-sky-100 dark:border-sky-800/50"><FileText size={16}/> Capture Cliente</a>}
-                      {p.linkComprobanteAdmin && <a href={p.linkComprobanteAdmin} target="_blank" rel="noreferrer" className="text-xs text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-purple-100 dark:border-purple-800/50"><ImageIcon size={16}/> Extracto Banco</a>}
+                      {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-sky-100 dark:border-sky-800/50"><FileText size={16}/> Capture (Cliente/Ventas)</a>}
+                      {p.linkComprobanteAdmin && <a href={p.linkComprobanteAdmin} target="_blank" rel="noreferrer" className="text-xs text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-purple-100 dark:border-purple-800/50"><ImageIcon size={16}/> Extracto Banco (Admin)</a>}
                    </div>
                  </div>
 
+                 {/* Columna 3: Acciones */}
                  <div className="lg:col-span-3 flex flex-col items-stretch justify-start mt-6 lg:mt-0 pt-6 lg:pt-0 border-t border-slate-100 dark:border-slate-700 lg:border-none h-full relative">
                      
+                     {/* BOTONES ADMINISTRACIÓN (Cobros) */}
                      {esAdmin && p.status === 'Pendiente' && (
                        <div className="flex flex-col gap-3 w-full mt-auto">
                          <button onClick={()=>abrirModalValidacion(p)} className="bg-sky-600 text-white py-3.5 rounded-xl font-black text-sm shadow-lg hover:bg-sky-700 hover:-translate-y-0.5 transition-all w-full uppercase tracking-wider">Validar Pago</button>
-                         <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-200 text-red-600 py-3 rounded-xl font-bold text-sm hover:bg-red-50 transition-colors w-full">Devolver Pedido</button>
+                         <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-200 text-red-600 py-3 rounded-xl font-bold text-sm hover:bg-red-50 transition-colors w-full">Devolver a Ventas</button>
                        </div>
                      )}
                      
+                     {/* HILO DE COMENTARIOS DE AUDITORÍA */}
                      {p.status !== 'Pendiente' && p.notasAuditoria && p.notasAuditoria.length > 0 && (
                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
-                         <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><MessageSquare size={12}/> Comentarios:</span>
+                         <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><MessageSquare size={12}/> Hilo de Comentarios:</span>
                          <div className="space-y-2">
                            {p.notasAuditoria.map((n, i) => (
                              <div key={i} className="text-[11px] text-amber-900 dark:text-amber-200 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-amber-100 dark:border-amber-800/50">
@@ -363,17 +447,19 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        </div>
                      )}
 
+                     {/* BOTONES AUDITORÍA (MANTENER VISIBLE "AÑADIR NOTA" SIEMPRE) */}
                      {esAuditor && p.status !== 'Pendiente' && (
                        <div className="flex flex-col gap-3 w-full mt-auto">
                          {!p.auditado && (
                             <button onClick={()=>revisionRapida(p)} className="bg-emerald-50 hover:bg-emerald-100 border-2 border-emerald-200 text-emerald-700 py-3 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-colors shadow-sm"><CheckCircle size={18}/> Aprobación Rápida</button>
                          )}
                          <button onClick={()=>marcarAuditoriaConNota(p)} className="bg-white hover:bg-slate-50 border-2 border-slate-200 text-slate-600 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm">
-                            <MessageSquare size={16}/> {p.notasAuditoria?.length > 0 ? 'Responder / Nota' : 'Revisar con Nota'}
+                            <MessageSquare size={16}/> {p.notasAuditoria?.length > 0 ? 'Responder / Añadir Nota' : 'Revisar con Nota'}
                          </button>
                        </div>
                      )}
                      
+                     {/* LABELS DE ESTADO AUDITORÍA */}
                      {p.auditado && (
                        <div className="bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 py-4 rounded-2xl shadow-sm mt-4"><ShieldCheck size={20}/> Auditado</div>
                      )}
@@ -382,6 +468,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        <div className="text-[10px] font-black uppercase text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 w-full lg:w-max mt-4 border border-amber-200"><AlertTriangle size={14}/> Sin Auditar</div>
                      )}
 
+                     {/* ELIMINAR REGISTRO (Solo Admin Supremo) */}
                      {vistaAdmin === 'historial' && esAdminSupremo && (
                        <button onClick={()=>eliminarPedidoPermanente(p.id, p.clienteNombre)} className="mt-4 pt-4 text-red-400 hover:text-red-600 text-[11px] font-bold flex items-center justify-center gap-1 opacity-50 hover:opacity-100 transition-opacity uppercase tracking-widest border-t border-slate-100 dark:border-slate-700"><Trash2 size={14}/> Borrar Registro</button>
                      )}
@@ -472,6 +559,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                           <p className="text-xs mt-1 opacity-70">Para pegar la captura del banco desde tu portapapeles</p>
                        </div>
                     )}
+                    <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={(e)=>{
+                       if(e.target.files[0]){
+                          setModalValidacion(prev=>({...prev, file: e.target.files[0], previewUrl: URL.createObjectURL(e.target.files[0])}))
+                       }
+                    }}/>
                  </div>
                  
                  <button onClick={procesarValidacionDefinitiva} disabled={modalValidacion.subiendo} className="w-full bg-[#003366] hover:bg-[#002244] dark:bg-sky-600 dark:hover:bg-sky-700 text-white font-black py-4 rounded-xl mt-6 shadow-xl transition-transform hover:-translate-y-0.5 disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest">

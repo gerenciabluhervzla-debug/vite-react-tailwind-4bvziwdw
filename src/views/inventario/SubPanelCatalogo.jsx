@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { Package, Edit3, Trash2 } from 'lucide-react';
+import { Package, Edit3, Trash2, Camera, X, Loader2, PlusCircle, Image as ImageIcon } from 'lucide-react';
 import { Input } from '../../components/ui';
 import { setDoc, doc } from 'firebase/firestore';
+import { URL_GOOGLE_SCRIPT } from '../../config/firebase';
+import { compressImage } from '../../utils/image';
 
 export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs }) {
-  const defaultForm = { categoria: '', nuevoCat: '', nombre: '', presentaciones: '', precios: '', imagen: '' };
+  const defaultForm = { categoria: '', nuevoCat: '', nombre: '', presentaciones: '', precios: '', imagenes: [] };
   const [form, setForm] = useState(defaultForm);
   const [modoEdicion, setModoEdicion] = useState(null); 
+  const [subiendoIdx, setSubiendoIdx] = useState(null);
 
   const cargarEdicion = (catNombre, prod) => {
     setForm({ 
@@ -15,7 +18,8 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
       nombre: prod.nombre, 
       presentaciones: prod.presentaciones.join(', '), 
       precios: prod.precios ? prod.precios.join(', ') : '', 
-      imagen: prod.imagen || '' 
+      // Adaptabilidad por si había imágenes viejas en string
+      imagenes: prod.imagenes || (prod.imagen ? [prod.imagen] : []) 
     });
     setModoEdicion({ catOriginal: catNombre, nomOriginal: prod.nombre });
   };
@@ -40,6 +44,40 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
     }, "Eliminar Producto");
   };
 
+  const subirImagenCatalogo = async (e, idx) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    if(!URL_GOOGLE_SCRIPT) return dialogs.alert("Drive no está configurado.");
+    
+    setSubiendoIdx(idx);
+    try {
+        const base64Data = await compressImage(file, 800, 0.7);
+        const response = await fetch(URL_GOOGLE_SCRIPT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ 
+               tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
+               fileName: `Cat_${Date.now()}_${idx}.jpg`, 
+               mimeType: 'image/jpeg', 
+               data: base64Data 
+            })
+        });
+        const result = await response.json();
+        if (result.url) {
+            const newImgs = [...(form.imagenes || [])];
+            newImgs[idx] = result.url;
+            setForm({...form, imagenes: newImgs});
+        }
+    } catch(err) { console.error(err); dialogs.alert("Error subiendo foto.", "Fallo de Red"); }
+    setSubiendoIdx(null);
+  };
+
+  const eliminarImagen = (idx) => {
+      const newImgs = [...(form.imagenes || [])];
+      newImgs[idx] = '';
+      setForm({...form, imagenes: newImgs});
+  };
+
   const guardarProducto = async (e) => {
     e.preventDefault();
     const catName = form.categoria === 'OTRA' ? form.nuevoCat : form.categoria;
@@ -59,7 +97,10 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
     }
 
     let catIndex = newCatalogo.findIndex(c => c.categoria.toLowerCase() === catName.toLowerCase());
-    const nuevoProd = { nombre: form.nombre, presentaciones: presentacionesArr, precios: preciosArr, imagen: form.imagen };
+    
+    // Limpiamos el array de imagenes para que solo guarde las que coinciden con las presentaciones
+    const imagenesLimpias = presentacionesArr.map((_, i) => form.imagenes[i] || '');
+    const nuevoProd = { nombre: form.nombre, presentaciones: presentacionesArr, precios: preciosArr, imagenes: imagenesLimpias };
 
     if (catIndex >= 0) {
       newCatalogo[catIndex].productos.push(nuevoProd);
@@ -74,6 +115,8 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
       cancelarEdicion();
     } catch(err) { console.error(err); }
   };
+
+  const presentacionesArr = form.presentaciones.split(',').map(s=>s.trim()).filter(Boolean);
 
   return (
     <div className="flex flex-col gap-8">
@@ -93,7 +136,32 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
           <Input label="Nombre del Producto" value={form.nombre} onChange={e=>setForm({...form, nombre: e.target.value})} placeholder="Ej: Tratamiento KeraBluher" required/>
           <Input label="Presentaciones (Separadas por coma)" value={form.presentaciones} onChange={e=>setForm({...form, presentaciones: e.target.value})} placeholder="Ej: 1 Litro, 500ml, 250ml" required/>
           <Input label="Precios en USD (Separados por coma en mismo orden)" value={form.precios} onChange={e=>setForm({...form, precios: e.target.value})} placeholder="Ej: 25, 15, 8" />
-          <Input label="URL de Imagen (Opcional)" value={form.imagen} onChange={e=>setForm({...form, imagen: e.target.value})} placeholder="https://...imagen.jpg" />
+          
+          <div className="md:col-span-2 bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm mt-2">
+             <label className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2"><ImageIcon size={16}/> Galería de Presentaciones</label>
+             {presentacionesArr.length === 0 ? (
+                <p className="text-sm text-slate-400 font-bold italic text-center p-4">Escribe las presentaciones arriba para habilitar la carga de fotos.</p>
+             ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                   {presentacionesArr.map((pres, idx) => (
+                      <div key={idx} className="border-2 border-dashed border-slate-200 dark:border-slate-600 rounded-xl p-4 flex flex-col items-center justify-center gap-3">
+                         <span className="text-[10px] font-black uppercase text-slate-500 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded w-full text-center truncate">{pres}</span>
+                         {form.imagenes && form.imagenes[idx] ? (
+                            <div className="relative group">
+                               <img src={form.imagenes[idx]} className="h-20 w-20 object-cover rounded-xl shadow-md border-2 border-emerald-400" alt={pres} />
+                               <button type="button" onClick={() => eliminarImagen(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"><Trash2 size={12}/></button>
+                            </div>
+                         ) : (
+                            <label className="cursor-pointer w-full bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 py-3 px-2 rounded-xl text-[10px] font-black text-center hover:bg-sky-100 transition-colors shadow-sm flex flex-col items-center gap-1">
+                               {subiendoIdx === idx ? <Loader2 size={16} className="animate-spin mx-auto"/> : <><Camera size={16}/> Cargar</>}
+                               <input type="file" accept="image/*" className="hidden" onChange={(e)=>subirImagenCatalogo(e, idx)} disabled={subiendoIdx !== null} />
+                            </label>
+                         )}
+                      </div>
+                   ))}
+                </div>
+             )}
+          </div>
           
           <div className="md:col-span-2 flex justify-end gap-3 mt-4">
             {modoEdicion && <button type="button" onClick={cancelarEdicion} className="bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold py-3 px-6 rounded-xl transition-colors">Cancelar Edición</button>}
@@ -106,22 +174,29 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
         <h3 className="font-black text-xl text-slate-800 dark:text-slate-100 mb-4 px-2">Catálogo Web Actual</h3>
         <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
           <table className="w-full text-left text-sm border-collapse">
-            <thead><tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400"><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Categoría</th><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Producto, Presentaciones y Precio</th><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Acciones</th></tr></thead>
+            <thead><tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400"><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Categoría</th><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Producto y Presentaciones</th><th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide text-right">Acciones</th></tr></thead>
             <tbody>
               {catalogo.map(c => c.productos.map(p => (
                 <tr key={p.nombre} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                   <td className="p-4 font-bold text-slate-500 dark:text-slate-400 text-xs uppercase tracking-widest">{c.categoria}</td>
                   <td className="p-4">
                     <div className="font-bold text-slate-800 dark:text-slate-100 text-base">{p.nombre}</div>
-                    <div className="flex flex-wrap gap-2 mt-2">
+                    <div className="flex flex-wrap gap-2 mt-3">
                        {p.presentaciones.map((pres, i) => (
-                         <span key={pres} className="text-xs font-semibold bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 px-2 py-1 rounded">
-                           {pres} {p.precios && p.precios[i] > 0 ? `($${p.precios[i]})` : ''}
-                         </span>
+                         <div key={pres} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 pr-3 rounded-lg shadow-sm overflow-hidden">
+                           {p.imagenes && p.imagenes[i] ? (
+                              <img src={p.imagenes[i]} className="w-8 h-8 object-cover border-r border-slate-200 dark:border-slate-700" alt="prod" />
+                           ) : (
+                              <div className="w-8 h-8 bg-slate-200 dark:bg-slate-700 flex items-center justify-center border-r border-slate-300 dark:border-slate-600"><ImageIcon size={12} className="text-slate-400"/></div>
+                           )}
+                           <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                             {pres} {p.precios && p.precios[i] > 0 ? <span className="text-emerald-600 dark:text-emerald-400 ml-1">${p.precios[i]}</span> : ''}
+                           </span>
+                         </div>
                        ))}
                     </div>
                   </td>
-                  <td className="p-4 flex justify-end gap-2">
+                  <td className="p-4 flex justify-end gap-2 items-center">
                      <button onClick={()=>cargarEdicion(c.categoria, p)} className="text-sky-600 bg-sky-50 dark:bg-sky-900/30 dark:text-sky-400 p-2.5 rounded-lg hover:bg-sky-100 dark:hover:bg-sky-900 transition-colors" title="Editar Producto"><Edit3 size={18}/></button>
                      <button onClick={()=>eliminarProducto(c.categoria, p.nombre)} className="text-red-600 bg-red-50 dark:bg-red-900/30 dark:text-red-400 p-2.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900 transition-colors" title="Eliminar del Catálogo"><Trash2 size={18}/></button>
                   </td>
