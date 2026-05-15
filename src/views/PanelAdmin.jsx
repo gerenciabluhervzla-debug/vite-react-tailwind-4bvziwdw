@@ -15,6 +15,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const [descForm, setDescForm] = useState({ porcentaje: '', inicio: '', fin: '' });
   const [modalValidacion, setModalValidacion] = useState(null);
   const [backupLoading, setBackupLoading] = useState(false);
+  const [showModalTasas, setShowModalTasas] = useState(false); // NUEVO ESTADO PARA EL HISTORIAL
 
   const getVeneziaDate = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -106,7 +107,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             reader.onload = async (event) => {
                try {
                    const data = JSON.parse(event.target.result);
-
                    const colecciones = ['pedidos', 'cierres_inventario', 'movimientos', 'logs', 'users'];
                    for (const col of colecciones) {
                        if (data[col]) {
@@ -116,36 +116,26 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                            }
                        }
                    }
-
                    if (data.inventario) {
                        if (data.inventario.catalogo) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), data.inventario.catalogo);
                        if (data.inventario.stock) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), data.inventario.stock);
                        if (data.inventario.notas) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), data.inventario.notas);
                    }
-
-                   if (data.config) {
-                       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), data.config);
-                   }
+                   if (data.config) { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), data.config); }
 
                    loggear('BACKUP_RESTAURADO', 'Se ejecutó una restauración de base de datos desde un archivo local.');
                    dialogs.alert("Restauración completada con éxito. Por favor recarga la página para ver los cambios.", "Éxito");
                } catch (err) {
                    console.error(err);
                    dialogs.alert("El archivo seleccionado no es válido o está corrupto.", "Error");
-               } finally {
-                   setBackupLoading(false);
-               }
+               } finally { setBackupLoading(false); }
             };
             reader.readAsText(file);
-        } catch (err) {
-            setBackupLoading(false);
-            dialogs.alert("Error leyendo el archivo.");
-        }
+        } catch (err) { setBackupLoading(false); dialogs.alert("Error leyendo el archivo."); }
     }, "Confirmación Requerida");
     
     e.target.value = '';
   };
-  // ------------------------------------------------
 
   const pendientes = pedidos.filter(p => p.status === 'Pendiente');
   
@@ -309,18 +299,24 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   return (
     <div className="space-y-6 animate-in fade-in relative">
        
-       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          <div className="bg-[#003366] text-white p-8 rounded-[2rem] flex flex-col justify-center border-4 border-sky-400/20 shadow-xl relative overflow-hidden h-full">
-             <div className="relative z-10">
+       {/* CORRECCIÓN VISUAL DE LAS TARJETAS: Se usa items-start para que no se alarguen */}
+       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 items-start">
+          
+          <div className="bg-[#003366] text-white p-6 rounded-[2rem] border-4 border-sky-400/20 shadow-xl flex flex-col relative overflow-hidden h-full">
+             <div className="relative z-10 mb-4">
                 <div className="text-xs font-black uppercase tracking-widest opacity-60 mb-1">Tasa Bluher</div>
                 <h2 className="text-4xl font-black">{config?.tasaDia || 1} <span className="text-lg">Bs/$</span></h2>
                 {!tasaActualizadaHoy && <div className="mt-2 text-[10px] font-bold text-yellow-300 bg-yellow-900/30 px-3 py-1.5 rounded-lg border border-yellow-400 inline-block uppercase tracking-wider">⚠️ Actualiza la tasa de hoy.</div>}
              </div>
-             {esAdmin && <button onClick={actualizarTasa} className="mt-5 bg-sky-500 hover:bg-sky-400 px-6 py-3 rounded-xl font-bold shadow-md transition-colors w-full relative z-10">Ajustar Tasa</button>}
+             
+             <div className="relative z-10 flex flex-col gap-2 mt-auto">
+                {esAdmin && <button onClick={actualizarTasa} className="bg-sky-500 hover:bg-sky-400 px-6 py-3 rounded-xl font-bold text-sm shadow-md transition-colors w-full">Ajustar Tasa</button>}
+                <button onClick={() => setShowModalTasas(true)} className="bg-white/10 hover:bg-white/20 px-6 py-3 rounded-xl font-bold text-xs transition-colors w-full flex items-center justify-center gap-2">Ver Historial de Tasas</button>
+             </div>
           </div>
 
           {esAdminSupremo && (
-            <div className={`p-8 rounded-[2rem] shadow-xl relative overflow-hidden border-4 flex flex-col justify-center h-full ${isGlobalDiscountActiveStatus ? 'bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400/30 text-white' : 'bg-gradient-to-r from-pink-600 to-purple-700 border-pink-400/30 text-white'}`}>
+            <div className={`p-6 rounded-[2rem] shadow-xl relative overflow-hidden border-4 flex flex-col h-full ${isGlobalDiscountActiveStatus ? 'bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400/30 text-white' : 'bg-gradient-to-r from-pink-600 to-purple-700 border-pink-400/30 text-white'}`}>
               <Percent size={120} className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none"/>
               <div className="flex justify-between items-start mb-4 relative z-10">
                  <div>
@@ -332,52 +328,49 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  )}
               </div>
 
-              {isGlobalDiscountActiveStatus ? (
-                <div className="relative z-10 flex flex-col sm:flex-row justify-between items-center gap-4 mt-2 bg-white/10 p-5 rounded-2xl backdrop-blur-sm border border-white/20">
-                   <div>
-                     <div className="text-sm font-semibold opacity-90">Descuento aplicado en tienda:</div>
-                     <div className="text-3xl font-black">{config?.descuentoGlobalPorcentaje}% OFF</div>
-                     <div className="text-[10px] font-bold mt-1 bg-black/20 inline-block px-2 py-1 rounded uppercase tracking-wider">
-                       Del {config?.descuentoGlobalInicio} al {config?.descuentoGlobalFin}
+              <div className="relative z-10 mt-auto">
+                {isGlobalDiscountActiveStatus ? (
+                  <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white/10 p-5 rounded-2xl backdrop-blur-sm border border-white/20">
+                     <div>
+                       <div className="text-3xl font-black">{config?.descuentoGlobalPorcentaje}% OFF</div>
+                       <div className="text-[10px] font-bold mt-1 bg-black/20 inline-block px-2 py-1 rounded uppercase tracking-wider">Hasta {config?.descuentoGlobalFin}</div>
                      </div>
-                   </div>
-                   <button onClick={apagarDescuento} className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg transition-transform hover:-translate-y-0.5 w-full sm:w-auto justify-center">
-                     <PowerOff size={18}/> Detener Campaña
-                   </button>
-                </div>
-              ) : (
-                <form onSubmit={guardarDescuento} className="relative z-10 grid grid-cols-2 gap-3">
-                   <div className="col-span-2 flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Rebaja (%)</label><input type="number" min="1" max="99" required value={descForm.porcentaje} onChange={e=>setDescForm({...descForm, porcentaje: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-sm" placeholder="Ej: 15" /></div>
-                   <div className="flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Inicio</label><input type="date" required value={descForm.inicio} onChange={e=>setDescForm({...descForm, inicio: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-xs" /></div>
-                   <div className="flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Fin</label><input type="date" required value={descForm.fin} onChange={e=>setDescForm({...descForm, fin: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-xs" /></div>
-                   <div className="col-span-2 mt-2"><button type="submit" className="w-full bg-white text-purple-700 font-black py-3 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 text-sm uppercase tracking-widest">Activar Campaña</button></div>
-                </form>
-              )}
+                     <button onClick={apagarDescuento} className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg transition-transform hover:-translate-y-0.5 w-full sm:w-auto justify-center"><PowerOff size={18}/> Detener</button>
+                  </div>
+                ) : (
+                  <form onSubmit={guardarDescuento} className="grid grid-cols-2 gap-3">
+                     <div className="col-span-2 flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Rebaja (%)</label><input type="number" min="1" max="99" required value={descForm.porcentaje} onChange={e=>setDescForm({...descForm, porcentaje: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-sm" placeholder="Ej: 15" /></div>
+                     <div className="flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Inicio</label><input type="date" required value={descForm.inicio} onChange={e=>setDescForm({...descForm, inicio: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-xs" /></div>
+                     <div className="flex flex-col"><label className="text-[10px] font-black uppercase opacity-70 mb-1 ml-1">Fin</label><input type="date" required value={descForm.fin} onChange={e=>setDescForm({...descForm, fin: e.target.value})} className="p-2.5 rounded-xl bg-black/20 border border-white/20 outline-none text-white font-bold text-xs" /></div>
+                     <div className="col-span-2 mt-2"><button type="submit" className="w-full bg-white text-purple-700 font-black py-3 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 text-sm uppercase tracking-widest">Activar Campaña</button></div>
+                  </form>
+                )}
+              </div>
            </div>
          )}
 
          {esAdminSupremo && (
-           <div className="bg-slate-900 text-white p-8 rounded-[2rem] shadow-xl relative overflow-hidden border-4 border-slate-700 flex flex-col justify-center h-full">
+           <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl relative overflow-hidden border-4 border-slate-700 flex flex-col h-full">
               <Database size={120} className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none"/>
               <div className="flex justify-between items-start mb-4 relative z-10">
                  <div>
                    <h3 className="text-xl font-black flex items-center gap-2">Base de Datos</h3>
-                   <p className="text-xs font-medium opacity-80 mt-1">Backup seguro en Google Drive.</p>
+                   <p className="text-xs font-medium opacity-80 mt-1">Backup en Google Drive.</p>
                  </div>
                  {config?.ultimaFechaBackup === hoyStr && (
                    <span className="bg-emerald-500/30 text-emerald-300 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-emerald-400/30 flex items-center gap-1"><CheckCircle size={12}/> Al día</span>
                  )}
               </div>
               
-              <div className="relative z-10 flex flex-col bg-white/5 p-5 rounded-2xl border border-white/10 mt-auto">
-                 <div className="mb-4">
-                   <div className="text-xs font-semibold text-slate-400">Último backup exportado:</div>
-                   <div className="text-base font-black">{config?.ultimaFechaBackup === hoyStr ? 'Hoy, sistema respaldado.' : (config?.ultimaFechaBackup || 'Nunca')}</div>
+              <div className="relative z-10 mt-auto bg-white/5 p-4 rounded-2xl border border-white/10 flex flex-col gap-3">
+                 <div>
+                   <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-0.5">Último backup exportado:</div>
+                   <div className="text-sm font-black text-emerald-300">{config?.ultimaFechaBackup === hoyStr ? 'Hoy, sistema respaldado.' : (config?.ultimaFechaBackup || 'Nunca')}</div>
                  </div>
                  <div className="flex gap-2">
                     <button onClick={()=>triggerBackup(false)} disabled={backupLoading} className="bg-sky-500 hover:bg-sky-600 text-white font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 shadow-md transition-all flex-1 text-xs disabled:opacity-50">
                       {backupLoading ? <Loader2 size={16} className="animate-spin"/> : <DownloadCloud size={16}/>} 
-                      {backupLoading ? 'Generando...' : 'Forzar Backup'}
+                      {backupLoading ? 'Generando...' : 'Backup'}
                     </button>
 
                     <label className="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 shadow-md transition-all flex-1 cursor-pointer text-xs">
@@ -393,8 +386,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
       <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-sm">
         
-        {/* CORRECCIÓN VISUAL: ESTILOS OPTIMIZADOS PARA ESCRITORIO EN LAS TABS */}
-        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-6 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
           <div>
             <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><CheckSquare className="text-sky-600"/> Validación y Auditoría</h2>
           </div>
@@ -410,11 +402,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         {vistaAdmin === 'historial' && (
           <div className="flex flex-col sm:flex-row gap-4 mb-8 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
             <div className="flex-1 w-full">
-               <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Desde (Fecha)</label>
+               <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2 block">Desde (Fecha)</label>
                <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors" />
             </div>
             <div className="flex-1 w-full">
-               <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2">Hasta (Fecha)</label>
+               <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2 block">Hasta (Fecha)</label>
                <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors" />
             </div>
             <div className="flex items-end pb-1 w-full sm:w-auto">
@@ -453,6 +445,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0">
                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-100 dark:border-slate-700 pb-2">Análisis Financiero</span>
                    
+                   {/* NUEVA LÓGICA DE VISUALIZACIÓN ZELLE */}
                    {p.esRegalo ? (
                       <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl"><Gift size={20}/> REGALO VIP</div>
                    ) : p.moneda === 'ZELLE' ? (
@@ -485,8 +478,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    </div>
                    
                    <div className="flex flex-col gap-2">
-                      {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-sky-100 dark:border-sky-800/50"><FileText size={16}/> Capture (Cliente/Ventas)</a>}
-                      {p.linkComprobanteAdmin && <a href={p.linkComprobanteAdmin} target="_blank" rel="noreferrer" className="text-xs text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-purple-100 dark:border-purple-800/50"><ImageIcon size={16}/> Extracto Banco (Admin)</a>}
+                      {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-700 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-sky-100 dark:border-sky-800/50"><FileText size={16}/> Capture Cliente</a>}
+                      {p.linkComprobanteAdmin && <a href={p.linkComprobanteAdmin} target="_blank" rel="noreferrer" className="text-xs text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 p-2.5 rounded-xl font-bold flex items-center gap-2 transition-colors border border-purple-100 dark:border-purple-800/50"><ImageIcon size={16}/> Extracto Banco</a>}
                    </div>
                  </div>
 
@@ -501,7 +494,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                      
                      {p.status !== 'Pendiente' && p.notasAuditoria && p.notasAuditoria.length > 0 && (
                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
-                         <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><MessageSquare size={12}/> Hilo de Comentarios:</span>
+                         <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 block mb-2 uppercase tracking-widest flex items-center gap-1"><MessageSquare size={12}/> Comentarios:</span>
                          <div className="space-y-2">
                            {p.notasAuditoria.map((n, i) => (
                              <div key={i} className="text-[11px] text-amber-900 dark:text-amber-200 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-amber-100 dark:border-amber-800/50">
@@ -519,7 +512,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                             <button onClick={()=>revisionRapida(p)} className="bg-emerald-50 hover:bg-emerald-100 border-2 border-emerald-200 text-emerald-700 py-3 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-colors shadow-sm"><CheckCircle size={18}/> Aprobación Rápida</button>
                          )}
                          <button onClick={()=>marcarAuditoriaConNota(p)} className="bg-white hover:bg-slate-50 border-2 border-slate-200 text-slate-600 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm">
-                            <MessageSquare size={16}/> {p.notasAuditoria?.length > 0 ? 'Responder / Añadir Nota' : 'Revisar con Nota'}
+                            <MessageSquare size={16}/> {p.notasAuditoria?.length > 0 ? 'Responder / Nota' : 'Revisar con Nota'}
                          </button>
                        </div>
                      )}
@@ -541,6 +534,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           </div>
         )}
 
+        {/* Pestaña de Auditoría Diaria */}
         {vistaAdmin === 'auditoria' && (
           <div className="space-y-6 animate-in fade-in">
              {diasAuditoria.map(dia => (
@@ -622,16 +616,37 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                           <p className="text-xs mt-1 opacity-70">Para pegar la captura del banco desde tu portapapeles</p>
                        </div>
                     )}
-                    <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={(e)=>{
-                       if(e.target.files[0]){
-                          setModalValidacion(prev=>({...prev, file: e.target.files[0], previewUrl: URL.createObjectURL(e.target.files[0])}))
-                       }
-                    }}/>
                  </div>
                  
                  <button onClick={procesarValidacionDefinitiva} disabled={modalValidacion.subiendo} className="w-full bg-[#003366] hover:bg-[#002244] dark:bg-sky-600 dark:hover:bg-sky-700 text-white font-black py-4 rounded-xl mt-6 shadow-xl transition-transform hover:-translate-y-0.5 disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest">
                    {modalValidacion.subiendo ? <><Loader2 className="animate-spin"/> Guardando...</> : 'Aprobar y Descontar'}
                  </button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* --- MODAL DEL HISTORIAL DE TASAS --- */}
+      {showModalTasas && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in">
+           <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 border border-slate-200 dark:border-slate-700 flex flex-col max-h-[80vh]">
+              <div className="p-5 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+                 <h3 className="text-lg font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">Historial de Tasas</h3>
+                 <button onClick={() => setShowModalTasas(false)} className="p-2 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={18}/></button>
+              </div>
+              <div className="p-5 overflow-y-auto">
+                 {(!config?.historialTasas || config.historialTasas.length === 0) ? (
+                    <div className="text-center text-slate-400 font-bold italic py-4 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl">No hay historial registrado.</div>
+                 ) : (
+                    <div className="space-y-3">
+                       {config.historialTasas.map((h, i) => (
+                          <div key={i} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
+                             <span className="font-bold text-slate-600 dark:text-slate-300 text-sm">{h.fecha}</span>
+                             <span className="font-black text-sky-600 dark:text-sky-400 text-xl">{h.tasa} <span className="text-xs">Bs</span></span>
+                          </div>
+                       ))}
+                    </div>
+                 )}
               </div>
            </div>
         </div>
