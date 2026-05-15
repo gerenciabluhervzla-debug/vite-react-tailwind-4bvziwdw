@@ -18,7 +18,6 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
       nombre: prod.nombre, 
       presentaciones: prod.presentaciones.join(', '), 
       precios: prod.precios ? prod.precios.join(', ') : '', 
-      // Adaptabilidad por si había imágenes viejas en string
       imagenes: prod.imagenes || (prod.imagen ? [prod.imagen] : []) 
     });
     setModoEdicion({ catOriginal: catNombre, nomOriginal: prod.nombre });
@@ -51,14 +50,19 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
     
     setSubiendoIdx(idx);
     try {
+        // CORRECCIÓN: Detectar tipo real (PNG o JPG)
+        const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+        
         const base64Data = await compressImage(file, 800, 0.7);
+        
         const response = await fetch(URL_GOOGLE_SCRIPT, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify({ 
                tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
-               fileName: `Cat_${Date.now()}_${idx}.jpg`, 
-               mimeType: 'image/jpeg', 
+               fileName: `Cat_${Date.now()}_${idx}.${ext}`, 
+               mimeType: mimeType, 
                data: base64Data 
             })
         });
@@ -98,7 +102,6 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
 
     let catIndex = newCatalogo.findIndex(c => c.categoria.toLowerCase() === catName.toLowerCase());
     
-    // Limpiamos el array de imagenes para que solo guarde las que coinciden con las presentaciones
     const imagenesLimpias = presentacionesArr.map((_, i) => form.imagenes[i] || '');
     const nuevoProd = { nombre: form.nombre, presentaciones: presentacionesArr, precios: preciosArr, imagenes: imagenesLimpias };
 

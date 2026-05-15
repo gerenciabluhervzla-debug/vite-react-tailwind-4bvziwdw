@@ -1,19 +1,45 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, X, Image as ImageIcon } from 'lucide-react';
 
-export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConfirm, dialogs }) {
+export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConfirm, dialogs, globalDiscountPercent = 0, isGlobalDiscountActive = false }) {
   const [carrito, setCarrito] = useState({});
   const [totalCotizacion, setTotalCotizacion] = useState(0);
   
-  // NUEVO: Filtros para buscar rápido
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
 
   const updateQty = (key, delta) => { 
     setCarrito(prev => { 
-      const n = Math.max(0, (prev[key]||0)+delta); 
-      if(n===0){const c={...prev}; delete c[key]; return c;} 
-      return {...prev, [key]:n}; 
+      const actual = prev[key] || 0;
+      const nuevo = Math.max(0, actual + delta); 
+
+      // VALIDACIÓN DE STOCK NORMAL Y COMBINADA (BOOSTERS + CONCENTRADOS)
+      if (delta > 0) {
+         const maxDisp = stock && stock[key] ? (typeof stock[key] === 'object' ? stock[key].envios : stock[key]) : 0;
+         if (nuevo > maxDisp) {
+            if(dialogs) dialogs.alert(`Solo tenemos ${maxDisp} unidades disponibles de este producto.`, "Stock Límite");
+            return prev;
+         }
+
+         const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+         const isBooster = boosterKeys.includes(key);
+         const isConcentrado = key === "Concentrado|Unidad";
+
+         if (isBooster || isConcentrado) {
+            let currentNeeded = prev["Concentrado|Unidad"] || 0;
+            boosterKeys.forEach(bk => { currentNeeded += (prev[bk] || 0); });
+            
+            const dispConcentrado = stock && stock["Concentrado|Unidad"] ? (typeof stock["Concentrado|Unidad"] === 'object' ? stock["Concentrado|Unidad"].envios : stock["Concentrado|Unidad"]) : 0;
+            
+            if (currentNeeded + delta > dispConcentrado) {
+              if(dialogs) dialogs.alert(`No puedes agregar más. Solo quedan ${dispConcentrado} Concentrados en stock (se requiere 1 Concentrado por cada Booster añadido).`, "Stock de Concentrado Límite");
+              return prev;
+            }
+         }
+      }
+
+      if(nuevo === 0){const c={...prev}; delete c[key]; return c;} 
+      return {...prev, [key]:nuevo}; 
     }); 
   };
 
@@ -30,8 +56,10 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
       }));
       total += (pPrecio * qty);
     });
-    setTotalCotizacion(total);
-  }, [carrito, catalogo]);
+    
+    const finalTotal = isGlobalDiscountActive ? total * (1 - globalDiscountPercent / 100) : total;
+    setTotalCotizacion(finalTotal);
+  }, [carrito, catalogo, isGlobalDiscountActive, globalDiscountPercent]);
 
   const handleConfirm = () => {
     const lineas = [];
@@ -44,7 +72,9 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
           if (presIndex >= 0 && p.precios) pPrecio = p.precios[presIndex] || 0;
         }
       }));
-      lineas.push(`- ${qty}x ${prod} (${pres}) ${pPrecio > 0 ? `[$${pPrecio} c/u]` : ''}`);
+      
+      const finalPrice = isGlobalDiscountActive ? pPrecio * (1 - globalDiscountPercent / 100) : pPrecio;
+      lineas.push(`- ${qty}x ${prod} (${pres}) ${finalPrice > 0 ? `[$${finalPrice.toFixed(2)} c/u]` : ''}`);
     });
     
     if (lineas.length === 0) {
@@ -125,14 +155,15 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
                        {p.presentaciones.map((pres, i) => {
                           const k = `${p.nombre}|${pres}`; const q = carrito[k] || 0;
                           const disp = stock ? (typeof stock[k] === 'object' ? stock[k].envios : (stock[k]||0)) : 0;
-                          // AQUI SE LEE LA IMAGEN DESDE EL ARREGLO
                           const imageUrl = p.imagenes && p.imagenes[i] ? p.imagenes[i] : null;
+                          
+                          const originalPrice = p.precios[i] || 0;
+                          const discountedPrice = originalPrice * (1 - globalDiscountPercent / 100);
 
                           return (
                             <div key={pres} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-3 rounded-[1.5rem] border dark:border-slate-700 transition-colors gap-3">
                                
                                <div className="flex items-center gap-3 w-full">
-                                  {/* MUESTRA LA IMAGEN DE LA PRESENTACIÓN */}
                                   {imageUrl ? (
                                     <img src={imageUrl} alt={pres} className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-600 shadow-sm shrink-0" />
                                   ) : (
@@ -144,7 +175,14 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
                                   <div className="flex flex-col">
                                     <span className="font-bold opacity-60 text-[10px] dark:text-slate-400 uppercase tracking-widest leading-none mb-1">{pres}</span>
                                     <div className="flex items-baseline gap-2">
-                                       <span className="font-black text-emerald-600 text-base leading-none">${p.precios[i]}</span>
+                                       {isGlobalDiscountActive ? (
+                                         <>
+                                           <span className="font-black text-pink-600 text-base leading-none">${discountedPrice.toFixed(2)}</span>
+                                           <span className="text-[10px] font-bold text-slate-400 line-through">${originalPrice}</span>
+                                         </>
+                                       ) : (
+                                         <span className="font-black text-emerald-600 text-base leading-none">${originalPrice}</span>
+                                       )}
                                        <span className={`text-[9px] font-black ${disp===0?'text-red-500':'text-sky-500'}`}>Stock: {disp}</span>
                                     </div>
                                   </div>
@@ -165,7 +203,9 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
         </div>
         
         <div className="p-6 border-t dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800 transition-colors">
-          <div className="font-black opacity-50 dark:text-slate-400 tracking-widest uppercase text-xs">Items: {Object.values(carrito).reduce((a,b)=>a+b,0)}</div>
+          <div className="font-black opacity-50 dark:text-slate-400 tracking-widest uppercase text-xs">
+            Items: {Object.values(carrito).reduce((a,b)=>a+b,0)} &nbsp;|&nbsp; Total: <span className="text-sky-600 dark:text-sky-400">${totalCotizacion.toFixed(2)}</span>
+          </div>
           <button onClick={handleConfirm} className="bg-sky-600 text-white px-8 py-4 rounded-[2rem] font-black shadow-lg hover:bg-sky-700 transition-all uppercase tracking-widest text-sm">Añadir a la Orden</button>
         </div>
       </div>

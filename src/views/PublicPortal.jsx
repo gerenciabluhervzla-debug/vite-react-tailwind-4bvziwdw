@@ -16,13 +16,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   const [selectedCategory, setSelectedCategory] = useState('Todos');
 
   const [form, setForm] = useState({
-    nombre: '',
-    cedula: '',
-    telefono: '',
-    agencia: '',
-    direccion: '',
-    referencia: '',
-    comprobanteUrl: ''
+    nombre: '', cedula: '', telefono: '', agencia: '', direccion: '', referencia: '', comprobanteUrl: ''
   });
 
   const tasa = parseFloat(config?.tasaDia) || 1;
@@ -41,10 +35,28 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       const actual = prev[key] || 0;
       const nuevo = Math.max(0, actual + delta);
       
-      const maxDisp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
-      if (delta > 0 && nuevo > maxDisp) {
-        dialogs.alert(`Solo tenemos ${maxDisp} unidades disponibles de este producto.`, "Stock Límite");
-        return prev;
+      if (delta > 0) {
+         const maxDisp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+         if (nuevo > maxDisp) {
+            dialogs.alert(`Solo tenemos ${maxDisp} unidades disponibles de este producto.`, "Stock Límite");
+            return prev;
+         }
+
+         const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+         const isBooster = boosterKeys.includes(key);
+         const isConcentrado = key === "Concentrado|Unidad";
+
+         if (isBooster || isConcentrado) {
+            let currentNeeded = prev["Concentrado|Unidad"] || 0;
+            boosterKeys.forEach(bk => { currentNeeded += (prev[bk] || 0); });
+            
+            const dispConcentrado = typeof stock["Concentrado|Unidad"] === 'object' ? stock["Concentrado|Unidad"].envios : (stock["Concentrado|Unidad"] || 0);
+            
+            if (currentNeeded + delta > dispConcentrado) {
+              dialogs.alert(`No puedes agregar más. Solo quedan ${dispConcentrado} Concentrados en stock (se requiere 1 Concentrado por cada Booster añadido).`, "Stock de Concentrado Límite");
+              return prev;
+            }
+         }
       }
 
       if (nuevo === 0) {
@@ -103,13 +115,17 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
 
     setSubiendoFoto(true);
     try {
+      const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+      const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+      
       const base64Data = await compressImage(file, 800, 0.7);
+      
       const response = await fetch(URL_GOOGLE_SCRIPT, {
         method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ 
            tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
-           fileName: `ComprobanteWeb_${Date.now()}.jpg`, 
-           mimeType: 'image/jpeg', 
+           fileName: `ComprobanteWeb_${Date.now()}.${ext}`, 
+           mimeType: mimeType, 
            data: base64Data 
         })
       });
@@ -138,9 +154,21 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
     setEnviando(true);
     try {
       const lineas = [];
-      Object.entries(carrito).forEach(([key, qty]) => {
+      const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+      let finalCarrito = { ...carrito };
+      let countBoosters = 0;
+
+      Object.entries(finalCarrito).forEach(([key, qty]) => {
+        if (boosterKeys.includes(key)) countBoosters += qty;
         lineas.push(`- ${qty}x ${key.replace('|', ' ')}`);
       });
+
+      if (countBoosters > 0) {
+         finalCarrito["Concentrado|Unidad"] = (finalCarrito["Concentrado|Unidad"] || 0) + countBoosters;
+         const yaTieneConcentrado = lineas.some(l => l.includes("Concentrado"));
+         if (!yaTieneConcentrado) lineas.push(`- ${countBoosters}x Concentrado (Unidad) [Auto]`);
+      }
+
       const productosString = lineas.join('\n');
 
       const nuevoPedido = {
@@ -160,7 +188,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         referencia: form.referencia,
         linkComprobantePago: form.comprobanteUrl,
         productos: productosString,
-        carritoObj: carrito,
+        carritoObj: finalCarrito,
         status: 'Por Pagar / Cotización',
         esPublico: true,
         auditado: false,
@@ -268,7 +296,6 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                         const originalPrice = prod.precios[i];
                         const discountedPrice = originalPrice * (1 - globalDiscountPercent / 100);
 
-                        // AQUÍ LEEMOS LA IMAGEN DESDE EL ARREGLO
                         const imgUrl = prod.imagenes && prod.imagenes[i] ? prod.imagenes[i] : null;
 
                         return (

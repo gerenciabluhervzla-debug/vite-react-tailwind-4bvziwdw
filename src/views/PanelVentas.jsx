@@ -56,9 +56,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     
     setFormData(prev => ({ 
       ...prev, 
-      montoPago: final.toFixed(2), 
+      montoPago: prev.esRegalo ? prev.montoPago : final.toFixed(2), 
       moneda: prev.moneda === 'ZELLE' ? 'ZELLE' : 'USD', 
-      tasa: prev.tasa || config.tasaDia 
+      tasa: prev.tasa || config?.tasaDia 
     }));
   }, [formData.carritoObj, formData.descuentoPorcentaje, config?.tasaDia, catalogo, globalDiscountPercent]);
 
@@ -215,19 +215,41 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     if (!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) return dialogs.alert("Debes seleccionar productos del Catálogo Visual.", "Carrito Vacío");
     if (!formData.courier) return dialogs.alert("Por favor selecciona la Empresa de Envío.", "Falta Agencia");
     if (!formData.origenPedido) return dialogs.alert("Por favor selecciona de dónde viene el pedido.", "Falta Origen");
-    if (!formData.esRegalo && (!formData.tasa || parseFloat(formData.tasa) <= 0)) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
-    if (!formData.esRegalo && !formData.moneda) return dialogs.alert("Por favor selecciona la moneda de pago.", "Falta Moneda");
+    
+    if (!formData.tasa || parseFloat(formData.tasa) <= 0) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
+    if (!formData.moneda) return dialogs.alert("Por favor selecciona la moneda de pago.", "Falta Moneda");
+    
     if (formData.esMercadoLibre && !formData.linkGuiaML) return dialogs.alert("Si es un envío de MercadoLibre, debes adjuntar el PDF o Imagen de la guía antes de procesar.", "Falta Guía ML");
     
+    // REVISIÓN DE STOCK (INCLUYENDO LA REGLA DEL CONCENTRADO PARA LOS BOOSTERS)
+    const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
     let sinStock = false;
     let itemsFaltantes = [];
+    let extraConcentrados = 0;
+
     Object.entries(formData.carritoObj).forEach(([key, qty]) => {
       let maxDisp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key]||0);
       if (qty > maxDisp) {
         sinStock = true;
         itemsFaltantes.push(key.replace('|', ' '));
       }
+      if (boosterKeys.includes(key)) {
+         extraConcentrados += qty;
+      }
     });
+
+    if (extraConcentrados > 0) {
+       const qtyConcentradosActual = formData.carritoObj["Concentrado|Unidad"] || 0;
+       const totalConcentradosNecesarios = qtyConcentradosActual + extraConcentrados;
+       const dispConcentrado = typeof stock["Concentrado|Unidad"] === 'object' ? stock["Concentrado|Unidad"].envios : (stock["Concentrado|Unidad"]||0);
+       
+       if (totalConcentradosNecesarios > dispConcentrado) {
+          sinStock = true;
+          if (!itemsFaltantes.some(i => i.includes("Concentrado"))) {
+             itemsFaltantes.push(`Concentrado (Requiere ${totalConcentradosNecesarios} total por los Boosters)`);
+          }
+       }
+    }
 
     if (sinStock) {
       dialogs.confirm(`Falta stock en almacén de envíos para:\n\n${itemsFaltantes.join('\n')}\n\n¿Guardar en la "Lista de Espera" para procesar luego?`, () => {
@@ -241,7 +263,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
   const procesarVenta = async (finalStatus) => {
     setEnviando(true);
-    let montoNum = formData.esRegalo ? 0 : (parseFloat(formData.montoPago) || 0);
+    let montoNum = parseFloat(formData.montoPago) || 0;
     const tasa = parseFloat(formData.tasa) || 1;
     let descuento = parseFloat(formData.descuentoPorcentaje) || 0;
     let pagoExtUsd = 0;
@@ -253,17 +275,15 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     }
 
     let calculo = { usd: 0, ves: 0 };
-    if (!formData.esRegalo) {
-       if (formData.moneda === 'ZELLE') {
-           calculo.usd = montoNum; 
-           calculo.ves = 0; 
-       } else if (formData.moneda === 'USD') {
-           calculo.usd = montoNum;
-           calculo.ves = montoNum * tasa;
-       } else {
-           calculo.ves = montoNum;
-           calculo.usd = tasa > 0 ? montoNum / tasa : 0;
-       }
+    if (formData.moneda === 'ZELLE') {
+        calculo.usd = montoNum; 
+        calculo.ves = 0; 
+    } else if (formData.moneda === 'USD') {
+        calculo.usd = montoNum;
+        calculo.ves = montoNum * tasa;
+    } else {
+        calculo.ves = montoNum;
+        calculo.usd = tasa > 0 ? montoNum / tasa : 0;
     }
 
     let finalCarrito = { ...formData.carritoObj };
@@ -419,12 +439,15 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Origen del Pedido</label>
                <select name="origenPedido" value={formData.origenPedido} onChange={(e)=>setFormData({...formData, origenPedido: e.target.value})} required className="p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm">
                  <option value="" disabled>Seleccionar origen...</option>
-                 <option value="CADENITA DIA MADRE">CADENITA DIA MADRE</option>
-                 <option value="CADENITA 15% DESCUENTO">CADENITA 15% DESCUENTO</option>
-                 <option value="CADENITA 30% DESCUENTO">CADENITA 30% DESCUENTO</option>
+                 <option value="PROMOCION DEL MES">PROMOCIÓN DEL MES</option>
+                 <option value="CUPON100">CUPON100</option>
+                 <option value="MAYORISTA30">MAYORISTA30</option>
                  <option value="PAUTA">PAUTA</option>
                  <option value="PAGINA WEB">PAGINA WEB</option>
                  <option value="RECOMPRA">RECOMPRA</option>
+                 <option value="SEGUIMIENTO">SEGUIMIENTO</option>
+                 <option value="REDES">REDES</option>
+                 <option value="CLIENTE NUEVO / RECOMENDADO">CLIENTE NUEVO / RECOMENDADO</option>
                </select>
              </div>
 
@@ -468,7 +491,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                )}
 
                <div className="flex items-center gap-3">
-                 <input type="checkbox" id="regalo-check" checked={formData.esRegalo} onChange={(e) => setFormData({...formData, esRegalo: e.target.checked})} className="w-5 h-5 accent-purple-600 cursor-pointer rounded" />
+                 <input 
+                    type="checkbox" 
+                    id="regalo-check" 
+                    checked={formData.esRegalo} 
+                    onChange={(e) => {
+                       const checked = e.target.checked;
+                       setFormData(prev => ({
+                          ...prev, 
+                          esRegalo: checked,
+                          montoPago: checked ? '0' : prev.montoPago,
+                          referencia: checked ? 'MUESTRA / OBSEQUIO VIP' : ''
+                       }))
+                    }} 
+                    className="w-5 h-5 accent-purple-600 cursor-pointer rounded" 
+                 />
                  <label htmlFor="regalo-check" className="text-sm font-bold text-purple-700 dark:text-purple-400 cursor-pointer uppercase tracking-wider flex items-center gap-1"><Gift size={16}/> Es Regalo / Obsequio VIP</label>
                </div>
              </div>
@@ -501,10 +538,10 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
              </div>
 
              <div className={`md:col-span-2 p-8 rounded-3xl shadow-inner grid grid-cols-1 md:grid-cols-4 gap-6 transition-colors ${formData.esRegalo ? 'bg-purple-900/20 border-2 border-purple-500 text-purple-300' : 'bg-[#003366] dark:bg-slate-950 text-white'}`}>
-               <div className="flex flex-col"><InputDark disabled={formData.esRegalo || formData.moneda === 'ZELLE'} type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 45.20" /></div>
+               <div className="flex flex-col"><InputDark disabled={formData.moneda === 'ZELLE'} type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required placeholder="Ej: 45.20" /></div>
                <div className="flex flex-col">
                  <label className="text-[10px] font-black uppercase text-slate-300 mb-1.5 ml-2 transition-colors">Moneda de Pago</label>
-                 <select disabled={formData.esRegalo} value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} required={!formData.esRegalo} className={`p-3.5 border-2 rounded-2xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold cursor-pointer disabled:opacity-50 shadow-inner ${!formData.moneda && !formData.esRegalo ? 'border-amber-500 text-slate-400' : 'border-slate-700 text-white'}`}>
+                 <select value={formData.moneda} onChange={(e)=>setFormData({...formData, moneda: e.target.value})} required className={`p-3.5 border-2 rounded-2xl bg-slate-800 outline-none focus:border-sky-400 transition-colors font-bold cursor-pointer shadow-inner ${!formData.moneda ? 'border-amber-500 text-slate-400' : 'border-slate-700 text-white'}`}>
                    <option value="" disabled>Seleccionar...</option> 
                    <option value="USD">Dólares (Efectivo / Panamá)</option> 
                    <option value="ZELLE">Zelle (USD Directo)</option>
@@ -512,9 +549,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                  </select>
                </div>
                <div className="flex flex-col relative">
-                  <InputDark disabled={formData.esRegalo} type="number" step="0.01" label="Monto Final a Pagar" value={formData.esRegalo ? '0' : formData.montoPago} onChange={(e)=>setFormData({...formData, montoPago: e.target.value})} required={!formData.esRegalo} placeholder="Ej: 30.50" />
+                  <InputDark type="number" step="0.01" label="Monto Final a Pagar" value={formData.montoPago} onChange={(e)=>setFormData({...formData, montoPago: e.target.value})} required placeholder="Ej: 30.50" />
                   
-                  {!formData.esRegalo && formData.tasa && formData.montoPago && formData.moneda && (
+                  {formData.tasa && formData.montoPago && formData.moneda && (
                     <span className="text-xs text-sky-400 font-bold absolute -bottom-5 left-2">
                        {formData.moneda === 'ZELLE' 
                           ? 'Pago directo vía Zelle (Sin Bs)'
@@ -525,7 +562,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                     </span>
                   )}
                </div>
-               <InputDark disabled={formData.esRegalo} label="Referencia / Banco" value={formData.esRegalo ? 'MUESTRA / OBSEQUIO VIP' : formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required={!formData.esRegalo} placeholder="Ej. 1234 Banesco" />
+               <InputDark label="Referencia / Banco" value={formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required placeholder="Ej. 1234 Banesco" />
                
                {!formData.esRegalo && (
                  <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-6"><InputDark type="number" step="0.01" label="Añadir Descuento Asesor (%)" value={formData.descuentoPorcentaje} onChange={(e)=>setFormData({...formData, descuentoPorcentaje: e.target.value})} placeholder="Ej: 5" /></div>
@@ -583,7 +620,10 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                 <div className="lg:col-span-3 flex flex-col justify-start mt-2 lg:mt-0">
                   <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monto a pagar:</span>
                   {p.esRegalo ? (
-                     <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1"><Gift size={14}/> REGALO VIP</div>
+                     <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800/50">
+                        <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1 mb-1"><Gift size={14}/> REGALO VIP</div>
+                        {p.montoUsd > 0 && <div className="font-black text-purple-800 dark:text-purple-300 text-lg">+ ${p.montoUsd.toFixed(2)}</div>}
+                     </div>
                   ) : p.moneda === 'ZELLE' ? (
                      <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800/50">
                         <div className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">ZELLE</div>
@@ -634,7 +674,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         </div>
       )}
 
-      {/* ... (Las vistas de 'espera' y 'web' se mantienen igual) ... */}
       {vista === 'espera' && puedeCrear && (
         <div className="animate-in fade-in bg-amber-50 dark:bg-amber-900/10 p-6 rounded-xl border border-amber-200 dark:border-amber-800">
            <h3 className="font-bold text-amber-800 dark:text-amber-500 mb-4 flex items-center gap-2"><Clock/> Clientes en Espera (Sin Stock)</h3>
@@ -692,6 +731,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         isOpen={isCatalogOpen} 
         onClose={()=>setIsCatalogOpen(false)} 
         dialogs={dialogs}
+        globalDiscountPercent={globalDiscountPercent}
+        isGlobalDiscountActive={isGlobalDiscountActive}
         onConfirm={(txt, obj)=>{
           setFormData(prev => ({
             ...prev, 
