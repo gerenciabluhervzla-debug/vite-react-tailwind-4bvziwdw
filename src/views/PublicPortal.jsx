@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud, Search, Percent, Image as ImageIcon, X, Copy } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud, Search, Percent, Image as ImageIcon, X, Copy, Eye } from 'lucide-react';
 import { collection, addDoc } from 'firebase/firestore';
 import { BRAND_LOGO } from '../config/constants';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
@@ -15,6 +15,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [showPaymentInfo, setShowPaymentInfo] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null); // NUEVO ESTADO PARA EL VISOR DE IMÁGENES
 
   const getDirectUrl = (url) => {
     if (!url) return null;
@@ -333,9 +334,13 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                         return (
                           <div key={pres} className="flex flex-col gap-3 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border dark:border-slate-700 transition-colors">
                             <div className="flex gap-4 items-center">
+                               {/* SECCIÓN DE LA IMAGEN CON EL HOVER/OJITO */}
                                {imgUrl ? (
-                                  <div className="w-16 h-16 rounded-xl overflow-hidden shadow-sm shrink-0 border border-slate-200 dark:border-slate-600 bg-white">
-                                     <img src={imgUrl} alt={pres} className="w-full h-full object-cover" />
+                                  <div className="relative group w-16 h-16 rounded-xl overflow-hidden shadow-sm shrink-0 border border-slate-200 dark:border-slate-600 bg-white cursor-pointer" onClick={() => setPreviewImage(imgUrl)}>
+                                     <img src={imgUrl} alt={pres} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Eye className="text-white drop-shadow-md" size={20} />
+                                     </div>
                                   </div>
                                ) : (
                                   <div className="w-16 h-16 rounded-xl bg-slate-200 dark:bg-slate-800 flex items-center justify-center shrink-0 border border-slate-300 dark:border-slate-700">
@@ -348,7 +353,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                                  {isGlobalDiscountActive ? (
                                    <div className="flex items-baseline gap-2 mt-1">
                                      <span className="font-black text-pink-600 dark:text-pink-400 text-xl leading-none">${discountedPrice.toFixed(2)}</span>
-                                     <span className="text-[10px] font-bold text-slate-400 line-through">${originalPrice}</span>
+                                     <span className="text-xs font-bold text-slate-400 line-through">${originalPrice}</span>
                                    </div>
                                  ) : (
                                    <div className="font-black text-emerald-600 dark:text-emerald-400 text-xl leading-none mt-1">${originalPrice}</div>
@@ -383,6 +388,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         )}
       </main>
 
+      {/* CARRITO Y MODALES EXISTENTES */}
       {isCartOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setIsCartOpen(false)}></div>
@@ -570,6 +576,13 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         </div>
       )}
 
+      {/* NUEVO: MODAL PARA AMPLIAR LA IMAGEN */}
+      {previewImage && (
+        <div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in" onClick={() => setPreviewImage(null)}>
+           <button className="absolute top-6 right-6 text-white bg-white/10 hover:bg-red-500 rounded-full p-2 transition-colors"><X size={24}/></button>
+           <img src={previewImage} className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl animate-in zoom-in-95 bg-white" alt="Vista Ampliada" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }

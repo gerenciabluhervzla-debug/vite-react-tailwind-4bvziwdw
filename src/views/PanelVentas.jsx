@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, UploadCloud, FileType } from 'lucide-react';
+import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, UploadCloud, FileType, Ban } from 'lucide-react';
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
 import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
@@ -174,6 +174,28 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     setPedidoDevuelto(null);
   };
 
+  // NUEVA FUNCIÓN: Anular / Descartar Pedido desde Ventas
+  const anularPedidoVentas = (pedido) => {
+    dialogs.prompt(`Estás a punto de ANULAR y descartar el pedido de ${pedido.clienteNombre}.\n\nEscribe el motivo de la cancelación:`, async (motivo) => {
+      if (!motivo) return;
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { 
+           status: 'Anulado', 
+           motivoAnulacion: `Cancelado por Ventas: ${motivo}`,
+           anuladoPor: perfil.nombre,
+           fechaAnulacion: Date.now(),
+           montoUsd: 0, montoVes: 0, 
+           notasAuditoria: [...(pedido.notasAuditoria || []), { fecha: Date.now(), texto: `ORDEN ANULADA POR VENTAS: ${motivo}`, autor: perfil.nombre }]
+        });
+        loggear('PEDIDO_ANULADO_VENTAS', `Ventas anuló el pedido de ${pedido.clienteNombre} por: ${motivo}`);
+        dialogs.alert("El pedido ha sido anulado y descartado exitosamente.", "Completado");
+      } catch (e) { 
+        console.error(e); 
+        dialogs.alert("Error al intentar anular el pedido."); 
+      }
+    }, "Cancelar Pedido");
+  };
+
   const handleFileUploadML = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -221,7 +243,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     
     if (formData.esMercadoLibre && !formData.linkGuiaML) return dialogs.alert("Si es un envío de MercadoLibre, debes adjuntar el PDF o Imagen de la guía antes de procesar.", "Falta Guía ML");
     
-    // REVISIÓN DE STOCK (INCLUYENDO LA REGLA DEL CONCENTRADO PARA LOS BOOSTERS)
     const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
     let sinStock = false;
     let itemsFaltantes = [];
@@ -439,15 +460,12 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Origen del Pedido</label>
                <select name="origenPedido" value={formData.origenPedido} onChange={(e)=>setFormData({...formData, origenPedido: e.target.value})} required className="p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm">
                  <option value="" disabled>Seleccionar origen...</option>
-                 <option value="PROMOCION DEL MES">PROMOCIÓN DEL MES</option>
-                 <option value="CUPON100">CUPON100</option>
-                 <option value="MAYORISTA30">MAYORISTA30</option>
+                 <option value="CADENITA DIA MADRE">CADENITA DIA MADRE</option>
+                 <option value="CADENITA 15% DESCUENTO">CADENITA 15% DESCUENTO</option>
+                 <option value="CADENITA 30% DESCUENTO">CADENITA 30% DESCUENTO</option>
                  <option value="PAUTA">PAUTA</option>
                  <option value="PAGINA WEB">PAGINA WEB</option>
                  <option value="RECOMPRA">RECOMPRA</option>
-                 <option value="SEGUIMIENTO">SEGUIMIENTO</option>
-                 <option value="REDES">REDES</option>
-                 <option value="CLIENTE NUEVO / RECOMENDADO">CLIENTE NUEVO / RECOMENDADO</option>
                </select>
              </div>
 
@@ -590,11 +608,14 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
           <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-700">
             {pedidos.filter(p => !p.esPublico).length === 0 ? (
               <div className="p-10 text-center text-slate-400 italic font-bold">No hay ventas registradas aún.</div>
-            ) : pedidos.filter(p => !p.esPublico).map(p => (
-              <div key={p.id} className="flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+            ) : pedidos.filter(p => !p.esPublico).map(p => {
+              const isAnulado = p.status === 'Anulado';
+              
+              return (
+              <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${isAnulado ? 'opacity-60 grayscale-[50%]' : ''}`}>
                 
                 <div className="lg:col-span-4 flex flex-col justify-start">
-                  <div className="font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2">
+                  <div className={`font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2 ${isAnulado ? 'line-through text-slate-400' : ''}`}>
                      {p.clienteNombre}
                      {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
                   </div>
@@ -619,7 +640,13 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
                 <div className="lg:col-span-3 flex flex-col justify-start mt-2 lg:mt-0">
                   <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monto a pagar:</span>
-                  {p.esRegalo ? (
+                  {isAnulado ? (
+                     <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-xl border border-slate-300 dark:border-slate-600">
+                        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-1"><Ban size={12}/> ORDEN ANULADA</div>
+                        <div className="font-black text-slate-400 text-lg line-through">${(p.montoUsd||0).toFixed(2)}</div>
+                        <div className="text-[10px] text-red-500 font-bold mt-1 leading-tight">Motivo: {p.motivoAnulacion}</div>
+                     </div>
+                  ) : p.esRegalo ? (
                      <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800/50">
                         <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1 mb-1"><Gift size={14}/> REGALO VIP</div>
                         {p.montoUsd > 0 && <div className="font-black text-purple-800 dark:text-purple-300 text-lg">+ ${p.montoUsd.toFixed(2)}</div>}
@@ -652,12 +679,22 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                 {puedeCrear && (
                   <div className="lg:col-span-3 flex flex-row lg:flex-col items-center lg:items-end justify-between lg:justify-start gap-3 mt-4 lg:mt-0 pt-4 lg:pt-0 border-t border-slate-100 dark:border-slate-700 lg:border-none w-full">
                     <div className="flex flex-wrap lg:flex-col gap-2 w-full lg:w-auto items-center lg:items-end">
-                      {p.status === 'Rechazado' && (
-                        <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 hover:bg-amber-200 text-xs font-bold py-2 px-4 rounded-lg transition-colors shadow-sm w-full lg:w-auto text-center">Corregir Orden</button>
-                      )}
+                      
+                      {/* BOTONES EXCLUSIVOS DE "PENDIENTE" O "RECHAZADO" */}
                       {(p.status === 'Pendiente' || p.status === 'Rechazado') && (
-                        <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="text-xs text-slate-500 hover:text-amber-500 font-bold underline transition-colors p-2 lg:p-0">Mover a Espera</button>
+                        <>
+                          <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 dark:text-amber-400 text-xs font-bold py-2 px-4 rounded-lg transition-colors shadow-sm w-full lg:w-auto text-center border border-amber-200 dark:border-amber-800">
+                             Corregir / Modificar
+                          </button>
+                          <button onClick={() => anularPedidoVentas(p)} className="bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 text-xs font-bold py-2 px-4 rounded-lg transition-colors shadow-sm w-full lg:w-auto text-center flex justify-center items-center gap-1.5 border border-red-200 dark:border-red-800/50">
+                             <Ban size={14}/> Descartar
+                          </button>
+                          <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="text-xs text-slate-500 hover:text-amber-500 font-bold underline transition-colors p-2 lg:p-0">
+                             Mover a Espera
+                          </button>
+                        </>
                       )}
+
                       {p.status === 'Despachado' && (
                         <>
                           <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">Guía: {p.guia}</div>
@@ -665,11 +702,11 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                         </>
                       )}
                     </div>
-                    {p.auditado && <span className="text-emerald-600 font-bold text-[10px] flex items-center justify-end gap-1 mt-1 uppercase tracking-widest w-full lg:w-auto"><ShieldCheck size={14}/> Auditado</span>}
+                    {p.auditado && p.status !== 'Anulado' && <span className="text-emerald-600 font-bold text-[10px] flex items-center justify-end gap-1 mt-1 uppercase tracking-widest w-full lg:w-auto"><ShieldCheck size={14}/> Auditado</span>}
                   </div>
                 )}
               </div>
-            ))}
+            )})}
           </div>
         </div>
       )}
@@ -688,7 +725,11 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                        {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
                      </div>
                    </div>
-                   <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-sky-600 text-white px-6 py-3 rounded-xl font-black text-xs shadow hover:bg-sky-700 transition-colors shrink-0 w-full sm:w-auto">Retomar Pedido</button>
+                   <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                     <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm hover:bg-amber-200 transition-colors w-full sm:w-auto">Modificar</button>
+                     <button onClick={() => anularPedidoVentas(p)} className="bg-red-100 text-red-700 px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm hover:bg-red-200 transition-colors w-full sm:w-auto">Descartar</button>
+                     <button onClick={() => cambiarEstadoPedido(p.id, 'Pendiente')} className="bg-sky-600 text-white px-6 py-2.5 rounded-xl font-black text-xs shadow hover:bg-sky-700 transition-colors w-full sm:w-auto">Retomar Pedido</button>
+                   </div>
                  </div>
                ))}
              </div>

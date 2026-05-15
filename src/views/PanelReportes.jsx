@@ -240,7 +240,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
          <div style="background: #f8fafc; padding: 15px; margin-top: 15px; border-radius: 8px; border-left: 4px solid #0ea5e9;">
             <h3 style="margin: 0 0 10px 0; font-size: 14px;">${asesora.nombre.toUpperCase()}</h3>
             <p style="margin: 0; font-size: 12px; font-weight: bold; color: #475569;">
-               Efectivo: <span style="color:#0f172a;">$${asesora.totalUsd.toFixed(2)}</span> | 
+               Divisas: <span style="color:#0f172a;">$${asesora.totalUsd.toFixed(2)}</span> | 
                Zelle: <span style="color:#6b21a8;">$${asesora.totalZelle.toFixed(2)}</span> | 
                Bolívares: <span style="color:#059669;">Bs. ${asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
             </p>
@@ -351,7 +351,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              <>
                <div className="bg-[#003366] text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-sky-600 relative overflow-hidden">
                   <div className="relative z-10">
-                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Efectivo / Transf ($)</div>
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Divisas / Transf ($)</div>
                     <div className="text-3xl lg:text-4xl font-black">${metricas.ventasUSD.toFixed(2)}</div>
                   </div>
                   <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
@@ -452,7 +452,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                                   <span className="font-black text-lg text-sky-800 dark:text-sky-300 uppercase tracking-tighter">{asesora.nombre}</span>
                                   <div className="flex flex-wrap gap-4 text-xs font-bold text-slate-600 dark:text-slate-300">
-                                     <span className="bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border dark:border-slate-700 shadow-sm">Efectivo: <span className="text-slate-900 dark:text-white">${asesora.totalUsd.toFixed(2)}</span></span>
+                                     <span className="bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border dark:border-slate-700 shadow-sm">Divisas: <span className="text-slate-900 dark:text-white">${asesora.totalUsd.toFixed(2)}</span></span>
                                      <span className="bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-3 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800/50 shadow-sm">Zelle: ${asesora.totalZelle.toFixed(2)}</span>
                                      <span className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800/50 shadow-sm">Bs. {asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2})}</span>
                                   </div>

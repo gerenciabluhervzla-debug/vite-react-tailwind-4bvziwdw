@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Package, Edit3, Trash2, Camera, X, Loader2, PlusCircle, Image as ImageIcon } from 'lucide-react';
+import { Package, Edit3, Trash2, Camera, X, Loader2, PlusCircle, Image as ImageIcon, Eye } from 'lucide-react';
 import { Input } from '../../components/ui';
 import { setDoc, doc } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../../config/firebase';
@@ -10,6 +10,7 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
   const [form, setForm] = useState(defaultForm);
   const [modoEdicion, setModoEdicion] = useState(null); 
   const [subiendoIdx, setSubiendoIdx] = useState(null);
+  const [previewImage, setPreviewImage] = useState(null); // NUEVO ESTADO PARA EL VISOR DE IMÁGENES
 
   // FUNCIÓN MAESTRA PARA SALTAR EL BLOQUEO DE GOOGLE DRIVE
   const getDirectUrl = (url) => {
@@ -105,7 +106,7 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
     
     if(!catName || !form.nombre || presentacionesArr.length === 0) return dialogs.alert("Por favor completa todos los campos requeridos.", "Información Incompleta");
 
-    // BLINDAJE: Garantiza que los precios SIEMPRE coincidan con la cantidad de presentaciones
+    // BLINDAJE DE PRECIOS
     const rawPrecios = form.precios ? form.precios.split(',').map(s=>parseFloat(s.trim()) || 0) : [];
     const preciosArr = presentacionesArr.map((_, i) => rawPrecios[i] || 0);
 
@@ -141,7 +142,7 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
   const presentacionesArr = form.presentaciones.split(',').map(s=>s.trim()).filter(Boolean);
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8 relative">
       <div className="bg-slate-50 dark:bg-slate-800/50 p-8 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-inner">
         <h3 className="font-black text-xl text-slate-800 dark:text-slate-100 mb-6 flex items-center gap-2"><Package className="text-sky-600"/> {modoEdicion ? 'Editar Producto Seleccionado' : 'Añadir Nuevo Producto al Catálogo'}</h3>
         <form onSubmit={guardarProducto} className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -169,9 +170,12 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
                       <div key={idx} className="border-2 border-dashed border-slate-200 dark:border-slate-600 rounded-xl p-4 flex flex-col items-center justify-center gap-3">
                          <span className="text-[10px] font-black uppercase text-slate-500 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded w-full text-center truncate">{pres}</span>
                          {form.imagenes && form.imagenes[idx] ? (
-                            <div className="relative group">
+                            <div className="relative group cursor-pointer" onClick={() => setPreviewImage(getDirectUrl(form.imagenes[idx]))}>
                                <img src={getDirectUrl(form.imagenes[idx])} className="h-20 w-20 object-cover rounded-xl shadow-md border-2 border-emerald-400 bg-white" alt={pres} />
-                               <button type="button" onClick={() => eliminarImagen(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"><Trash2 size={12}/></button>
+                               <div className="absolute inset-0 bg-black/40 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Eye size={20} className="text-white" />
+                               </div>
+                               <button type="button" onClick={(e) => { e.stopPropagation(); eliminarImagen(idx); }} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"><Trash2 size={12}/></button>
                             </div>
                          ) : (
                             <label className="cursor-pointer w-full bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 py-3 px-2 rounded-xl text-[10px] font-black text-center hover:bg-sky-100 transition-colors shadow-sm flex flex-col items-center gap-1">
@@ -210,7 +214,12 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
                          return (
                            <div key={pres} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 pr-3 rounded-lg shadow-sm overflow-hidden">
                              {imageUrl ? (
-                                <img src={imageUrl} className="w-8 h-8 object-cover border-r border-slate-200 dark:border-slate-700 bg-white" alt="prod" />
+                                <div className="relative group w-8 h-8 overflow-hidden border-r border-slate-200 dark:border-slate-700 bg-white cursor-pointer shrink-0" onClick={() => setPreviewImage(imageUrl)}>
+                                   <img src={imageUrl} className="w-full h-full object-cover transition-transform group-hover:scale-110" alt="prod" />
+                                   <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <Eye size={12} className="text-white" />
+                                   </div>
+                                </div>
                              ) : (
                                 <div className="w-8 h-8 bg-slate-200 dark:bg-slate-700 flex items-center justify-center border-r border-slate-300 dark:border-slate-600"><ImageIcon size={12} className="text-slate-400"/></div>
                              )}
@@ -232,6 +241,14 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
           </table>
         </div>
       </div>
+
+      {/* NUEVO: MODAL PARA AMPLIAR LA IMAGEN */}
+      {previewImage && (
+        <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in" onClick={() => setPreviewImage(null)}>
+           <button className="absolute top-6 right-6 text-white bg-white/10 hover:bg-red-500 rounded-full p-2 transition-colors"><X size={24}/></button>
+           <img src={previewImage} className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl animate-in zoom-in-95 bg-white" alt="Vista Ampliada" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }

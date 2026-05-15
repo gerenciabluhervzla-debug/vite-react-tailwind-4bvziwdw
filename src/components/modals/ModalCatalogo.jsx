@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, X, Image as ImageIcon } from 'lucide-react';
+import { Search, X, Image as ImageIcon, Eye } from 'lucide-react';
 
 export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConfirm, dialogs, globalDiscountPercent = 0, isGlobalDiscountActive = false }) {
   const [carrito, setCarrito] = useState({});
@@ -7,6 +7,7 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
   
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
+  const [previewImage, setPreviewImage] = useState(null); // NUEVO ESTADO PARA EL VISOR DE IMÁGENES
 
   // FUNCIÓN MAESTRA
   const getDirectUrl = (url) => {
@@ -67,7 +68,6 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
       catalogo.forEach(c => c.productos.forEach(p => {
         if(p.nombre === nombre) {
           const presIndex = p.presentaciones.indexOf(pres);
-          // BLINDAJE DE PRECIOS
           if (presIndex >= 0 && p.precios && p.precios[presIndex] !== undefined) pPrecio = p.precios[presIndex];
         }
       }));
@@ -183,8 +183,14 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
                             <div key={pres} className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-3 rounded-[1.5rem] border dark:border-slate-700 transition-colors gap-3">
                                
                                <div className="flex items-center gap-3 w-full">
+                                  {/* SECCIÓN DE LA IMAGEN CON EL HOVER/OJITO */}
                                   {imageUrl ? (
-                                    <img src={imageUrl} alt={pres} className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-600 shadow-sm shrink-0 bg-white" />
+                                    <div className="relative group w-12 h-12 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-600 shadow-sm shrink-0 bg-white cursor-pointer" onClick={() => setPreviewImage(imageUrl)}>
+                                       <img src={imageUrl} alt={pres} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <Eye size={16} className="text-white drop-shadow-md" />
+                                       </div>
+                                    </div>
                                   ) : (
                                     <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-800 flex items-center justify-center shrink-0 border border-slate-300 dark:border-slate-700">
                                        <ImageIcon size={16} className="text-slate-400"/>
@@ -228,6 +234,14 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
           <button onClick={handleConfirm} className="bg-sky-600 text-white px-8 py-4 rounded-[2rem] font-black shadow-lg hover:bg-sky-700 transition-all uppercase tracking-widest text-sm">Añadir a la Orden</button>
         </div>
       </div>
+
+      {/* NUEVO: MODAL PARA AMPLIAR LA IMAGEN */}
+      {previewImage && (
+        <div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in" onClick={() => setPreviewImage(null)}>
+           <button className="absolute top-6 right-6 text-white bg-white/10 hover:bg-red-500 rounded-full p-2 transition-colors"><X size={24}/></button>
+           <img src={previewImage} className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl animate-in zoom-in-95 bg-white" alt="Vista Ampliada" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }
