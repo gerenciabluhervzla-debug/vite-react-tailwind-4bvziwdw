@@ -13,7 +13,6 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
       const actual = prev[key] || 0;
       const nuevo = Math.max(0, actual + delta); 
 
-      // VALIDACIÓN DE STOCK NORMAL Y COMBINADA (BOOSTERS + CONCENTRADOS)
       if (delta > 0) {
          const maxDisp = stock && stock[key] ? (typeof stock[key] === 'object' ? stock[key].envios : stock[key]) : 0;
          if (nuevo > maxDisp) {
@@ -155,7 +154,9 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
                        {p.presentaciones.map((pres, i) => {
                           const k = `${p.nombre}|${pres}`; const q = carrito[k] || 0;
                           const disp = stock ? (typeof stock[k] === 'object' ? stock[k].envios : (stock[k]||0)) : 0;
-                          const imageUrl = p.imagenes && p.imagenes[i] ? p.imagenes[i] : null;
+                          
+                          // MODO COMPATIBILIDAD: Busca en el arreglo nuevo, si no, busca en la variable vieja
+                          const imageUrl = (p.imagenes && p.imagenes[i]) ? p.imagenes[i] : (i === 0 && p.imagen ? p.imagen : null);
                           
                           const originalPrice = p.precios[i] || 0;
                           const discountedPrice = originalPrice * (1 - globalDiscountPercent / 100);
@@ -165,7 +166,7 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
                                
                                <div className="flex items-center gap-3 w-full">
                                   {imageUrl ? (
-                                    <img src={imageUrl} alt={pres} className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-600 shadow-sm shrink-0" />
+                                    <img src={imageUrl} alt={pres} className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-600 shadow-sm shrink-0 bg-white" />
                                   ) : (
                                     <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-800 flex items-center justify-center shrink-0 border border-slate-300 dark:border-slate-700">
                                        <ImageIcon size={16} className="text-slate-400"/>

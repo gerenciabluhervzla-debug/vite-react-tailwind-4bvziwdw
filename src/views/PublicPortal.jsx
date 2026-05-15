@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud, Search, Percent, Image as ImageIcon } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Sun, Moon, Store, CheckCircle, Package, Trash2, Loader2, UploadCloud, Search, Percent, Image as ImageIcon, X, Copy } from 'lucide-react';
 import { collection, addDoc } from 'firebase/firestore';
 import { BRAND_LOGO } from '../config/constants';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
@@ -14,6 +14,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
+  const [showPaymentInfo, setShowPaymentInfo] = useState(false); // NUEVO ESTADO PARA EL MODAL
 
   const [form, setForm] = useState({
     nombre: '', cedula: '', telefono: '', agencia: '', direccion: '', referencia: '', comprobanteUrl: ''
@@ -140,6 +141,18 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
   };
 
   const limpiarTexto = (str) => str ? str.replace(/[<>]/g, "") : "";
+
+  // FUNCIÓN PARA COPIAR DATOS BANCARIOS AL PORTAPAPELES
+  const copiarDatosPago = () => {
+    const textoPago = "Banco: Banesco 0134\nTeléfono: 04241138092\nCédula: 19603402";
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(textoPago)
+        .then(() => dialogs.alert("Los datos bancarios han sido copiados al portapapeles.", "¡Copiado!"))
+        .catch(() => dialogs.alert("No se pudo copiar automáticamente.", "Error"));
+    } else {
+       dialogs.alert("Datos:\n" + textoPago, "Copia manual");
+    }
+  };
 
   const confirmarPedido = async (e) => {
     e.preventDefault();
@@ -351,6 +364,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
         )}
       </main>
 
+      {/* CARRITO FLOTANTE */}
       {isCartOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setIsCartOpen(false)}></div>
@@ -432,6 +446,11 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
                      <h3 className="text-xs font-black uppercase text-slate-400 mt-6 mb-2 border-b dark:border-slate-700 pb-2">Información de Pago (Obligatorio)</h3>
                      <p className="text-[10px] text-slate-500 mb-3">Adjunta la referencia y captura del pago móvil o transferencia para procesar tu orden.</p>
                      
+                     {/* BOTÓN PARA ABRIR MODAL DE DATOS DE PAGO */}
+                     <button type="button" onClick={() => setShowPaymentInfo(true)} className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-400 py-3 rounded-xl font-bold text-xs transition-colors mb-4 flex items-center justify-center gap-2 border border-indigo-200 dark:border-indigo-800">
+                        <CheckCircle size={16} /> Ver Datos para el Pago
+                     </button>
+
                      {darkMode ? <InputDark label="Referencia Bancaria" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} required placeholder="Ej: 1234 Banesco"/> 
                                : <Input label="Referencia Bancaria" value={form.referencia} onChange={e=>setForm({...form, referencia: e.target.value})} required placeholder="Ej: 1234 Banesco"/>}
                      
@@ -470,6 +489,32 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
           </div>
         </div>
       )}
+
+      {/* MODAL DE DATOS DE PAGO */}
+      {showPaymentInfo && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-in fade-in">
+           <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 border border-slate-200 dark:border-slate-700">
+              <div className="p-5 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+                 <h3 className="text-lg font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">Datos para el Pago</h3>
+                 <button onClick={() => setShowPaymentInfo(false)} className="p-2 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={18}/></button>
+              </div>
+              <div className="p-6 flex flex-col items-center">
+                 <img src="/pago-movil.jpeg" alt="Datos de Pago" className="w-full max-w-[220px] h-auto object-contain rounded-xl shadow-sm mb-6 border border-slate-200 dark:border-slate-700" />
+                 
+                 <div className="bg-slate-50 dark:bg-slate-900 p-5 rounded-xl w-full border border-slate-100 dark:border-slate-700 mb-5 text-center">
+                    <div className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2">Banco: <span className="font-black text-slate-800 dark:text-white">Banesco 0134</span></div>
+                    <div className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2">Teléfono: <span className="font-black text-slate-800 dark:text-white">04241138092</span></div>
+                    <div className="text-sm font-bold text-slate-600 dark:text-slate-400">Cédula: <span className="font-black text-slate-800 dark:text-white">19603402</span></div>
+                 </div>
+
+                 <button onClick={copiarDatosPago} className="w-full bg-sky-600 hover:bg-sky-700 text-white font-bold py-3.5 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
+                   <Copy size={18}/> Copiar Datos al Portapapeles
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
+
     </div>
   );
 }

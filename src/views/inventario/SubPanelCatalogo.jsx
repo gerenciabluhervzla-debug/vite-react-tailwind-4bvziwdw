@@ -50,7 +50,6 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
     
     setSubiendoIdx(idx);
     try {
-        // CORRECCIÓN: Detectar tipo real (PNG o JPG)
         const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
         const ext = mimeType === 'image/png' ? 'png' : 'jpg';
         
@@ -185,18 +184,22 @@ export default function SubPanelCatalogo({ catalogo, db, appId, loggear, dialogs
                   <td className="p-4">
                     <div className="font-bold text-slate-800 dark:text-slate-100 text-base">{p.nombre}</div>
                     <div className="flex flex-wrap gap-2 mt-3">
-                       {p.presentaciones.map((pres, i) => (
-                         <div key={pres} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 pr-3 rounded-lg shadow-sm overflow-hidden">
-                           {p.imagenes && p.imagenes[i] ? (
-                              <img src={p.imagenes[i]} className="w-8 h-8 object-cover border-r border-slate-200 dark:border-slate-700" alt="prod" />
-                           ) : (
-                              <div className="w-8 h-8 bg-slate-200 dark:bg-slate-700 flex items-center justify-center border-r border-slate-300 dark:border-slate-600"><ImageIcon size={12} className="text-slate-400"/></div>
-                           )}
-                           <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                             {pres} {p.precios && p.precios[i] > 0 ? <span className="text-emerald-600 dark:text-emerald-400 ml-1">${p.precios[i]}</span> : ''}
-                           </span>
-                         </div>
-                       ))}
+                       {p.presentaciones.map((pres, i) => {
+                         // MODO COMPATIBILIDAD AQUI TAMBIEN
+                         const imageUrl = (p.imagenes && p.imagenes[i]) ? p.imagenes[i] : (i === 0 && p.imagen ? p.imagen : null);
+                         return (
+                           <div key={pres} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 pr-3 rounded-lg shadow-sm overflow-hidden">
+                             {imageUrl ? (
+                                <img src={imageUrl} className="w-8 h-8 object-cover border-r border-slate-200 dark:border-slate-700 bg-white" alt="prod" />
+                             ) : (
+                                <div className="w-8 h-8 bg-slate-200 dark:bg-slate-700 flex items-center justify-center border-r border-slate-300 dark:border-slate-600"><ImageIcon size={12} className="text-slate-400"/></div>
+                             )}
+                             <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                               {pres} {p.precios && p.precios[i] > 0 ? <span className="text-emerald-600 dark:text-emerald-400 ml-1">${p.precios[i]}</span> : ''}
+                             </span>
+                           </div>
+                         )
+                       })}
                     </div>
                   </td>
                   <td className="p-4 flex justify-end gap-2 items-center">
