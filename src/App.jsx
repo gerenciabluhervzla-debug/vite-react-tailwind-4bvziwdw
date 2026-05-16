@@ -117,8 +117,11 @@ export default function App() {
     return () => unsubs.forEach(u => u());
   }, [user]);
 
-  // CORRECCIÓN VITAL: LECTURA DE DATOS PÚBLICOS (Siempre se ejecuta, no requiere inicio de sesión)
+  // CORRECCIÓN VITAL: LECTURA DE DATOS PÚBLICOS
+  // Ahora depende de `user` para que se reinicie si Firebase tumba la conexión al cerrar sesión.
   useEffect(() => {
+    if (!user) return; // Espera a que haya usuario anónimo o loggeado
+
     const unsubs = [];
     const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
 
@@ -135,9 +138,9 @@ export default function App() {
     }, onError));
 
     return () => unsubs.forEach(unsub => unsub());
-  }, []); // <-- Dependencias vacías para que corra siempre al iniciar
+  }, [user]);
 
-  // LECTURA DE DATOS PRIVADOS (Solo descarga información si el usuario tiene permiso aprobado)
+  // LECTURA DE DATOS PRIVADOS
   useEffect(() => {
     if (!userProfile || !userProfile.isApproved) return;
     const unsubs = [];
@@ -187,6 +190,7 @@ export default function App() {
     catch (error) { console.error(error); dialogs.alert("Error de conexión."); setAuthLoading(false); }
   };
   
+  // CORRECCIÓN VITAL: Cierre de Sesión seguro
   const cerrarSesion = async () => {
     if (userProfile && user) {
        try {
@@ -194,7 +198,8 @@ export default function App() {
          await registrarLogSistem(userProfile, 'CIERRE_SESION', `Cerró sesión.`);
        } catch(e) {}
     }
-    signOut(auth);
+    await signOut(auth); // Desconecta
+    try { await signInAnonymously(auth); } catch(e) {} // Reconecta anónimamente para que vea el portal
   };
 
   const cambiarEstadoPedido = async (id, nuevoEstado) => {
@@ -253,10 +258,7 @@ export default function App() {
     const r = userProfile?.role;
     const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
     const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA].includes(r);
-    
-    // CORRECCIÓN QA: Auditoría ahora también puede ver la pestaña Despacho
     const showDespacho = [ROLES.ADMIN, ROLES.DESPACHO, ROLES.AUDITORIA].includes(r);
-    
     const showReportes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r);
     const showInventario = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r); 
     const showUsuarios = [ROLES.ADMIN].includes(r);
