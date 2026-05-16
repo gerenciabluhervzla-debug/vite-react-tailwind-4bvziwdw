@@ -35,11 +35,36 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
   const handleGuiaChange = (id, field, value) => setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
 
+  // =========================================================================
+  // SUBIDA DE ARCHIVOS ORGANIZADA (CARPETAS Y NOMBRES E1_NOMBRE_FECHA)
+  // =========================================================================
   const handleFileUpload = async (e, id, field) => {
     const file = e.target.files[0];
     if (!file) return;
     if (!URL_GOOGLE_SCRIPT) return dialogs.alert("⚠️ Falta configurar el puente de Google Drive.", "Configuración Faltante");
     
+    // 1. Ubicamos los datos del cliente actual
+    const pedidoActivo = pedidos.find(p => p.id === id);
+    const nombreBase = pedidoActivo?.clienteNombre || 'Sin_Nombre';
+    const nombreLimpio = nombreBase.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, '_');
+    
+    // 2. Generamos las fechas
+    const hoy = new Date();
+    const dia = String(hoy.getDate()).padStart(2, '0');
+    const mes = String(hoy.getMonth() + 1).padStart(2, '0');
+    const anio = hoy.getFullYear();
+    const fechaCarpeta = `${dia}-${mes}-${anio}`;
+    const fechaBD = `${dia}/${mes}/${anio}`;
+
+    // 3. Calculamos el prefijo (E1, E2...)
+    const enviosDeHoy = pedidos.filter(p => p.fechaDespacho === fechaBD && p.status === 'Despachado');
+    const prefijoE = `E${enviosDeHoy.length + 1}`;
+
+    // 4. Establecemos la ruta y el nombre final
+    const carpetaRaiz = field === 'link' ? 'Guias' : 'Fotos_Productos';
+    const nombreFinal = `${prefijoE}_${nombreLimpio}_${fechaCarpeta}.jpg`;
+    const rutaCarpetas = `${carpetaRaiz}/${fechaCarpeta}`;
+
     setSubiendo({ id, field });
     try {
         const base64Data = await compressImage(file, 800, 0.7);
@@ -48,7 +73,8 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
             method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify({ 
                tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
-               fileName: `Soporte_${id.substring(0,5)}_${field}.jpg`, 
+               fileName: nombreFinal, 
+               folderPath: rutaCarpetas, // Enviamos la ruta de las carpetas al script de Google
                mimeType: 'image/jpeg', 
                data: base64Data 
             })
@@ -59,11 +85,16 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
            const dbField = field === 'link' ? 'linkGuia' : 'linkFotoProductos';
            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id), { [dbField]: result.url });
            handleGuiaChange(id, field, result.url); 
-           loggear('FOTO_PROCESADA', `Soporte en caché para el pedido ${id}`); 
+           loggear('FOTO_PROCESADA', `Archivo ${nombreFinal} guardado exitosamente`); 
         }
         setSubiendo({ id: null, field: null });
-    } catch (error) { console.error(error); dialogs.alert("Error subiendo la foto a Drive.", "Fallo de Red"); setSubiendo({ id: null, field: null }); }
+    } catch (error) { 
+      console.error(error); 
+      dialogs.alert("Error subiendo la foto a Drive.", "Fallo de Red"); 
+      setSubiendo({ id: null, field: null }); 
+    }
   };
+  // =========================================================================
 
   const guardarAvance = async (pedido) => {
     const inputData = guiasInput[pedido.id] || {};
