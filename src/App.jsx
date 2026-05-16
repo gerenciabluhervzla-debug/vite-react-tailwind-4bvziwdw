@@ -120,8 +120,6 @@ export default function App() {
   // CORRECCIÓN VITAL: LECTURA DE DATOS PÚBLICOS
   // Ahora depende de `user` para que se reinicie si Firebase tumba la conexión al cerrar sesión.
   useEffect(() => {
-    if (!user) return; // Espera a que haya usuario anónimo o loggeado
-
     const unsubs = [];
     const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
 
@@ -138,7 +136,7 @@ export default function App() {
     }, onError));
 
     return () => unsubs.forEach(unsub => unsub());
-  }, [user]);
+  }, []);
 
   // LECTURA DE DATOS PRIVADOS
   useEffect(() => {
