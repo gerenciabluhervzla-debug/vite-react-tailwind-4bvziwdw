@@ -138,7 +138,7 @@ export default function App() {
     }, onError));
 
     return () => unsubs.forEach(unsub => unsub());
-  }, [user]); // <-- CLAVE: Reconstruye los oyentes al cambiar la sesión
+  }, []); // <--- CLAVE: Este arreglo vacío [] asegura que la conexión jamás se corte al cerrar sesión.
 
   // =======================================================================
   // 2. CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
