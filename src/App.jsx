@@ -121,7 +121,7 @@ export default function App() {
   // Ahora depende de `user` para que se reinicie si Firebase tumba la conexión al cerrar sesión.
   useEffect(() => {
     const unsubs = [];
-    const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
+    const onError = (e) => console.warn("Firestore Listener Error:", e.message);
 
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), (docSnap) => {
       setCatalogo(docSnap.exists() && docSnap.data().categorias ? docSnap.data().categorias : DEFAULT_CATALOGO);
