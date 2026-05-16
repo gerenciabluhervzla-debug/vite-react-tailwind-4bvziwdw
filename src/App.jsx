@@ -117,10 +117,10 @@ export default function App() {
     return () => unsubs.forEach(u => u());
   }, [user]);
 
+  // CORRECCIÓN VITAL: LECTURA DE DATOS PÚBLICOS (Siempre se ejecuta, no requiere inicio de sesión)
   useEffect(() => {
-    if (!user) return;
     const unsubs = [];
-    const onError = (e) => console.warn("Firestore Listener Error:", e.message);
+    const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
 
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), (docSnap) => {
       setCatalogo(docSnap.exists() && docSnap.data().categorias ? docSnap.data().categorias : DEFAULT_CATALOGO);
@@ -134,36 +134,43 @@ export default function App() {
       if(docSnap.exists()) setConfigGral(docSnap.data());
     }, onError));
 
-    if (userProfile && userProfile.isApproved) {
-      const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(150));
-      unsubs.push(onSnapshot(qPedidos, (snapshot) => {
-        setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, onError));
+    return () => unsubs.forEach(unsub => unsub());
+  }, []); // <-- Dependencias vacías para que corra siempre al iniciar
 
-      unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => {
-        setNotasInventario(docSnap.exists() ? docSnap.data() : {});
-      }, onError));
+  // LECTURA DE DATOS PRIVADOS (Solo descarga información si el usuario tiene permiso aprobado)
+  useEffect(() => {
+    if (!userProfile || !userProfile.isApproved) return;
+    const unsubs = [];
+    const onError = (e) => console.warn("Firestore Listener Error Privado:", e.message);
 
-      const qMovimientos = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), orderBy('fechaCreacion', 'desc'), limit(50));
-      unsubs.push(onSnapshot(qMovimientos, (snapshot) => {
-        setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, onError));
+    const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(150));
+    unsubs.push(onSnapshot(qPedidos, (snapshot) => {
+      setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, onError));
 
-      const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITORIA].includes(userProfile.role);
-      if (esAdminOAuditor) {
-        unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
-          setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        }, onError));
-        
-        const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(200));
-        unsubs.push(onSnapshot(qLogs, (snapshot) => {
-          setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        }, onError));
-      }
+    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => {
+      setNotasInventario(docSnap.exists() ? docSnap.data() : {});
+    }, onError));
+
+    const qMovimientos = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), orderBy('fechaCreacion', 'desc'), limit(50));
+    unsubs.push(onSnapshot(qMovimientos, (snapshot) => {
+      setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, onError));
+
+    const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITORIA].includes(userProfile.role);
+    if (esAdminOAuditor) {
+      unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
+        setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, onError));
+      
+      const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(200));
+      unsubs.push(onSnapshot(qLogs, (snapshot) => {
+        setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, onError));
     }
 
     return () => unsubs.forEach(unsub => unsub());
-  }, [user, userProfile?.isApproved]);
+  }, [userProfile?.isApproved]);
 
   const registrarLogSistem = async (perfilActivo, accion, detalle) => {
     if (!perfilActivo) return;
