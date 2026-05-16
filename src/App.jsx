@@ -117,11 +117,13 @@ export default function App() {
     return () => unsubs.forEach(u => u());
   }, [user]);
 
-  // CORRECCIÓN VITAL: LECTURA DE DATOS PÚBLICOS
-  // Ahora depende de `user` para que se reinicie si Firebase tumba la conexión al cerrar sesión.
+  // =======================================================================
+  // 1. CARGA DE DATOS PÚBLICOS (RECONEXIÓN AUTOMÁTICA)
+  // Depende de [user] para reiniciarse si la sesión cambia, evitando el bloqueo.
+  // =======================================================================
   useEffect(() => {
     const unsubs = [];
-    const onError = (e) => console.warn("Firestore Listener Error:", e.message);
+    const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
 
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), (docSnap) => {
       setCatalogo(docSnap.exists() && docSnap.data().categorias ? docSnap.data().categorias : DEFAULT_CATALOGO);
@@ -136,9 +138,11 @@ export default function App() {
     }, onError));
 
     return () => unsubs.forEach(unsub => unsub());
-  }, []);
+  }, [user]); // <-- CLAVE: Reconstruye los oyentes al cambiar la sesión
 
-  // LECTURA DE DATOS PRIVADOS
+  // =======================================================================
+  // 2. CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
+  // =======================================================================
   useEffect(() => {
     if (!userProfile || !userProfile.isApproved) return;
     const unsubs = [];
@@ -188,7 +192,9 @@ export default function App() {
     catch (error) { console.error(error); dialogs.alert("Error de conexión."); setAuthLoading(false); }
   };
   
-  // CORRECCIÓN VITAL: Cierre de Sesión seguro
+  // =======================================================================
+  // CIERRE DE SESIÓN TOTAL Y RECARGA
+  // =======================================================================
   const cerrarSesion = async () => {
     if (userProfile && user) {
        try {
@@ -196,8 +202,12 @@ export default function App() {
          await registrarLogSistem(userProfile, 'CIERRE_SESION', `Cerró sesión.`);
        } catch(e) {}
     }
-    await signOut(auth); // Desconecta
-    try { await signInAnonymously(auth); } catch(e) {} // Reconecta anónimamente para que vea el portal
+    await signOut(auth); // Corta la conexión de raíz
+    
+    // Forzamos un "Hard Reload" para limpiar la memoria de React por completo.
+    // Esto asegura que entrarás fresco como un cliente normal sin errores de Firebase.
+    window.location.hash = ''; 
+    window.location.reload(); 
   };
 
   const cambiarEstadoPedido = async (id, nuevoEstado) => {
