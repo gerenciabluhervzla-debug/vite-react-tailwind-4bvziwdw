@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  signInWithPopup, signOut, onAuthStateChanged 
+  signInWithPopup, signOut, onAuthStateChanged, signInAnonymously 
 } from 'firebase/auth';
 import { 
   collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit
@@ -63,29 +63,29 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // =======================================================================
-  // 1. EL VERDADERO CONTROL DE SESIÓN (Limpio y sin anónimos)
-  // =======================================================================
+  // 🔥 LA MAGIA OCURRE AQUÍ: El inicio anónimo ahora es paciente.
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
       } else {
-        setUser(null);
-        setUserProfile(null);
-        setAuthLoading(false);
+        // SOLAMENTE si Firebase está 100% seguro de que no hay un empleado loggeado, creamos el Anónimo
+        try {
+          await signInAnonymously(auth);
+        } catch (error) {
+          console.error("Error iniciando sesión anónima", error);
+          setUser(null);
+          setUserProfile(null);
+          setAuthLoading(false);
+        }
       }
     });
 
     return () => unsubscribe();
   }, []);
 
-  // =======================================================================
-  // 2. PERFIL DE EMPLEADOS
-  // =======================================================================
   useEffect(() => {
-    if (!user) return; 
-
+    if (!user) return;
     let isFirstLoad = true;
     const unsubs = [];
     
@@ -103,8 +103,7 @@ export default function App() {
               }).catch(()=>{});
            }
         }
-      } else {
-        // Registro del empleado nuevo con cuenta de Google
+      } else if (!user.isAnonymous) {
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
@@ -116,9 +115,10 @@ export default function App() {
   }, [user]);
 
   // =======================================================================
-  // 3. CARGA DE DATOS PÚBLICOS (Libre acceso para los clientes web)
+  // 1. CARGA DE DATOS PÚBLICOS
   // =======================================================================
   useEffect(() => {
+    // Si retiramos el `if (!user) return;` aquí, el catálogo siempre cargará
     const unsubs = [];
     const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
 
@@ -138,36 +138,37 @@ export default function App() {
   }, []);
 
   // =======================================================================
-  // 4. CARGA DE DATOS PRIVADOS (Solo empleados de Bluher)
+  // 2. CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
   // =======================================================================
   useEffect(() => {
     if (!userProfile || !userProfile.isApproved) return;
     const unsubs = [];
+    const onError = (e) => console.warn("Firestore Listener Error Privado:", e.message);
 
     const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(150));
     unsubs.push(onSnapshot(qPedidos, (snapshot) => {
       setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }));
+    }, onError));
 
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => {
       setNotasInventario(docSnap.exists() ? docSnap.data() : {});
-    }));
+    }, onError));
 
     const qMovimientos = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), orderBy('fechaCreacion', 'desc'), limit(50));
     unsubs.push(onSnapshot(qMovimientos, (snapshot) => {
       setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }));
+    }, onError));
 
     const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITORIA].includes(userProfile.role);
     if (esAdminOAuditor) {
       unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
         setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }));
+      }, onError));
       
       const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(200));
       unsubs.push(onSnapshot(qLogs, (snapshot) => {
         setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }));
+      }, onError));
     }
 
     return () => unsubs.forEach(unsub => unsub());
@@ -190,7 +191,7 @@ export default function App() {
     } 
     catch (error) { 
       console.error(error); 
-      dialogs.alert("Error de conexión al iniciar sesión."); 
+      dialogs.alert("Error de conexión."); 
       setAuthLoading(false); 
     }
   };
@@ -225,7 +226,7 @@ export default function App() {
 
   if (isPublicRoute) {
     content = <PublicPortal catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
-  } else if (authLoading || (user && !userProfile)) {
+  } else if (authLoading || (user && !userProfile && !user.isAnonymous)) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
         <img src={BRAND_LOGO} alt="Logo Bluher" className="h-20 mb-8 mix-blend-multiply dark:invert animate-pulse" />
@@ -233,7 +234,7 @@ export default function App() {
         <div className="font-bold text-xl tracking-tight">Verificando seguridad...</div>
       </div>
     );
-  } else if (!user) {
+  } else if (!user || user.isAnonymous) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-[#f0f4f8] to-[#d8e4f0] dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
         <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-md text-sky-600 dark:text-sky-400 hover:text-sky-800 transition-colors">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
