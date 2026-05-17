@@ -1,14 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  signInWithPopup, signOut, onAuthStateChanged, signInWithCustomToken, setPersistence, browserLocalPersistence 
-} from 'firebase/auth';
-import { 
-  collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit
-} from 'firebase/firestore';
-import { 
-  ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users, 
-  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X 
-} from 'lucide-react';
+import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit } from 'firebase/firestore';
+import { ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users, FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X } from 'lucide-react';
 
 import { auth, db, googleProvider, appId } from './config/firebase';
 import { BRAND_LOGO, ROLES, DEFAULT_CATALOGO } from './config/constants';
@@ -42,7 +35,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('ventas');
   const [darkMode, setDarkMode] = useState(false);
   const [isPublicRoute, setIsPublicRoute] = useState(window.location.hash === '#tienda');
-  
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [dialogConfig, setDialogConfig] = useState(null);
@@ -63,43 +55,17 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // =======================================================================
-  // CONTROL DE SESIÓN CON BÚFER EN LOCALSTORAGE (Tu solución)
-  // =======================================================================
+  // LÓGICA PURA DE FIREBASE
   useEffect(() => {
-    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-       signInWithCustomToken(auth, __initial_auth_token).catch(()=>{});
-    }
-
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        // Guardamos tu "Cookie/Sello" de seguridad local
-        localStorage.setItem('bluher_session', 'active');
         setUser(currentUser);
       } else {
-        // Si Firebase dice que no hay nadie, revisamos si existe el sello local.
-        const hasLocalSession = localStorage.getItem('bluher_session') === 'active';
-        
-        if (hasLocalSession) {
-           // Si el sello existe, Firebase simplemente está lento por el F5.
-           // Le damos 3 segundos de gracia en la pantalla de carga para que se recupere.
-           setTimeout(() => {
-              if (!auth.currentUser) {
-                 localStorage.removeItem('bluher_session');
-                 setUser(null);
-                 setUserProfile(null);
-                 setAuthLoading(false);
-              }
-           }, 3000);
-        } else {
-           // Si no hay sello, es un visitante normal o ya cerramos sesión.
-           setUser(null);
-           setUserProfile(null);
-           setAuthLoading(false);
-        }
+        setUser(null);
+        setUserProfile(null);
+        setAuthLoading(false);
       }
     });
-
     return () => unsubscribe();
   }, []);
 
@@ -133,60 +99,50 @@ export default function App() {
     return () => unsubs.forEach(u => u());
   }, [user]);
 
-  // =======================================================================
   // 1. CARGA DE DATOS PÚBLICOS
-  // =======================================================================
   useEffect(() => {
     const unsubs = [];
-    const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
-
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), (docSnap) => {
       setCatalogo(docSnap.exists() && docSnap.data().categorias ? docSnap.data().categorias : DEFAULT_CATALOGO);
-    }, onError));
-
+    }));
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), (docSnap) => {
       setStockInventario(docSnap.exists() ? docSnap.data() : {});
-    }, onError));
-
+    }));
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), (docSnap) => {
       if(docSnap.exists()) setConfigGral(docSnap.data());
-    }, onError));
-
+    }));
     return () => unsubs.forEach(unsub => unsub());
   }, []);
 
-  // =======================================================================
-  // 2. CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
-  // =======================================================================
+  // 2. CARGA DE DATOS PRIVADOS
   useEffect(() => {
     if (!userProfile || !userProfile.isApproved) return;
     const unsubs = [];
-    const onError = (e) => console.warn("Firestore Listener Error Privado:", e.message);
 
     const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(150));
     unsubs.push(onSnapshot(qPedidos, (snapshot) => {
       setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, onError));
+    }));
 
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => {
       setNotasInventario(docSnap.exists() ? docSnap.data() : {});
-    }, onError));
+    }));
 
     const qMovimientos = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), orderBy('fechaCreacion', 'desc'), limit(50));
     unsubs.push(onSnapshot(qMovimientos, (snapshot) => {
       setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, onError));
+    }));
 
     const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITORIA].includes(userProfile.role);
     if (esAdminOAuditor) {
       unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
         setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, onError));
+      }));
       
       const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(200));
       unsubs.push(onSnapshot(qLogs, (snapshot) => {
         setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, onError));
+      }));
     }
 
     return () => unsubs.forEach(unsub => unsub());
@@ -202,19 +158,15 @@ export default function App() {
   };
   const loggear = (accion, detalle) => registrarLogSistem(userProfile, accion, detalle);
 
-  // Inyectamos la orden de persistencia JUSTO antes de que inicie sesión para obligar a Firebase.
   const signInGoogle = async () => {
     try { 
       setAuthLoading(true); 
-      await setPersistence(auth, browserLocalPersistence);
       await signInWithPopup(auth, googleProvider); 
-      localStorage.setItem('bluher_session', 'active');
     } 
     catch (error) { 
       console.error(error); 
       dialogs.alert("Error de conexión al iniciar sesión."); 
       setAuthLoading(false); 
-      localStorage.removeItem('bluher_session');
     }
   };
   
@@ -226,7 +178,6 @@ export default function App() {
        } catch(e) {}
     }
     await signOut(auth);
-    localStorage.removeItem('bluher_session'); // Destruimos el sello local
     window.location.hash = ''; 
     window.location.reload(); 
   };
@@ -380,11 +331,9 @@ export default function App() {
     const parts = p.fechaDespacho.split('/');
     if (parts.length !== 3) return false;
     const timeDespacho = new Date(parts[2], parts[1] - 1, parts[0]).getTime();
-    
     const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     const tDateApp = getVeneziaTimeApp();
     const timeHoy = new Date(tDateApp.getFullYear(), tDateApp.getMonth(), tDateApp.getDate()).getTime();
-    
     return timeDespacho <= timeHoy;
 })} />
             </div>
