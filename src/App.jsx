@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  signInWithPopup, signOut, onAuthStateChanged, signInWithCustomToken 
+  signInWithPopup, signOut, onAuthStateChanged, signInWithCustomToken, setPersistence, browserLocalPersistence 
 } from 'firebase/auth';
 import { 
   collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit
@@ -64,27 +64,36 @@ export default function App() {
   }, []);
 
   // =======================================================================
-  // CONTROL DE SESIÓN Y PERSISTENCIA (A prueba de F5)
+  // CONTROL DE SESIÓN Y PERSISTENCIA BLINDADA (A prueba de F5)
   // =======================================================================
   useEffect(() => {
-    // Puente por si el servidor inyecta un token inicial
     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
        signInWithCustomToken(auth, __initial_auth_token).catch(()=>{});
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        // El navegador restauró la sesión del empleado
-        setUser(currentUser);
-      } else {
-        // No hay nadie conectado, es un visitante normal
-        setUser(null);
-        setUserProfile(null);
-        setAuthLoading(false);
-      }
-    });
+    let unsubscribe;
 
-    return () => unsubscribe();
+    // Forzamos explícitamente a Firebase a guardar la sesión en el navegador
+    setPersistence(auth, browserLocalPersistence)
+      .then(() => {
+        unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+          if (currentUser) {
+            setUser(currentUser);
+          } else {
+            setUser(null);
+            setUserProfile(null);
+            setAuthLoading(false);
+          }
+        });
+      })
+      .catch((error) => {
+        console.error("Error fijando la persistencia de sesión:", error);
+        setAuthLoading(false);
+      });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -106,8 +115,7 @@ export default function App() {
               }).catch(()=>{});
            }
         }
-      } else {
-        // Empleado nuevo registrándose con Google
+      } else if (!user.isAnonymous) {
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
@@ -138,7 +146,7 @@ export default function App() {
     }, onError));
 
     return () => unsubs.forEach(unsub => unsub());
-  }, []); 
+  }, []);
 
   // =======================================================================
   // 2. CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
@@ -204,7 +212,6 @@ export default function App() {
     }
     await signOut(auth); // Corta la conexión de raíz
     
-    // Forzamos un "Hard Reload" para limpiar la memoria de React por completo.
     window.location.hash = ''; 
     window.location.reload(); 
   };
@@ -227,7 +234,7 @@ export default function App() {
 
   if (isPublicRoute) {
     content = <PublicPortal catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
-  } else if (authLoading || (user && !userProfile)) {
+  } else if (authLoading || (user && !userProfile && !user.isAnonymous)) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
         <img src={BRAND_LOGO} alt="Logo Bluher" className="h-20 mb-8 mix-blend-multiply dark:invert animate-pulse" />
@@ -235,7 +242,7 @@ export default function App() {
         <div className="font-bold text-xl tracking-tight">Verificando seguridad...</div>
       </div>
     );
-  } else if (!user) {
+  } else if (!user || user.isAnonymous) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-[#f0f4f8] to-[#d8e4f0] dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
         <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-md text-sky-600 dark:text-sky-400 hover:text-sky-800 transition-colors">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
