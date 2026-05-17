@@ -19,9 +19,18 @@ import PanelUsuarios from './views/PanelUsuarios';
 import PanelLogs from './views/PanelLogs';
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [userProfile, setUserProfile] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  // 🔥 TRUCO MAESTRO: Si existe la sesión local, iniciamos con esos datos para engañar al F5.
+  const [user, setUser] = useState(() => {
+    const savedUser = localStorage.getItem('bluher_auth_user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
+  const [userProfile, setUserProfile] = useState(() => {
+    const savedProfile = localStorage.getItem('bluher_auth_profile');
+    return savedProfile ? JSON.parse(savedProfile) : null;
+  });
+  
+  // Si encontramos caché local, no necesitamos la pantalla de carga de Firebase (authLoading = false).
+  const [authLoading, setAuthLoading] = useState(() => !localStorage.getItem('bluher_auth_user'));
   
   const [pedidos, setPedidos] = useState([]);
   const [catalogo, setCatalogo] = useState(DEFAULT_CATALOGO);
@@ -55,49 +64,64 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // LÓGICA PURA DE FIREBASE
+  // ====================================================================
+  // LISTENER DE FIREBASE (Verificador secundario)
+  // ====================================================================
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        setUser(currentUser);
+        // Formateamos un objeto limpio para guardarlo en texto
+        const cleanUser = { uid: currentUser.uid, email: currentUser.email, displayName: currentUser.displayName, photoURL: currentUser.photoURL };
+        localStorage.setItem('bluher_auth_user', JSON.stringify(cleanUser));
+        setUser(currentUser); // Usamos el objeto real de Firebase para el resto de la app
       } else {
-        setUser(null);
-        setUserProfile(null);
-        setAuthLoading(false);
+        // Solo eliminamos la sesión local si Firebase explícitamente dice que NO hay cuenta
+        // (y dejamos un delay de 2 segundos para evitar falsos negativos).
+        setTimeout(() => {
+           if (!auth.currentUser) {
+              localStorage.removeItem('bluher_auth_user');
+              localStorage.removeItem('bluher_auth_profile');
+              setUser(null);
+              setUserProfile(null);
+           }
+        }, 2000);
       }
+      setAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
+  // ====================================================================
+  // LISTENER DEL PERFIL (Búsqueda en base de datos)
+  // ====================================================================
   useEffect(() => {
     if (!user) return;
-    let isFirstLoad = true;
     const unsubs = [];
     
     const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
     unsubs.push(onSnapshot(userRef, async (snap) => {
       if (snap.exists()) {
         const profile = snap.data();
+        // Guardamos copia del perfil en caché local
+        localStorage.setItem('bluher_auth_profile', JSON.stringify(profile));
         setUserProfile(profile);
-        if (isFirstLoad) {
-           isFirstLoad = false;
-           if (!profile.isOnline) {
-              updateDoc(userRef, { isOnline: true });
-              addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
-                  accion: 'INICIO_SESION', detalle: 'El usuario inició sesión en el sistema.', usuarioEmail: profile.email, usuarioNombre: profile.nombre, usuarioRol: profile.role, fecha: Date.now()
-              }).catch(()=>{});
-           }
+        
+        // Manejo de Estado Online
+        if (!profile.isOnline && auth.currentUser) {
+           updateDoc(userRef, { isOnline: true });
         }
-      } else {
+      } else if (auth.currentUser && !auth.currentUser.isAnonymous) {
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
+        localStorage.setItem('bluher_auth_profile', JSON.stringify(newProfile));
         setUserProfile(newProfile);
       }
-      setAuthLoading(false);
-    }, () => setAuthLoading(false)));
+    }, (error) => {
+       console.warn("Perfil Snapshot Error:", error.message);
+    }));
 
     return () => unsubs.forEach(u => u());
-  }, [user]);
+  }, [user?.uid]);
 
   // 1. CARGA DE DATOS PÚBLICOS
   useEffect(() => {
@@ -161,11 +185,11 @@ export default function App() {
   const signInGoogle = async () => {
     try { 
       setAuthLoading(true); 
-      await signInWithPopup(auth, googleProvider); 
+      const result = await signInWithPopup(auth, googleProvider); 
+      // Si el inicio fue exitoso, la función onAuthStateChanged se disparará y guardará la sesión local.
     } 
     catch (error) { 
-      console.error(error); 
-      dialogs.alert("Error de conexión al iniciar sesión."); 
+      console.error("Popup bloqueado o cancelado:", error); 
       setAuthLoading(false); 
     }
   };
@@ -178,6 +202,9 @@ export default function App() {
        } catch(e) {}
     }
     await signOut(auth);
+    // Vaciamos la memoria
+    localStorage.removeItem('bluher_auth_user');
+    localStorage.removeItem('bluher_auth_profile');
     window.location.hash = ''; 
     window.location.reload(); 
   };
@@ -200,7 +227,7 @@ export default function App() {
 
   if (isPublicRoute) {
     content = <PublicPortal catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
-  } else if (authLoading || (user && !userProfile)) {
+  } else if (authLoading) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
         <img src={BRAND_LOGO} alt="Logo Bluher" className="h-20 mb-8 mix-blend-multiply dark:invert animate-pulse" />
