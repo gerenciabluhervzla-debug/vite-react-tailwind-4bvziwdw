@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+// 🔥 1. CAMBIO CLAVE: Importamos explícitamente los motores de memoria persistente
+import { initializeAuth, browserLocalPersistence, indexedDBLocalPersistence, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const getEnvVar = (key) => {
@@ -32,10 +33,15 @@ try {
 }
 
 export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+
+// 🔥 2. CAMBIO CLAVE: Obligamos a Vite y Firebase a blindar la sesión contra F5
+export const auth = initializeAuth(app, {
+  persistence: [indexedDBLocalPersistence, browserLocalPersistence]
+});
+
 export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
 export const appId = typeof __app_id !== 'undefined' ? __app_id : (getEnvVar('VITE_FIREBASE_APP_ID') || 'app-bluher-official');
 
 export const URL_GOOGLE_SCRIPT = getEnvVar('VITE_GOOGLE_SCRIPT_URL');
-export const WORKER_GEMINI_URL = getEnvVar('VITE_GEMINI_WORKER_URL')
+export const WORKER_GEMINI_URL = getEnvVar('VITE_GEMINI_WORKER_URL');
