@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  signInWithPopup, signOut, onAuthStateChanged, signInWithCustomToken 
+  signInWithPopup, signOut, onAuthStateChanged, signInWithCustomToken, setPersistence, browserLocalPersistence 
 } from 'firebase/auth';
 import { 
   collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit
@@ -64,7 +64,7 @@ export default function App() {
   }, []);
 
   // =======================================================================
-  // CONTROL DE SESIÓN ESTÁNDAR Y PERSISTENCIA
+  // CONTROL DE SESIÓN CON BÚFER EN LOCALSTORAGE (Tu solución)
   // =======================================================================
   useEffect(() => {
     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -73,11 +73,30 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
+        // Guardamos tu "Cookie/Sello" de seguridad local
+        localStorage.setItem('bluher_session', 'active');
         setUser(currentUser);
       } else {
-        setUser(null);
-        setUserProfile(null);
-        setAuthLoading(false);
+        // Si Firebase dice que no hay nadie, revisamos si existe el sello local.
+        const hasLocalSession = localStorage.getItem('bluher_session') === 'active';
+        
+        if (hasLocalSession) {
+           // Si el sello existe, Firebase simplemente está lento por el F5.
+           // Le damos 3 segundos de gracia en la pantalla de carga para que se recupere.
+           setTimeout(() => {
+              if (!auth.currentUser) {
+                 localStorage.removeItem('bluher_session');
+                 setUser(null);
+                 setUserProfile(null);
+                 setAuthLoading(false);
+              }
+           }, 3000);
+        } else {
+           // Si no hay sello, es un visitante normal o ya cerramos sesión.
+           setUser(null);
+           setUserProfile(null);
+           setAuthLoading(false);
+        }
       }
     });
 
@@ -103,7 +122,7 @@ export default function App() {
               }).catch(()=>{});
            }
         }
-      } else if (!user.isAnonymous) {
+      } else {
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
@@ -183,9 +202,20 @@ export default function App() {
   };
   const loggear = (accion, detalle) => registrarLogSistem(userProfile, accion, detalle);
 
+  // Inyectamos la orden de persistencia JUSTO antes de que inicie sesión para obligar a Firebase.
   const signInGoogle = async () => {
-    try { setAuthLoading(true); await signInWithPopup(auth, googleProvider); } 
-    catch (error) { console.error(error); dialogs.alert("Error de conexión."); setAuthLoading(false); }
+    try { 
+      setAuthLoading(true); 
+      await setPersistence(auth, browserLocalPersistence);
+      await signInWithPopup(auth, googleProvider); 
+      localStorage.setItem('bluher_session', 'active');
+    } 
+    catch (error) { 
+      console.error(error); 
+      dialogs.alert("Error de conexión al iniciar sesión."); 
+      setAuthLoading(false); 
+      localStorage.removeItem('bluher_session');
+    }
   };
   
   const cerrarSesion = async () => {
@@ -196,6 +226,7 @@ export default function App() {
        } catch(e) {}
     }
     await signOut(auth);
+    localStorage.removeItem('bluher_session'); // Destruimos el sello local
     window.location.hash = ''; 
     window.location.reload(); 
   };
