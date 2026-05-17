@@ -63,29 +63,47 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // 🔥 LA MAGIA OCURRE AQUÍ: El inicio anónimo ahora es paciente.
+  // =======================================================================
+  // 🔥 CIRUGÍA MAESTRA: Control de Sesión Anti-Carrera (Paciencia)
+  // =======================================================================
   useEffect(() => {
+    let timeoutId;
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
+        // Si la sesión de Google o un Anónimo viejo carga, CANCELAMOS la creación de nuevos anónimos
+        clearTimeout(timeoutId);
         setUser(currentUser);
       } else {
-        // SOLAMENTE si Firebase está 100% seguro de que no hay un empleado loggeado, creamos el Anónimo
-        try {
-          await signInAnonymously(auth);
-        } catch (error) {
-          console.error("Error iniciando sesión anónima", error);
-          setUser(null);
-          setUserProfile(null);
-          setAuthLoading(false);
-        }
+        setUser(null);
+        setUserProfile(null);
+        setAuthLoading(false);
+
+        // Esperamos 1.5 segundos antes de asumir que realmente es un visitante desconocido
+        timeoutId = setTimeout(async () => {
+          if (!auth.currentUser) {
+            try {
+              await signInAnonymously(auth);
+            } catch (error) {
+              console.warn("No se pudo crear anónimo:", error.message);
+            }
+          }
+        }, 1500);
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(timeoutId);
+      unsubscribe();
+    };
   }, []);
 
+  // =======================================================================
+  // PERFIL DE EMPLEADOS
+  // =======================================================================
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.isAnonymous) return; 
+
     let isFirstLoad = true;
     const unsubs = [];
     
@@ -103,7 +121,7 @@ export default function App() {
               }).catch(()=>{});
            }
         }
-      } else if (!user.isAnonymous) {
+      } else {
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
@@ -115,10 +133,9 @@ export default function App() {
   }, [user]);
 
   // =======================================================================
-  // 1. CARGA DE DATOS PÚBLICOS
+  // CARGA DE DATOS PÚBLICOS
   // =======================================================================
   useEffect(() => {
-    // Si retiramos el `if (!user) return;` aquí, el catálogo siempre cargará
     const unsubs = [];
     const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
 
@@ -138,37 +155,36 @@ export default function App() {
   }, []);
 
   // =======================================================================
-  // 2. CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
+  // CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
   // =======================================================================
   useEffect(() => {
     if (!userProfile || !userProfile.isApproved) return;
     const unsubs = [];
-    const onError = (e) => console.warn("Firestore Listener Error Privado:", e.message);
 
     const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(150));
     unsubs.push(onSnapshot(qPedidos, (snapshot) => {
       setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, onError));
+    }));
 
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => {
       setNotasInventario(docSnap.exists() ? docSnap.data() : {});
-    }, onError));
+    }));
 
     const qMovimientos = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), orderBy('fechaCreacion', 'desc'), limit(50));
     unsubs.push(onSnapshot(qMovimientos, (snapshot) => {
       setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, onError));
+    }));
 
     const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITORIA].includes(userProfile.role);
     if (esAdminOAuditor) {
       unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
         setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, onError));
+      }));
       
       const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(200));
       unsubs.push(onSnapshot(qLogs, (snapshot) => {
         setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, onError));
+      }));
     }
 
     return () => unsubs.forEach(unsub => unsub());
@@ -191,7 +207,7 @@ export default function App() {
     } 
     catch (error) { 
       console.error(error); 
-      dialogs.alert("Error de conexión."); 
+      dialogs.alert("Error de conexión al iniciar sesión."); 
       setAuthLoading(false); 
     }
   };
