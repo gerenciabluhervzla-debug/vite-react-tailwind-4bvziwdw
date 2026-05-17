@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  signInWithPopup, signOut, onAuthStateChanged, signInAnonymously 
+  signInWithPopup, signOut, onAuthStateChanged 
 } from 'firebase/auth';
 import { 
   collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit
@@ -42,6 +42,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('ventas');
   const [darkMode, setDarkMode] = useState(false);
   const [isPublicRoute, setIsPublicRoute] = useState(window.location.hash === '#tienda');
+  
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [dialogConfig, setDialogConfig] = useState(null);
@@ -63,40 +64,27 @@ export default function App() {
   }, []);
 
   // =======================================================================
-  // 1. EL VERDADERO CONTROL DE SESIÓN SEGURO Y PACIENTE
+  // 1. EL VERDADERO CONTROL DE SESIÓN (Limpio y sin anónimos)
   // =======================================================================
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        // CASO A: Firebase encontró la sesión (Empleado de Google o Anónimo viejo)
         setUser(currentUser);
-        // Si es un cliente anónimo, frenamos la pantalla de carga aquí mismo.
-        if (currentUser.isAnonymous) {
-           setAuthLoading(false);
-        }
       } else {
-        // CASO B: Firebase buscó a fondo y está 100% seguro de que no hay nadie.
-        // Ahora sí, creamos al "Visitante Anónimo" sin el riesgo de destruir cuentas.
-        try {
-          await signInAnonymously(auth);
-          // (Al crearse el anónimo, esta misma función se disparará de nuevo y entrará al CASO A)
-        } catch (error) {
-          console.error("Error al crear sesión anónima", error);
-          setUser(null);
-          setUserProfile(null);
-          setAuthLoading(false);
-        }
+        setUser(null);
+        setUserProfile(null);
+        setAuthLoading(false);
       }
     });
+
     return () => unsubscribe();
   }, []);
 
   // =======================================================================
-  // 2. PERFIL DE EMPLEADOS (Blindado para ignorar anónimos)
+  // 2. PERFIL DE EMPLEADOS
   // =======================================================================
   useEffect(() => {
-    // Si no hay usuario, o es el Visitante Anónimo, NO buscamos perfil de empleado
-    if (!user || user.isAnonymous) return; 
+    if (!user) return; 
 
     let isFirstLoad = true;
     const unsubs = [];
@@ -116,7 +104,7 @@ export default function App() {
            }
         }
       } else {
-        // Registro del empleado nuevo
+        // Registro del empleado nuevo con cuenta de Google
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
@@ -128,7 +116,7 @@ export default function App() {
   }, [user]);
 
   // =======================================================================
-  // 3. CARGA DE DATOS PÚBLICOS (Sin bloqueos para que el catálogo se vea siempre)
+  // 3. CARGA DE DATOS PÚBLICOS (Libre acceso para los clientes web)
   // =======================================================================
   useEffect(() => {
     const unsubs = [];
@@ -149,7 +137,9 @@ export default function App() {
     return () => unsubs.forEach(unsub => unsub());
   }, []);
 
-  // 4. CARGA DE DATOS PRIVADOS
+  // =======================================================================
+  // 4. CARGA DE DATOS PRIVADOS (Solo empleados de Bluher)
+  // =======================================================================
   useEffect(() => {
     if (!userProfile || !userProfile.isApproved) return;
     const unsubs = [];
@@ -235,7 +225,7 @@ export default function App() {
 
   if (isPublicRoute) {
     content = <PublicPortal catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
-  } else if (authLoading || (user && !userProfile && !user.isAnonymous)) {
+  } else if (authLoading || (user && !userProfile)) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
         <img src={BRAND_LOGO} alt="Logo Bluher" className="h-20 mb-8 mix-blend-multiply dark:invert animate-pulse" />
@@ -243,7 +233,7 @@ export default function App() {
         <div className="font-bold text-xl tracking-tight">Verificando seguridad...</div>
       </div>
     );
-  } else if (!user || user.isAnonymous) {
+  } else if (!user) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-[#f0f4f8] to-[#d8e4f0] dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
         <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-md text-sky-600 dark:text-sky-400 hover:text-sky-800 transition-colors">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
