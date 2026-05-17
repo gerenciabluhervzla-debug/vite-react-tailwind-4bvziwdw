@@ -64,26 +64,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          try { await signInAnonymously(auth); } catch(e) {}
-        }
-      } catch (error) { console.error("Auth error", error); }
-    };
-    initAuth();
+    // Puente por si el servidor inyecta un token inicial
+    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+       signInWithCustomToken(auth, __initial_auth_token).catch(()=>{});
+    }
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser && !currentUser.isAnonymous) {
+      if (currentUser) {
+        // Si el navegador recuerda la sesión (sea Empleado o Cliente Anónimo), la restaura.
         setUser(currentUser);
-      } else if (currentUser && currentUser.isAnonymous) {
-        setUser(currentUser); 
       } else {
-        setUser(null); setUserProfile(null); setAuthLoading(false);
+        // Si Firebase confirma que NO hay nadie conectado, creamos el "Cliente Fantasma".
+        try { 
+          await signInAnonymously(auth); 
+        } catch (error) { 
+          setUser(null); 
+          setUserProfile(null); 
+          setAuthLoading(false);
+        }
       }
     });
+
     return () => unsubscribe();
   }, []);
 
