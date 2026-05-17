@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  signInWithPopup, signOut, onAuthStateChanged, signInAnonymously, signInWithCustomToken 
+  signInWithPopup, signOut, onAuthStateChanged, signInWithCustomToken 
 } from 'firebase/auth';
 import { 
   collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit
@@ -63,25 +63,24 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  // =======================================================================
+  // CONTROL DE SESIÓN Y PERSISTENCIA (A prueba de F5)
+  // =======================================================================
   useEffect(() => {
     // Puente por si el servidor inyecta un token inicial
     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
        signInWithCustomToken(auth, __initial_auth_token).catch(()=>{});
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        // Si el navegador recuerda la sesión (sea Empleado o Cliente Anónimo), la restaura.
+        // El navegador restauró la sesión del empleado
         setUser(currentUser);
       } else {
-        // Si Firebase confirma que NO hay nadie conectado, creamos el "Cliente Fantasma".
-        try { 
-          await signInAnonymously(auth); 
-        } catch (error) { 
-          setUser(null); 
-          setUserProfile(null); 
-          setAuthLoading(false);
-        }
+        // No hay nadie conectado, es un visitante normal
+        setUser(null);
+        setUserProfile(null);
+        setAuthLoading(false);
       }
     });
 
@@ -107,7 +106,8 @@ export default function App() {
               }).catch(()=>{});
            }
         }
-      } else if (!user.isAnonymous) {
+      } else {
+        // Empleado nuevo registrándose con Google
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
@@ -120,7 +120,6 @@ export default function App() {
 
   // =======================================================================
   // 1. CARGA DE DATOS PÚBLICOS (RECONEXIÓN AUTOMÁTICA)
-  // Depende de [user] para reiniciarse si la sesión cambia, evitando el bloqueo.
   // =======================================================================
   useEffect(() => {
     const unsubs = [];
@@ -139,7 +138,7 @@ export default function App() {
     }, onError));
 
     return () => unsubs.forEach(unsub => unsub());
-  }, []); // <--- CLAVE: Este arreglo vacío [] asegura que la conexión jamás se corte al cerrar sesión.
+  }, []); 
 
   // =======================================================================
   // 2. CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
@@ -206,7 +205,6 @@ export default function App() {
     await signOut(auth); // Corta la conexión de raíz
     
     // Forzamos un "Hard Reload" para limpiar la memoria de React por completo.
-    // Esto asegura que entrarás fresco como un cliente normal sin errores de Firebase.
     window.location.hash = ''; 
     window.location.reload(); 
   };
@@ -229,7 +227,7 @@ export default function App() {
 
   if (isPublicRoute) {
     content = <PublicPortal catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
-  } else if (authLoading || (user && !userProfile && !user.isAnonymous)) {
+  } else if (authLoading || (user && !userProfile)) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
         <img src={BRAND_LOGO} alt="Logo Bluher" className="h-20 mb-8 mix-blend-multiply dark:invert animate-pulse" />
@@ -237,7 +235,7 @@ export default function App() {
         <div className="font-bold text-xl tracking-tight">Verificando seguridad...</div>
       </div>
     );
-  } else if (!user || user.isAnonymous) {
+  } else if (!user) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-[#f0f4f8] to-[#d8e4f0] dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
         <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-md text-sky-600 dark:text-sky-400 hover:text-sky-800 transition-colors">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
