@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-// 🔥 CAMBIO CLAVE 1: Importamos signInWithRedirect y getRedirectResult
-import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit } from 'firebase/firestore';
-import { ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users, FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X } from 'lucide-react';
+import { 
+  signInWithPopup, signOut, onAuthStateChanged, signInAnonymously 
+} from 'firebase/auth';
+import { 
+  collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit
+} from 'firebase/firestore';
+import { 
+  ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users, 
+  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X 
+} from 'lucide-react';
 
 import { auth, db, googleProvider, appId } from './config/firebase';
 import { BRAND_LOGO, ROLES, DEFAULT_CATALOGO } from './config/constants';
@@ -36,6 +42,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('ventas');
   const [darkMode, setDarkMode] = useState(false);
   const [isPublicRoute, setIsPublicRoute] = useState(window.location.hash === '#tienda');
+  
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [dialogConfig, setDialogConfig] = useState(null);
@@ -56,17 +63,17 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // 🔥 CAMBIO CLAVE 2: Atrapamos cualquier error si la redirección falla
   useEffect(() => {
-    getRedirectResult(auth).catch((error) => {
-      console.error("Error en la redirección de Firebase:", error);
-      setAuthLoading(false);
-    });
-  }, []);
+    const initAuth = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch (error) {
+        console.error("Error iniciando sesión anónima", error);
+      }
+    };
+    initAuth();
 
-  // LÓGICA PURA DE FIREBASE
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
       } else {
@@ -75,6 +82,7 @@ export default function App() {
         setAuthLoading(false);
       }
     });
+
     return () => unsubscribe();
   }, []);
 
@@ -97,7 +105,7 @@ export default function App() {
               }).catch(()=>{});
            }
         }
-      } else {
+      } else if (!user.isAnonymous) {
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
@@ -108,50 +116,61 @@ export default function App() {
     return () => unsubs.forEach(u => u());
   }, [user]);
 
+  // =======================================================================
   // 1. CARGA DE DATOS PÚBLICOS
+  // =======================================================================
   useEffect(() => {
+    if (!user) return;
     const unsubs = [];
+    const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
+
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), (docSnap) => {
       setCatalogo(docSnap.exists() && docSnap.data().categorias ? docSnap.data().categorias : DEFAULT_CATALOGO);
-    }));
+    }, onError));
+
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), (docSnap) => {
       setStockInventario(docSnap.exists() ? docSnap.data() : {});
-    }));
+    }, onError));
+
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), (docSnap) => {
       if(docSnap.exists()) setConfigGral(docSnap.data());
-    }));
-    return () => unsubs.forEach(unsub => unsub());
-  }, []);
+    }, onError));
 
-  // 2. CARGA DE DATOS PRIVADOS
+    return () => unsubs.forEach(unsub => unsub());
+  }, [user]);
+
+  // =======================================================================
+  // 2. CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
+  // =======================================================================
   useEffect(() => {
     if (!userProfile || !userProfile.isApproved) return;
     const unsubs = [];
+    const onError = (e) => console.warn("Firestore Listener Error Privado:", e.message);
 
     const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(150));
     unsubs.push(onSnapshot(qPedidos, (snapshot) => {
       setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }));
+    }, onError));
 
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => {
       setNotasInventario(docSnap.exists() ? docSnap.data() : {});
-    }));
+    }, onError));
 
     const qMovimientos = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), orderBy('fechaCreacion', 'desc'), limit(50));
     unsubs.push(onSnapshot(qMovimientos, (snapshot) => {
       setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }));
+    }, onError));
 
     const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITORIA].includes(userProfile.role);
     if (esAdminOAuditor) {
       unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
         setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }));
+      }, onError));
       
       const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(200));
       unsubs.push(onSnapshot(qLogs, (snapshot) => {
         setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }));
+      }, onError));
     }
 
     return () => unsubs.forEach(unsub => unsub());
@@ -167,15 +186,14 @@ export default function App() {
   };
   const loggear = (accion, detalle) => registrarLogSistem(userProfile, accion, detalle);
 
-  // 🔥 CAMBIO CLAVE 3: Función de Redirect en lugar de Popup
   const signInGoogle = async () => {
     try { 
       setAuthLoading(true); 
-      await signInWithRedirect(auth, googleProvider); 
+      await signInWithPopup(auth, googleProvider); 
     } 
     catch (error) { 
       console.error(error); 
-      dialogs.alert("Error de conexión al iniciar sesión."); 
+      dialogs.alert("Error de conexión."); 
       setAuthLoading(false); 
     }
   };
@@ -210,7 +228,7 @@ export default function App() {
 
   if (isPublicRoute) {
     content = <PublicPortal catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
-  } else if (authLoading || (user && !userProfile)) {
+  } else if (authLoading || (user && !userProfile && !user.isAnonymous)) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
         <img src={BRAND_LOGO} alt="Logo Bluher" className="h-20 mb-8 mix-blend-multiply dark:invert animate-pulse" />
@@ -218,7 +236,7 @@ export default function App() {
         <div className="font-bold text-xl tracking-tight">Verificando seguridad...</div>
       </div>
     );
-  } else if (!user) {
+  } else if (!user || user.isAnonymous) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-[#f0f4f8] to-[#d8e4f0] dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
         <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-md text-sky-600 dark:text-sky-400 hover:text-sky-800 transition-colors">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
@@ -341,9 +359,11 @@ export default function App() {
     const parts = p.fechaDespacho.split('/');
     if (parts.length !== 3) return false;
     const timeDespacho = new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+    
     const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     const tDateApp = getVeneziaTimeApp();
     const timeHoy = new Date(tDateApp.getFullYear(), tDateApp.getMonth(), tDateApp.getDate()).getTime();
+    
     return timeDespacho <= timeHoy;
 })} />
             </div>
