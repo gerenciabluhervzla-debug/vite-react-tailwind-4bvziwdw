@@ -42,7 +42,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('ventas');
   const [darkMode, setDarkMode] = useState(false);
   const [isPublicRoute, setIsPublicRoute] = useState(window.location.hash === '#tienda');
-  
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [dialogConfig, setDialogConfig] = useState(null);
@@ -63,31 +62,42 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  // =======================================================================
+  // 1. EL VERDADERO CONTROL DE SESIÓN SEGURO Y PACIENTE
+  // =======================================================================
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        await signInAnonymously(auth);
-      } catch (error) {
-        console.error("Error iniciando sesión anónima", error);
-      }
-    };
-    initAuth();
-
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
+        // CASO A: Firebase encontró la sesión (Empleado de Google o Anónimo viejo)
         setUser(currentUser);
+        // Si es un cliente anónimo, frenamos la pantalla de carga aquí mismo.
+        if (currentUser.isAnonymous) {
+           setAuthLoading(false);
+        }
       } else {
-        setUser(null);
-        setUserProfile(null);
-        setAuthLoading(false);
+        // CASO B: Firebase buscó a fondo y está 100% seguro de que no hay nadie.
+        // Ahora sí, creamos al "Visitante Anónimo" sin el riesgo de destruir cuentas.
+        try {
+          await signInAnonymously(auth);
+          // (Al crearse el anónimo, esta misma función se disparará de nuevo y entrará al CASO A)
+        } catch (error) {
+          console.error("Error al crear sesión anónima", error);
+          setUser(null);
+          setUserProfile(null);
+          setAuthLoading(false);
+        }
       }
     });
-
     return () => unsubscribe();
   }, []);
 
+  // =======================================================================
+  // 2. PERFIL DE EMPLEADOS (Blindado para ignorar anónimos)
+  // =======================================================================
   useEffect(() => {
-    if (!user) return;
+    // Si no hay usuario, o es el Visitante Anónimo, NO buscamos perfil de empleado
+    if (!user || user.isAnonymous) return; 
+
     let isFirstLoad = true;
     const unsubs = [];
     
@@ -105,7 +115,8 @@ export default function App() {
               }).catch(()=>{});
            }
         }
-      } else if (!user.isAnonymous) {
+      } else {
+        // Registro del empleado nuevo
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
@@ -117,10 +128,9 @@ export default function App() {
   }, [user]);
 
   // =======================================================================
-  // 1. CARGA DE DATOS PÚBLICOS
+  // 3. CARGA DE DATOS PÚBLICOS (Sin bloqueos para que el catálogo se vea siempre)
   // =======================================================================
   useEffect(() => {
-    if (!user) return;
     const unsubs = [];
     const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
 
@@ -137,40 +147,37 @@ export default function App() {
     }, onError));
 
     return () => unsubs.forEach(unsub => unsub());
-  }, [user]);
+  }, []);
 
-  // =======================================================================
-  // 2. CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
-  // =======================================================================
+  // 4. CARGA DE DATOS PRIVADOS
   useEffect(() => {
     if (!userProfile || !userProfile.isApproved) return;
     const unsubs = [];
-    const onError = (e) => console.warn("Firestore Listener Error Privado:", e.message);
 
     const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(150));
     unsubs.push(onSnapshot(qPedidos, (snapshot) => {
       setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, onError));
+    }));
 
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => {
       setNotasInventario(docSnap.exists() ? docSnap.data() : {});
-    }, onError));
+    }));
 
     const qMovimientos = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), orderBy('fechaCreacion', 'desc'), limit(50));
     unsubs.push(onSnapshot(qMovimientos, (snapshot) => {
       setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, onError));
+    }));
 
     const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITORIA].includes(userProfile.role);
     if (esAdminOAuditor) {
       unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
         setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, onError));
+      }));
       
       const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(200));
       unsubs.push(onSnapshot(qLogs, (snapshot) => {
         setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, onError));
+      }));
     }
 
     return () => unsubs.forEach(unsub => unsub());
@@ -193,7 +200,7 @@ export default function App() {
     } 
     catch (error) { 
       console.error(error); 
-      dialogs.alert("Error de conexión."); 
+      dialogs.alert("Error de conexión al iniciar sesión."); 
       setAuthLoading(false); 
     }
   };
