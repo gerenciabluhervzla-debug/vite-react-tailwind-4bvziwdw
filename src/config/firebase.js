@@ -1,8 +1,8 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+// 🔥 Importamos explícitamente setPersistence y browserLocalPersistence
+import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
-// Vite requiere que las variables se lean directamente, no a través de variables dinámicas [key]
 let firebaseConfig = { apiKey: "" };
 
 try {
@@ -22,8 +22,18 @@ try {
   console.warn("No se pudo cargar la configuración de Firebase");
 }
 
+// 🕵️‍♂️ DETECTOR: Nos dirá si Cloudflare borró tus credenciales al compilar
+console.log("Firebase API Key detectada:", firebaseConfig.apiKey ? "✅ SÍ" : "❌ NO (¡Variables de entorno faltantes!)");
+
 export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app); // Firebase activa la persistencia automática aquí
+export const auth = getAuth(app);
+
+// 🔥 TRUCO MAESTRO: Forzamos la persistencia estricta en LocalStorage desde el segundo cero,
+// antes de que cualquier componente de React (como App.jsx) intente preguntar por la sesión.
+setPersistence(auth, browserLocalPersistence)
+  .then(() => console.log("🔒 Persistencia de sesión anclada correctamente"))
+  .catch((error) => console.error("Error al anclar la persistencia:", error));
+
 export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
 
