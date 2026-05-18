@@ -82,12 +82,24 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     try {
       const llavesCatalogo = catalogo.flatMap(c => c.productos.flatMap(p => p.presentaciones.map(pres => `${p.nombre}|${pres}`))).join(', ');
       
-      const prompt = `Analiza este WhatsApp y extrae JSON: Nombre, Teléfono, Cédula, courier (ZOOM, MRW, Tealca, Domesa), Dirección, Productos, montoPago, Tipo de envío (si dice "MercadoLibre", esMercadoLibre=true), asesora. 
-      La variable "moneda" DEBE ser "USD", "VES" o "ZELLE". Si habla de Zelle es "ZELLE", si es dólares en efectivo es "USD", si es bolívares o Bs es "VES".
-      La variable "pagoEnvio" DEBE ser "COD" (cobro en destino) o "PAGADO" (envío pagado). Por defecto usa "COD".
-      productosCrudos: texto exacto.
-      carrito: mapea cantidades a estas llaves: [${llavesCatalogo}].
-      Texto: ${textoCrudo}`;
+      const prompt = `Analiza este pedido de WhatsApp y extrae los datos en JSON.
+
+      REGLAS ESTRICTAS:
+      1. REFERENCIAS MÚLTIPLES: Si el texto tiene varios pagos/referencias (ej. T0275, T2389...), DEBES unirlos todos en el campo "referencia" separando cada uno y mostrando su monto. 
+         Formato obligatorio: "T0275 (11.697,80Bs) | T2389 (7.573,65Bs) | T6662 (25.245,50Bs)". NUNCA borres referencias ni las unas en un solo número.
+      2. DIRECCIÓN: Si el cliente envía un código de agencia (Ej. "1307000 - MRW"), inclúyelo al principio del campo "direccion".
+      3. MONTO TOTAL: En "montoPago", coloca la suma total de la venta o el total global indicado.
+      4. MONEDA: Debe ser estrictamente "USD", "VES" o "ZELLE". Si habla de Zelle es "ZELLE", si es dólares en efectivo es "USD", si hay bolívares/Bs es "VES".
+      5. PAGO ENVÍO: "COD" (cobro en destino) o "PAGADO" (envío pagado). Por defecto usa "COD".
+      6. TIPO DE ENVÍO: Si dice "MercadoLibre", esMercadoLibre=true.
+      7. ORIGEN: Extrae el origen si aparece (ej. "RECOMPRA").
+      8. ASESORA: Extrae el nombre de la asesora si aparece.
+
+      productosCrudos: texto exacto original de los productos.
+      carrito: mapea cantidades exactas a estas llaves válidas: [${llavesCatalogo}].
+      
+      Texto del cliente: 
+      ${textoCrudo}`;
       
       const res = await fetch(WORKER_GEMINI_URL, {
         method: 'POST', 
@@ -174,7 +186,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     setPedidoDevuelto(null);
   };
 
-  // NUEVA FUNCIÓN: Anular / Descartar Pedido desde Ventas
   const anularPedidoVentas = (pedido) => {
     dialogs.prompt(`Estás a punto de ANULAR y descartar el pedido de ${pedido.clienteNombre}.\n\nEscribe el motivo de la cancelación:`, async (motivo) => {
       if (!motivo) return;
@@ -363,6 +374,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       
       cancelarEdicion();
       setVista('historial');
+      setTextoCrudo(''); // Se limpia automáticamente después de procesar
     } catch (e) { console.error(e); dialogs.alert("Error de guardado.", "Error"); }
     setEnviando(false);
   };
@@ -446,9 +458,15 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
               <h3 className="text-sky-900 dark:text-sky-300 font-bold mb-3 flex items-center gap-2"><Sparkles size={20} className="text-sky-600 dark:text-sky-400" /> Asistente de IA Bluher</h3>
               <div className="flex flex-col md:flex-row gap-4">
                 <textarea className="flex-1 p-4 border border-sky-200/60 dark:border-sky-700 rounded-xl text-sm resize-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-all shadow-inner bg-white/80 dark:bg-slate-800/80 dark:text-white" rows={2} placeholder="Pega aquí el mensaje del cliente (WhatsApp)..." value={textoCrudo} onChange={(e) => setTextoCrudo(e.target.value)}></textarea>
-                <button type="button" onClick={analizarConGemini} disabled={analizando} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-6 rounded-xl shadow-md disabled:opacity-50 transition-all hover:shadow-lg flex items-center justify-center min-w-[140px]">
-                  {analizando ? <Loader2 className="animate-spin" size={20}/> : 'Autocompletar'}
-                </button>
+                
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setTextoCrudo('')} disabled={analizando || !textoCrudo} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-3 px-4 rounded-xl shadow-sm disabled:opacity-50 transition-all flex items-center justify-center">
+                    Limpiar
+                  </button>
+                  <button type="button" onClick={analizarConGemini} disabled={analizando || !textoCrudo} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-6 rounded-xl shadow-md disabled:opacity-50 transition-all hover:shadow-lg flex items-center justify-center min-w-[140px]">
+                    {analizando ? <Loader2 className="animate-spin" size={20}/> : 'Autocompletar'}
+                  </button>
+                </div>
               </div>
             </div>
           )}
