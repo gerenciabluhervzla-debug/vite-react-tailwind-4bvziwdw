@@ -26,10 +26,9 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   };
   const hoyStr = getVeneziaDate();
 
-  // NUEVA FUNCIÓN: Calcula la fecha operativa (corte a las 12:30 PM)
+  // Función: Calcula la fecha operativa (corte a las 12:30 PM)
   const getFechaOperativaObj = (timestamp) => {
     const d = new Date(new Date(timestamp).toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    // Si es después de las 12:30 PM, cuenta para el día siguiente
     if (d.getHours() > 12 || (d.getHours() === 12 && d.getMinutes() >= 30)) {
       d.setDate(d.getDate() + 1);
     }
@@ -151,14 +150,14 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     e.target.value = '';
   };
 
-  // --- ORDENAMIENTO DE PENDIENTES (ASCENDENTE PARA PRIORIDAD POR ENTRADA) ---
+  // --- ORDENAMIENTO DE PENDIENTES (ASCENDENTE) ---
   const pendientesOrdenados = useMemo(() => {
     return pedidos
       .filter(p => p.status === 'Pendiente')
       .sort((a, b) => a.fechaCreacion - b.fechaCreacion); 
   }, [pedidos]);
   
-  // --- FILTRADO DEL HISTORIAL CON FECHA OPERATIVA ---
+  // --- FILTRADO DEL HISTORIAL CON FECHA OPERATIVA Y ORDEN ASCENDENTE ---
   const historialFiltrado = useMemo(() => {
     let todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
     
@@ -167,14 +166,14 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }
 
     if (fechaInicio && fechaFin) {
-      // Evaluamos la fecha operativa para que coincida con el corte de las 12:30 PM
       todosHistorial = todosHistorial.filter(p => {
          const opIso = getFechaOperativaObj(p.fechaCreacion).iso;
          return opIso >= fechaInicio && opIso <= fechaFin;
       });
     }
     
-    return todosHistorial.sort((a, b) => b.fechaCreacion - a.fechaCreacion);
+    // CORRECCIÓN: Orden ascendente para que el más antiguo sea el primero (index 1)
+    return todosHistorial.sort((a, b) => a.fechaCreacion - b.fechaCreacion);
   }, [pedidos, fechaInicio, fechaFin, mostrarAnulados]);
 
   // --- APLICAR BUSCADOR GLOBAL ---
@@ -325,11 +324,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Nuevo Comentario");
   };
 
-  // --- AGRUPACIÓN DE AUDITORÍA CON FECHA OPERATIVA ---
+  // --- AGRUPACIÓN DE AUDITORÍA (Orden ascendente también) ---
   const diasAuditoria = useMemo(() => {
     const dias = {};
     pedidos.forEach(p => {
-       // Usamos la fecha operativa calculada
        const { iso, visual } = getFechaOperativaObj(p.fechaCreacion);
        if (!dias[iso]) dias[iso] = { isoKey: iso, fecha: visual, total: 0, auditados: 0, fallas: 0, pedidos: [] };
        dias[iso].total++;
@@ -337,8 +335,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
        if (p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado' || p.status === 'Anulado') dias[iso].fallas++;
        dias[iso].pedidos.push(p);
     });
-    // Ordenamos descendente por el ISO para que los días más recientes queden arriba
-    return Object.values(dias).sort((a,b) => b.isoKey.localeCompare(a.isoKey)); 
+    // Ordenamos cronológicamente ascendente para consistencia general
+    return Object.values(dias).sort((a,b) => a.isoKey.localeCompare(b.isoKey)); 
   }, [pedidos]);
 
   const fechaHoy = new Date().toLocaleDateString('es-VE');
@@ -495,10 +493,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  <div className="lg:col-span-5 flex flex-col justify-start">
                    <div className="font-bold text-xl text-slate-800 dark:text-slate-100 pr-24 leading-tight">{p.clienteNombre}</div>
                    
-                   {/* MODIFICACIÓN: Indicador visual de la fecha operativa */}
                    <div className="text-[11px] font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1 mb-3 flex items-center flex-wrap gap-2">
                      <span>Ingreso: {new Date(p.fechaCreacion).toLocaleDateString('es-VE')} {new Date(p.fechaCreacion).toLocaleTimeString('es-VE', {hour: '2-digit', minute:'2-digit'})}</span>
-                     {/* Solo mostramos la etiqueta si la fecha operativa difiere de la fecha real de creación */}
                      {getFechaOperativaObj(p.fechaCreacion).visual !== new Date(p.fechaCreacion).toLocaleDateString('es-VE') && (
                         <span className="bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-700">Operativo: {getFechaOperativaObj(p.fechaCreacion).visual}</span>
                      )}
