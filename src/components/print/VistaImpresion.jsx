@@ -1,6 +1,32 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 
 export default function VistaImpresion({ pedidos }) { 
+  
+  // 1. Calculamos la misma numeración diaria que en el panel
+  const numeracionDiaria = useMemo(() => {
+    const map = {};
+    const agrupados = {};
+    pedidos.forEach(p => {
+       const fecha = p.fechaDespacho || 'Sin Fecha';
+       if (!agrupados[fecha]) agrupados[fecha] = [];
+       agrupados[fecha].push(p);
+    });
+    Object.keys(agrupados).forEach(fecha => {
+       agrupados[fecha].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+       agrupados[fecha].forEach((p, index) => { map[p.id] = index + 1; });
+    });
+    return map;
+  }, [pedidos]);
+
+  // 2. Ordenamos los pedidos de forma ascendente (1, 2, 3...)
+  const pedidosOrdenados = useMemo(() => {
+     return [...pedidos].sort((a, b) => {
+        const numA = numeracionDiaria[a.id] || 999999;
+        const numB = numeracionDiaria[b.id] || 999999;
+        return numA - numB;
+     });
+  }, [pedidos, numeracionDiaria]);
+
   if (pedidos.length === 0) {
     return (
       <div className="hidden print:block p-8 text-center text-xl font-bold italic text-slate-400">
@@ -15,12 +41,18 @@ export default function VistaImpresion({ pedidos }) {
         HOJA DE DESPACHO BLUHER - <span className="text-base font-medium">FECHA DE CORTE: {new Date().toLocaleDateString('es-VE')}</span>
       </h1>
       
-      <div className="grid grid-cols-2 gap-4 print:overflow-visible">
-        {pedidos.map((p) => (
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 print:overflow-visible pl-2 pt-2">
+        {pedidosOrdenados.map((p) => (
           <div key={p.id} className="border-2 border-slate-900 p-3 rounded-xl break-inside-avoid shadow-none relative mb-2 page-break-inside-avoid">
-            {p.esMercadoLibre && <div className="absolute top-0 right-0 bg-black text-white font-bold px-2 py-0.5 rounded-bl-lg text-[10px] uppercase tracking-widest">MERCADOLIBRE</div>}
             
-            <div className="flex justify-between items-center border-b border-slate-300 pb-2 mb-2 mt-1">
+            {/* Círculo con el número identificador del pedido */}
+            <div className="absolute -top-4 -left-4 bg-black text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white print:border-white z-10 text-sm">
+              {numeracionDiaria[p.id]}
+            </div>
+
+            {p.esMercadoLibre && <div className="absolute top-0 right-0 bg-black text-white font-bold px-2 py-0.5 rounded-bl-lg rounded-tr-md text-[10px] uppercase tracking-widest">MERCADOLIBRE</div>}
+            
+            <div className="flex justify-between items-center border-b border-slate-300 pb-2 mb-2 mt-1 ml-2">
               <div className="flex items-center gap-2">
                  <span className="font-black text-lg uppercase tracking-widest">{p.courier || 'ENVÍO'}</span>
                  <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-white text-black border-black'}`}>

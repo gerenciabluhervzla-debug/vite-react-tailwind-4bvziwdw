@@ -11,6 +11,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const puedeAnular = [ROLES.ADMIN, ROLES.DESPACHO].includes(perfil?.role);
   
   const [vistaDespacho, setVistaDespacho] = useState(esAuditorPuro ? 'historial_cierres' : 'pendientes');
+  const [filtroFechaHistorial, setFiltroFechaHistorial] = useState('');
 
   const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
   const pedidosDespachados = pedidos.filter(p => p.status === 'Despachado');
@@ -20,47 +21,101 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const [subiendo, setSubiendo] = useState({ id: null, field: null });
 
   const [cierres, setCierres] = useState([]);
+  const [movimientos, setMovimientos] = useState([]); 
   const [conteoActivo, setConteoActivo] = useState(false);
   const [conteoFisico, setConteoFisico] = useState({});
   const [notasConteo, setNotasConteo] = useState({});
   const [filtroFechaCierre, setFiltroFechaCierre] = useState('');
 
+  const numeracionDiaria = useMemo(() => {
+    const map = {};
+    const agrupados = {};
+    pedidos.forEach(p => {
+       const fecha = p.fechaDespacho || 'Sin Fecha';
+       if (!agrupados[fecha]) agrupados[fecha] = [];
+       agrupados[fecha].push(p);
+    });
+    Object.keys(agrupados).forEach(fecha => {
+       agrupados[fecha].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+       agrupados[fecha].forEach((p, index) => { map[p.id] = index + 1; });
+    });
+    return map;
+  }, [pedidos]);
+
   useEffect(() => {
-    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario'), orderBy('timestamp', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      setCierres(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (error) => console.warn("Error cargando cierres:", error.message));
-    return () => unsub();
+    const qCierres = query(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario'), orderBy('timestamp', 'desc'));
+    const unsubCierres = onSnapshot(qCierres, (snap) => setCierres(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    
+    const qMovs = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'));
+    const unsubMovs = onSnapshot(qMovs, (snap) => setMovimientos(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+
+    return () => { unsubCierres(); unsubMovs(); };
   }, [db, appId]);
+
+  // =========================================================================
+  // LÓGICA DE KARDEX DIARIO (Cálculo de Trazabilidad para Auditoría)
+  // =========================================================================
+  const hoyKardex = useMemo(() => {
+    const aggr = {};
+    catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
+        aggr[`${p.nombre}|${pres}`] = { ventas: 0, recepcion: 0, ingresos: 0 };
+    })));
+
+    const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const tDate = getVeneziaTime();
+    const todayStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
+    const startOfDay = new Date(tDate.getFullYear(), tDate.getMonth(), tDate.getDate()).getTime();
+
+    // 1. Sumar Ventas del Día
+    pedidos.forEach(p => {
+       if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr) {
+           if (p.carritoObj) {
+               Object.entries(p.carritoObj).forEach(([k, qty]) => {
+                   if (aggr[k]) aggr[k].ventas += qty;
+               });
+           }
+       }
+    });
+
+    // 2. Sumar Transferencias y Nuevos Ingresos del Día
+    movimientos.forEach(m => {
+       if (m.fechaCreacion >= startOfDay) {
+           if (m.tipo === 'TRANSFERENCIA') {
+               Object.entries(m.items || {}).forEach(([k, qty]) => {
+                   if (aggr[k]) aggr[k].recepcion += qty;
+               });
+           } else if (m.tipo === 'INGRESO') {
+               Object.entries(m.items || {}).forEach(([k, qty]) => {
+                   if (aggr[k]) aggr[k].ingresos += qty;
+               });
+           }
+       }
+    });
+    
+    return aggr;
+  }, [pedidos, movimientos, catalogo]);
+  // =========================================================================
 
   const handleGuiaChange = (id, field, value) => setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
 
-  // =========================================================================
-  // SUBIDA DE ARCHIVOS ORGANIZADA (CARPETAS Y NOMBRES E1_NOMBRE_FECHA)
-  // =========================================================================
   const handleFileUpload = async (e, id, field) => {
     const file = e.target.files[0];
     if (!file) return;
     if (!URL_GOOGLE_SCRIPT) return dialogs.alert("⚠️ Falta configurar el puente de Google Drive.", "Configuración Faltante");
     
-    // 1. Ubicamos los datos del cliente actual
     const pedidoActivo = pedidos.find(p => p.id === id);
     const nombreBase = pedidoActivo?.clienteNombre || 'Sin_Nombre';
     const nombreLimpio = nombreBase.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, '_');
     
-    // 2. Generamos las fechas
     const hoy = new Date();
     const dia = String(hoy.getDate()).padStart(2, '0');
     const mes = String(hoy.getMonth() + 1).padStart(2, '0');
     const anio = hoy.getFullYear();
     const fechaCarpeta = `${dia}-${mes}-${anio}`;
-    const fechaBD = `${dia}/${mes}/${anio}`;
 
-    // 3. Calculamos el prefijo (E1, E2...)
-    const enviosDeHoy = pedidos.filter(p => p.fechaDespacho === fechaBD && p.status === 'Despachado');
-    const prefijoE = `E${enviosDeHoy.length + 1}`;
+    const numeroAsignado = numeracionDiaria[id] || 1;
+    const prefijoE = `E${numeroAsignado}`;
 
-    // 4. Establecemos la ruta y el nombre final
     const carpetaRaiz = field === 'link' ? 'Guias' : 'Fotos_Productos';
     const nombreFinal = `${prefijoE}_${nombreLimpio}_${fechaCarpeta}.jpg`;
     const rutaCarpetas = `${carpetaRaiz}/${fechaCarpeta}`;
@@ -74,7 +129,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
             body: JSON.stringify({ 
                tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
                fileName: nombreFinal, 
-               folderPath: rutaCarpetas, // Enviamos la ruta de las carpetas al script de Google
+               folderPath: rutaCarpetas,
                mimeType: 'image/jpeg', 
                data: base64Data 
             })
@@ -94,7 +149,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       setSubiendo({ id: null, field: null }); 
     }
   };
-  // =========================================================================
 
   const guardarAvance = async (pedido) => {
     const inputData = guiasInput[pedido.id] || {};
@@ -233,10 +287,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   };
 
   const generarCSV = (cierre) => {
-    let csv = 'Categoria,Producto,Presentacion,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
+    let csv = 'Categoria,Producto,Presentacion,Inicio Dia,Ingresos,Recepcion,Ventas,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
     cierre.productos.forEach(p => {
       const estatus = p.diferencia === 0 ? 'OK' : (p.diferencia > 0 ? 'SOBRANTE' : 'FALTANTE');
-      csv += `"${p.categoria}","${p.nombre}","${p.presentacion}",${p.sistema},${p.fisico},${p.diferencia},"${estatus}","${p.nota}"\n`;
+      csv += `"${p.categoria}","${p.nombre}","${p.presentacion}",${p.inicioDia||0},${p.ingresos||0},${p.recepcion||0},${p.ventas||0},${p.sistema},${p.fisico},${p.diferencia},"${estatus}","${p.nota}"\n`;
     });
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' }); 
     const url = URL.createObjectURL(blob);
@@ -259,7 +313,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         <title>Reporte de Cierre - ${cierre.fecha}</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-          body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 900px; margin: 0 auto; }
+          body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 1000px; margin: 0 auto; }
           .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0ea5e9; padding-bottom: 20px; margin-bottom: 20px; }
           .logo { height: 60px; object-fit: contain; }
           h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; }
@@ -269,9 +323,9 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           .badge-ok { background: #dcfce7; color: #166534; }
           .badge-warn { background: #fee2e2; color: #991b1b; }
           .status-box { padding: 15px; border-radius: 8px; font-weight: 900; text-align: center; border: 1px solid currentColor; margin-bottom: 30px; font-size: 13px; letter-spacing: 1px; }
-          table { width: 100%; border-collapse: collapse; font-size: 13px; }
-          th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 8px; text-align: left; }
-          th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 6px; text-align: left; }
+          th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; }
           .ok { color: #166534; font-weight: bold; }
           .faltante { color: #dc2626; font-weight: bold; }
           .sobrante { color: #ea580c; font-weight: bold; }
@@ -280,7 +334,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       </head>
       <body>
         <div class="no-print" style="margin-bottom: 20px; background: #fffbeb; color: #b45309; padding: 15px; border-radius: 8px; border: 1px solid #fde68a; font-weight: bold; text-align: center;">
-           Para guardarlo en tu computadora, elige "Guardar como PDF" (Save as PDF) en el menú de impresión que acaba de aparecer.
+            Para guardarlo en tu computadora, elige "Guardar como PDF" (Save as PDF) en el menú de impresión que acaba de aparecer.
         </div>
         <div class="header">
           <div>
@@ -302,13 +356,42 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
            ${cierre.auditado ? 'AUDITORÍA VALIDADA POR: ' + cierre.auditadoPor.toUpperCase() : 'CIERRE PENDIENTE DE AUDITORÍA OFICIAL'}
         </div>
         <table>
-          <thead><tr><th>Categoría</th><th>Producto</th><th>Sistema</th><th>Físico</th><th>Diferencia</th><th>Notas Relevantes</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Categoría</th>
+              <th>Producto</th>
+              <th style="text-align:center;">Inicio Día</th>
+              <th style="text-align:center; color:#2563eb;">Ingresos</th>
+              <th style="text-align:center; color:#9333ea;">Recepción</th>
+              <th style="text-align:center; color:#059669;">Ventas</th>
+              <th style="text-align:center; background:#f8fafc;">Stock Final (Sistema)</th>
+              <th style="text-align:center;">Físico Real (Validado)</th>
+              <th style="text-align:center;">Dif.</th>
+              <th>Notas</th>
+            </tr>
+          </thead>
           <tbody>
     `;
     cierre.productos.forEach(p => {
        const claseDif = p.diferencia === 0 ? 'ok' : (p.diferencia < 0 ? 'faltante' : 'sobrante');
        const textDif = p.diferencia === 0 ? 'OK' : (p.diferencia > 0 ? '+'+p.diferencia : p.diferencia);
-       html += `<tr><td>${p.categoria}</td><td><strong>${p.nombre}</strong><br><span style="color:#64748b; font-size:11px;">${p.presentacion}</span></td><td style="text-align:center;">${p.sistema}</td><td style="text-align:center; font-weight:bold;">${p.fisico}</td><td class="${claseDif}" style="text-align:center;">${textDif}</td><td><i>${p.nota || '-'}</i></td></tr>`;
+       const ini = p.inicioDia !== undefined ? p.inicioDia : '-';
+       const ing = p.ingresos !== undefined ? p.ingresos : '-';
+       const rec = p.recepcion !== undefined ? p.recepcion : '-';
+       const vta = p.ventas !== undefined ? p.ventas : '-';
+
+       html += `<tr>
+         <td>${p.categoria}</td>
+         <td><strong>${p.nombre}</strong><br><span style="color:#64748b; font-size:10px;">${p.presentacion}</span></td>
+         <td style="text-align:center;">${ini}</td>
+         <td style="text-align:center; color:#2563eb; font-weight:bold;">${ing}</td>
+         <td style="text-align:center; color:#9333ea; font-weight:bold;">${rec}</td>
+         <td style="text-align:center; color:#059669; font-weight:bold;">${vta}</td>
+         <td style="text-align:center; font-weight:bold; font-size:13px; background:#f8fafc;">${p.sistema}</td>
+         <td style="text-align:center; font-weight:900; font-size:13px;">${p.fisico}</td>
+         <td class="${claseDif}" style="text-align:center;">${textDif}</td>
+         <td><i>${p.nota || '-'}</i></td>
+       </tr>`;
     });
     html += `</tbody></table>
       <div style="margin-top: 50px; border-top: 1px dashed #cbd5e1; padding-top: 20px; color: #94a3b8; font-size: 11px; text-align: center;">
@@ -323,13 +406,31 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     dialogs.confirm("¿Estás seguro de registrar el cierre de inventario de hoy?", async () => {
       const productosCierre = [];
       let totalDiferencias = 0;
+      
       catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
         const key = `${p.nombre}|${pres}`;
+        const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0 };
+        
         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+        const inicioDia = sistema + kData.ventas + kData.recepcion - kData.ingresos;
         const fisico = conteoFisico[key] || 0;
         const diferencia = fisico - sistema; 
+        
         if (diferencia !== 0) totalDiferencias++;
-        productosCierre.push({ categoria: c.categoria, nombre: p.nombre, presentacion: pres, sistema, fisico, diferencia, nota: notasConteo[key] || '' });
+        
+        productosCierre.push({ 
+           categoria: c.categoria, 
+           nombre: p.nombre, 
+           presentacion: pres, 
+           inicioDia,
+           recepcion: kData.recepcion,
+           ventas: kData.ventas,
+           ingresos: kData.ingresos,
+           sistema, 
+           fisico, 
+           diferencia, 
+           nota: notasConteo[key] || '' 
+        });
       })));
 
       const nuevoCierre = { fecha: new Date().toLocaleDateString('es-VE'), timestamp: Date.now(), creadoPor: perfil?.nombre || 'Despachador', totalItemsAuditados: productosCierre.length, anomaliasDetectadas: totalDiferencias, productos: productosCierre, auditado: false };
@@ -361,22 +462,17 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
      return parts.length === 3 ? new Date(parts[2], parts[1] - 1, parts[0]).getTime() : 0;
   };
 
-  const numeracionDiaria = useMemo(() => {
-    const map = {};
-    const agrupados = {};
-    pedidos.forEach(p => {
-       const fecha = p.fechaDespacho || 'Sin Fecha';
-       if (!agrupados[fecha]) agrupados[fecha] = [];
-       agrupados[fecha].push(p);
-    });
-    Object.keys(agrupados).forEach(fecha => {
-       agrupados[fecha].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
-       agrupados[fecha].forEach((p, index) => { map[p.id] = index + 1; });
-    });
-    return map;
-  }, [pedidos]);
-
-  const pedidosAMostrar = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
+  const pedidosAMostrar = useMemo(() => {
+    let lista = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
+    
+    if (vistaDespacho === 'historial' && filtroFechaHistorial) {
+      const [year, month, day] = filtroFechaHistorial.split('-');
+      const fechaFiltroStr = `${day}/${month}/${year}`;
+      lista = lista.filter(p => p.fechaDespacho === fechaFiltroStr);
+    }
+    
+    return lista;
+  }, [vistaDespacho, pedidosValidados, pedidosDespachados, filtroFechaHistorial]);
   
   const pedidosOrdenados = useMemo(() => {
      return [...pedidosAMostrar].sort((a, b) => {
@@ -400,11 +496,27 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
             <button onClick={() => setVistaDespacho('historial_cierres')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'historial_cierres' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>{esAuditorPuro ? 'Auditar Cierres' : 'Historial de Cierres'}</button>
           </div>
         </div>
-        {['pendientes', 'historial'].includes(vistaDespacho) && (
-          <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm w-full md:w-auto justify-center shrink-0">
-            <Printer size={18} /> Imprimir Etiquetas ({todayStr})
-          </button>
-        )}
+
+        <div className="flex flex-col md:flex-row w-full md:w-auto items-center gap-3">
+           {vistaDespacho === 'historial' && (
+             <div className="flex items-center gap-2 w-full md:w-auto">
+               <CalendarDays className="text-slate-400 shrink-0"/>
+               <input 
+                 type="date"
+                 value={filtroFechaHistorial}
+                 onChange={(e) => setFiltroFechaHistorial(e.target.value)}
+                 className="p-2 w-full md:w-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold outline-none focus:border-sky-500 transition-colors"
+               />
+               {filtroFechaHistorial && <button onClick={() => setFiltroFechaHistorial('')} className="text-xs text-red-500 hover:text-red-700 underline font-bold px-2">Limpiar</button>}
+             </div>
+           )}
+
+           {['pendientes', 'historial'].includes(vistaDespacho) && (
+             <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm w-full md:w-auto justify-center shrink-0">
+               <Printer size={18} /> Imprimir Etiquetas ({todayStr})
+             </button>
+           )}
+        </div>
       </div>
 
       {pedidosPendientes > 0 && vistaDespacho === 'pendientes' && (
@@ -421,7 +533,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         <div className="flex flex-col gap-8 w-full">
           {pedidosOrdenados.length === 0 ? (
             <div className="p-10 text-center text-slate-400 italic font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl">
-              No hay envíos en esta vista.
+              No hay envíos en esta vista o fecha.
             </div>
           ) : pedidosOrdenados.map(p => {
             
@@ -508,22 +620,50 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                   ) : (
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm flex flex-col gap-3 w-full h-full justify-between">
                       <input type="text" placeholder="N° de Guía Tracking" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                      
                       <div className="flex flex-col lg:flex-row gap-3">
                           <div className="flex-1 relative w-full">
                             <input type="text" placeholder="URL Recibo" readOnly={isLinkML} className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'} ${isLinkML ? 'opacity-70 cursor-not-allowed' : ''}`} value={valorLinkGuia} onChange={(e) => !isLinkML && handleGuiaChange(p.id, 'link', e.target.value)} />
                             <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg transition-colors shadow-sm ${isLinkML ? 'cursor-not-allowed bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'cursor-pointer'} ${valorLinkGuia && !isLinkML ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title={isLinkML ? "Guía provista por Ventas" : "Subir Recibo Agencia"}>
                               {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkGuia ? <CheckCircle size={16}/> : <UploadCloud size={16} />)}
-                              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => !isLinkML && handleFileUpload(e, p.id, 'link')} disabled={isLinkML || subiendo.field !== null} />
+                              <input type="file" accept="image/*" className="hidden" onChange={(e) => !isLinkML && handleFileUpload(e, p.id, 'link')} disabled={isLinkML || subiendo.field !== null} />
                             </label>
                           </div>
                           <div className="flex-1 relative w-full">
                             <input type="text" placeholder="URL Foto Caja" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkFoto ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkFoto} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
                             <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkFoto ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto del Paquete">
                               {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkFoto ? <CheckCircle size={16}/> : <Camera size={16} />)}
-                              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} disabled={subiendo.field !== null} />
+                              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} disabled={subiendo.field !== null} />
                             </label>
                           </div>
                       </div>
+
+                      {(valorLinkGuia || valorLinkFoto) && (
+                        <div className="flex gap-3 mt-1 mb-1">
+                            {valorLinkGuia && !isLinkML && (
+                                <div className="flex-1 relative group cursor-pointer" title="Ver comprobante de envío">
+                                    <span className="text-[10px] font-bold text-slate-500 mb-1 block">Foto Recibo:</span>
+                                    <a href={valorLinkGuia} target="_blank" rel="noreferrer" className="block relative h-20 w-full overflow-hidden rounded-xl border-2 border-slate-100 dark:border-slate-700 shadow-sm">
+                                        <img src={valorLinkGuia} alt="Recibo" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <Eye className="text-white" size={20} />
+                                        </div>
+                                    </a>
+                                </div>
+                            )}
+                            {valorLinkFoto && (
+                                <div className="flex-1 relative group cursor-pointer" title="Ver foto del paquete">
+                                    <span className="text-[10px] font-bold text-slate-500 mb-1 block">Foto Paquete:</span>
+                                    <a href={valorLinkFoto} target="_blank" rel="noreferrer" className="block relative h-20 w-full overflow-hidden rounded-xl border-2 border-slate-100 dark:border-slate-700 shadow-sm">
+                                        <img src={valorLinkFoto} alt="Paquete" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <Eye className="text-white" size={20} />
+                                        </div>
+                                    </a>
+                                </div>
+                            )}
+                        </div>
+                      )}
 
                       <div className="flex flex-col gap-2 mt-2">
                          <div className="flex flex-col lg:flex-row gap-2">
@@ -579,8 +719,12 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                    <thead>
                      <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                        <th className="p-4 font-black">Producto</th>
-                       <th className="p-4 font-black text-center w-24">Sistema</th>
-                       <th className="p-4 font-black text-center bg-sky-100 dark:bg-sky-900/40 w-32">Conteo Real</th>
+                       <th className="p-4 font-black text-center w-24">Inicio Día</th>
+                       <th className="p-4 font-black text-center w-24 text-blue-600">Ingresos</th>
+                       <th className="p-4 font-black text-center w-24 text-purple-600">Recepción</th>
+                       <th className="p-4 font-black text-center w-24 text-emerald-600">Ventas</th>
+                       <th className="p-4 font-black text-center w-24">Stock Final</th>
+                       <th className="p-4 font-black text-center bg-sky-100 dark:bg-sky-900/40 w-32">Validación Física</th>
                        <th className="p-4 font-black text-center w-28">Diferencia</th>
                        <th className="p-4 font-black">Notas / Justificación</th>
                      </tr>
@@ -588,7 +732,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                    <tbody>
                      {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
                         const key = `${p.nombre}|${pres}`;
+                        const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0 };
+                        
                         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+                        const inicioDia = sistema + kData.ventas + kData.recepcion - kData.ingresos;
                         const fisico = conteoFisico[key] ?? sistema;
                         const diferencia = fisico - sistema;
                         
@@ -602,7 +749,11 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                                <div className="font-bold text-slate-800 dark:text-slate-100">{p.nombre}</div>
                                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{pres}</div>
                              </td>
-                             <td className="p-4 text-center font-black text-lg text-slate-500">{sistema}</td>
+                             <td className="p-4 text-center font-bold text-lg text-slate-500">{inicioDia}</td>
+                             <td className="p-4 text-center font-bold text-lg text-blue-600">{kData.ingresos}</td>
+                             <td className="p-4 text-center font-bold text-lg text-purple-600">{kData.recepcion}</td>
+                             <td className="p-4 text-center font-bold text-lg text-emerald-600">{kData.ventas}</td>
+                             <td className="p-4 text-center font-black text-lg text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-900/30">{sistema}</td>
                              <td className="p-4 text-center bg-sky-50 dark:bg-sky-900/20">
                                 <input 
                                   type="number" 

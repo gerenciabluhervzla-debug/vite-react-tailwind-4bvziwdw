@@ -14,11 +14,20 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const [fechaFin, setFechaFin] = useState(getLocalToday());
 
   const rol = perfil?.role;
+  
+  // Solo el administrador ve el valor total del inventario
   const verTotalInventario = rol === ROLES.ADMIN;
-  const verDinero = rol !== ROLES.DESPACHO;
+  // Ahora permitimos que Despacho también vea las métricas de dinero y el botón de imprimir PDF
+  const verDinero = true; 
 
+  // --- CORRECCIÓN: SOLO SE INCLUYEN PEDIDOS VALIDADOS O DESPACHADOS ---
   const validados = useMemo(() => {
-    return pedidos.filter(p => p.status !== 'Rechazado' && p.status !== 'Anulado' && !p.esPublico);
+    return pedidos.filter(p => 
+      p.status !== 'Pendiente' && 
+      p.status !== 'Rechazado' && 
+      p.status !== 'Anulado' && 
+      !p.esPublico
+    );
   }, [pedidos]);
 
   const pedidosFiltrados = useMemo(() => {
@@ -168,6 +177,42 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        periodoEtiqueta = `Del ${fechaInicio.split('-').reverse().join('/')} al ${fechaFin.split('-').reverse().join('/')}`;
     }
 
+    // --- CÁLCULO DE PRODUCTOS VENDIDOS CON VALOR REAL PARA EL PDF ---
+    const productosDetallados = {};
+    pedidosFiltrados.forEach(p => {
+       if (p.esRegalo) return; 
+       
+       const descuentoAsesora = p.descuentoPorcentaje || 0;
+       const descuentoGlobal = p.descuentoGlobalAplicado || 0;
+       const descuentoRealAplicado = Math.max(descuentoAsesora, descuentoGlobal); 
+
+       if (p.carritoObj) {
+          Object.entries(p.carritoObj).forEach(([key, qty]) => {
+             if (!productosDetallados[key]) productosDetallados[key] = { nombre: key.replace('|', ' - '), unidades: 0, valorRealUsd: 0 };
+             
+             productosDetallados[key].unidades += qty;
+             
+             const [n, pr] = key.split('|');
+             let precioUnitarioCata = 0;
+             catalogo.forEach(c => c.productos.forEach(prod => {
+                if (prod.nombre === n) {
+                   const idx = prod.presentaciones.indexOf(pr);
+                   if (idx >= 0) precioUnitarioCata = prod.precios[idx] || 0;
+                }
+             }));
+             
+             let precioConDescuento = precioUnitarioCata;
+             if (descuentoRealAplicado > 0) {
+                 precioConDescuento = precioUnitarioCata - (precioUnitarioCata * (descuentoRealAplicado / 100));
+             }
+             
+             productosDetallados[key].valorRealUsd += (precioConDescuento * qty);
+          });
+       }
+    });
+
+    const listaProductosPDF = Object.values(productosDetallados).sort((a, b) => b.unidades - a.unidades);
+
     let html = `
       <!DOCTYPE html>
       <html>
@@ -263,7 +308,36 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     });
 
     html += `
-        <h2 style="margin-top: 50px;">Detalle Histórico Global (Todas las Órdenes)</h2>
+        <h2 style="margin-top: 50px;">Resumen de Productos Vendidos</h2>
+        <div style="font-size: 10px; color: #64748b; margin-top: -5px; margin-bottom: 10px;">
+           * El "Valor Real ($)" refleja lo que realmente ingresó por ese producto luego de aplicar descuentos si los hubo (No incluye mercancía de regalo).
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 60%;">Producto y Presentación</th>
+              <th style="width: 20%; text-align:center;">Unidades Vendidas</th>
+              <th style="width: 20%; text-align:right;">Valor Real ($)</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    if (listaProductosPDF.length === 0) {
+      html += `<tr><td colspan="3" style="text-align:center; padding: 30px; font-style: italic; color: #94a3b8;">No hay productos vendidos en este periodo.</td></tr>`;
+    } else {
+      listaProductosPDF.forEach(prod => {
+         html += `<tr>
+           <td><strong>${prod.nombre}</strong></td>
+           <td style="text-align:center; font-weight:bold; color:#0f172a;">${prod.unidades}</td>
+           <td style="text-align:right; font-weight:bold; color:#059669;">$${prod.valorRealUsd.toFixed(2)}</td>
+         </tr>`;
+      });
+    }
+    html += `</tbody></table>`;
+
+    html += `
+        <h2 style="margin-top: 50px;">Detalle Histórico Global (Todas las Órdenes Validadas)</h2>
         <table>
           <thead>
             <tr>
@@ -424,7 +498,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
-      {/* NUEVA TABLA DE ASESORAS */}
+      {/* TABLA DE ASESORAS */}
       {verDinero && (
         <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
            <div className="flex items-center gap-2 mb-6">

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban } from 'lucide-react';
+import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban, Search } from 'lucide-react';
 import { StatusBadge, InputDark } from '../components/ui';
 import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
@@ -15,6 +15,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const [descForm, setDescForm] = useState({ porcentaje: '', inicio: '', fin: '' });
   const [modalValidacion, setModalValidacion] = useState(null);
   const [backupLoading, setBackupLoading] = useState(false);
+
+  // NUEVOS ESTADOS PARA BUSCADOR Y ANULADOS
+  const [busqueda, setBusqueda] = useState('');
+  const [mostrarAnulados, setMostrarAnulados] = useState(false);
 
   const getVeneziaDate = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -135,15 +139,40 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     e.target.value = '';
   };
 
-  const pendientes = pedidos.filter(p => p.status === 'Pendiente');
+  // --- ORDENAMIENTO DE PENDIENTES (ASCENDENTE PARA PRIORIDAD POR ENTRADA) ---
+  const pendientesOrdenados = useMemo(() => {
+    return pedidos
+      .filter(p => p.status === 'Pendiente')
+      .sort((a, b) => a.fechaCreacion - b.fechaCreacion); // El más antiguo primero
+  }, [pedidos]);
   
+  // --- FILTRADO DEL HISTORIAL ---
   const historialFiltrado = useMemo(() => {
-    const todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
-    if (!fechaInicio || !fechaFin) return todosHistorial;
-    const fInicio = new Date(fechaInicio + 'T00:00:00').getTime();
-    const fFin = new Date(fechaFin + 'T23:59:59').getTime();
-    return todosHistorial.filter(p => p.fechaCreacion >= fInicio && p.fechaCreacion <= fFin);
-  }, [pedidos, fechaInicio, fechaFin]);
+    let todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
+    
+    // Ocultar anulados a menos que el switch esté activo
+    if (!mostrarAnulados) {
+      todosHistorial = todosHistorial.filter(p => p.status !== 'Anulado');
+    }
+
+    if (fechaInicio && fechaFin) {
+      const fInicio = new Date(fechaInicio + 'T00:00:00').getTime();
+      const fFin = new Date(fechaFin + 'T23:59:59').getTime();
+      todosHistorial = todosHistorial.filter(p => p.fechaCreacion >= fInicio && p.fechaCreacion <= fFin);
+    }
+    
+    // El historial sí lo ordenamos mostrando lo más reciente primero
+    return todosHistorial.sort((a, b) => b.fechaCreacion - a.fechaCreacion);
+  }, [pedidos, fechaInicio, fechaFin, mostrarAnulados]);
+
+  // --- APLICAR BUSCADOR GLOBAL A LA VISTA SELECCIONADA ---
+  const listado = useMemo(() => {
+    const base = vistaAdmin === 'pendientes' ? pendientesOrdenados : historialFiltrado;
+    if (!busqueda.trim()) return base;
+    
+    const busquedaMinuscula = busqueda.toLowerCase();
+    return base.filter(p => p.clienteNombre?.toLowerCase().includes(busquedaMinuscula));
+  }, [vistaAdmin, pendientesOrdenados, historialFiltrado, busqueda]);
 
   const actualizarTasa = async () => {
     dialogs.prompt("Ingresa la nueva tasa del día en Bolívares (Bs/$):", async (nuevaTasa) => {
@@ -245,7 +274,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Devolver Pedido");
   };
 
-  // --- NUEVA LÓGICA: ANULAR PEDIDO EN LUGAR DE BORRAR FÍSICAMENTE ---
   const anularPedido = (pedido) => {
     dialogs.prompt(`Estás a punto de ANULAR el pedido de ${pedido.clienteNombre}.\n\nEsta operación mantendrá el registro pero lo excluirá de los reportes financieros.\n\nEscribe el motivo de la anulación (Obligatorio):`, async (motivo) => {
       if (!motivo) return;
@@ -255,7 +283,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
            motivoAnulacion: motivo,
            anuladoPor: perfil.nombre,
            fechaAnulacion: Date.now(),
-           // Se establecen montos a cero para que no interfieran en futuros reportes si se modifica la lógica
            montoUsd: 0, montoVes: 0, 
            notasAuditoria: [...(pedido.notasAuditoria || []), { fecha: Date.now(), texto: `ORDEN ANULADA: ${motivo}`, autor: 'SISTEMA' }]
         });
@@ -299,7 +326,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     return Object.values(dias).sort((a,b) => b.fecha.localeCompare(a.fecha)); 
   }, [pedidos]);
 
-  const listado = vistaAdmin === 'pendientes' ? pendientes : historialFiltrado;
   const fechaHoy = new Date().toLocaleDateString('es-VE');
   const tasaActualizadaHoy = config?.ultimaActualizacion === fechaHoy;
   const isGlobalDiscountActiveStatus = config?.descuentoGlobalActivo;
@@ -393,15 +419,30 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><CheckSquare className="text-sky-600"/> Validación y Auditoría</h2>
           </div>
           
-          <div className="flex overflow-x-auto scrollbar-hide gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full sm:w-max">
-            {esAdmin && <button onClick={() => setVistaAdmin('pendientes')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Pendientes ({pendientes.length})</button>}
-            <button onClick={() => setVistaAdmin('historial')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial General</button>
-            {esAuditor && <button onClick={() => setVistaAdmin('auditoria')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'auditoria' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Diario de Auditoría</button>}
+          <div className="flex flex-col sm:flex-row items-center gap-4 w-full xl:w-auto">
+             
+             {/* BARRA DE BÚSQUEDA APLICADA */}
+             <div className="relative w-full sm:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                <input 
+                  type="text" 
+                  placeholder="Buscar por cliente..." 
+                  className="w-full pl-10 pr-4 py-2 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-sm font-bold outline-none focus:border-sky-500 transition-colors"
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                />
+             </div>
+
+             <div className="flex overflow-x-auto scrollbar-hide gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full sm:w-max">
+               {esAdmin && <button onClick={() => setVistaAdmin('pendientes')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Pendientes ({pendientesOrdenados.length})</button>}
+               <button onClick={() => setVistaAdmin('historial')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial General</button>
+               {esAuditor && <button onClick={() => setVistaAdmin('auditoria')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'auditoria' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Diario de Auditoría</button>}
+             </div>
           </div>
         </div>
 
         {vistaAdmin === 'historial' && (
-          <div className="flex flex-col sm:flex-row gap-4 mb-8 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
+          <div className="flex flex-col md:flex-row gap-4 mb-8 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 items-end">
             <div className="flex-1 w-full">
                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2 block">Desde (Fecha)</label>
                <input type="date" value={fechaInicio} onChange={e=>setFechaInicio(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors" />
@@ -410,9 +451,15 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                <label className="text-[10px] font-black uppercase text-slate-500 mb-1.5 ml-2 block">Hasta (Fecha)</label>
                <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors" />
             </div>
-            <div className="flex items-end pb-1 w-full sm:w-auto">
+            <div className="flex items-center gap-4 w-full md:w-auto">
+               {/* TOGGLE PARA MOSTRAR ANULADOS */}
+               <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600 px-4 py-3 rounded-xl font-bold text-sm select-none transition-colors w-full sm:w-auto justify-center">
+                 <input type="checkbox" className="w-4 h-4 accent-sky-500 rounded" checked={mostrarAnulados} onChange={(e) => setMostrarAnulados(e.target.checked)}/>
+                 Mostrar Anulados
+               </label>
+
                {(fechaInicio !== hoyStr || fechaFin !== hoyStr) && (
-                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 py-3 px-6 rounded-xl w-full transition-colors">Ver Solo Hoy</button>
+                 <button onClick={()=>{setFechaInicio(hoyStr); setFechaFin(hoyStr);}} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 py-3 px-6 rounded-xl w-full md:w-auto transition-colors">Ver Solo Hoy</button>
                )}
             </div>
           </div>
@@ -421,10 +468,15 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         {['pendientes', 'historial'].includes(vistaAdmin) && (
           <div className="flex flex-col gap-6">
             {listado.length === 0 ? (
-              <div className="p-12 text-center text-slate-400 font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl">No hay pedidos para mostrar en esta vista/fecha.</div>
-            ) : listado.map(p => (
+              <div className="p-12 text-center text-slate-400 font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl">No hay pedidos para mostrar con estos filtros.</div>
+            ) : listado.map((p, index) => (
               <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-6 p-6 md:p-8 transition-all border-2 rounded-[2rem] shadow-sm bg-white dark:bg-slate-800 ${vistaAdmin === 'historial' && !p.auditado && p.status !== 'Anulado' ? 'border-amber-300 dark:border-amber-700' : 'border-slate-200 dark:border-slate-600 hover:border-sky-300'}`}>
                  
+                 {/* CÍRCULO NUMERADOR IDENTIFICADOR */}
+                 <div className="absolute -top-3 -left-3 bg-[#003366] dark:bg-sky-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md z-10">
+                    {index + 1}
+                 </div>
+
                  <div className="absolute top-5 right-6"><StatusBadge status={p.status}/></div>
 
                  <div className="lg:col-span-5 flex flex-col justify-start">
@@ -531,7 +583,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        <div className="text-[10px] font-black uppercase text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 w-full lg:w-max mt-4 border border-amber-200"><AlertTriangle size={14}/> Sin Auditar</div>
                      )}
 
-                     {/* BOTÓN SEGURO: ANULAR ORDEN */}
                      {vistaAdmin === 'historial' && esAdminSupremo && p.status !== 'Anulado' && (
                        <button onClick={()=>anularPedido(p)} className="mt-4 pt-4 text-slate-400 hover:text-red-500 text-[11px] font-bold flex items-center justify-center gap-1 opacity-60 hover:opacity-100 transition-opacity uppercase tracking-widest border-t border-slate-100 dark:border-slate-700"><Ban size={14}/> Anular Orden (Sin borrar historial)</button>
                      )}
