@@ -27,14 +27,13 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   const [analizando, setAnalizando] = useState(false);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
 
-  // NUEVOS ESTADOS PARA BÚSQUEDA Y FILTROS DEL HISTORIAL
   const getLocalToday = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   };
   const [busquedaCliente, setBusquedaCliente] = useState('');
   const [fechaHistorial, setFechaHistorial] = useState(getLocalToday());
-  const [filtroStatus, setFiltroStatus] = useState('Todos'); // 'Todos', 'Pendiente', 'Validado', 'Despachado', 'Anulado'
+  const [filtroStatus, setFiltroStatus] = useState('Todos'); 
 
   const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
   const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
@@ -50,6 +49,50 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      hoyTimestamp <= new Date(config.descuentoGlobalFin + 'T23:59:59').getTime();
 
   const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
+
+  // --- NUEVA LÓGICA DE NUMERACIÓN DIARIA PARA VENTAS ---
+  const numeracionDiaria = useMemo(() => {
+    const map = {};
+    const agrupados = {};
+    pedidos.forEach(p => {
+       const fecha = p.fechaDespacho || 'Sin Fecha';
+       if (!agrupados[fecha]) agrupados[fecha] = [];
+       agrupados[fecha].push(p);
+    });
+    Object.keys(agrupados).forEach(fecha => {
+       agrupados[fecha].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+       agrupados[fecha].forEach((p, index) => { map[p.id] = index + 1; });
+    });
+    return map;
+  }, [pedidos]);
+
+  // --- FILTRO DE HISTORIAL CON FECHA DE DESPACHO (RESPETA REGLA DE 12:30PM) ---
+  const pedidosHistorialOrganizados = useMemo(() => {
+    let lista = pedidos.filter(p => !p.esPublico);
+
+    if (busquedaCliente.trim()) {
+      const b = busquedaCliente.toLowerCase();
+      lista = lista.filter(p => p.clienteNombre?.toLowerCase().includes(b));
+    }
+
+    if (fechaHistorial) {
+      const [year, month, day] = fechaHistorial.split('-');
+      const fechaFiltroStr = `${day}/${month}/${year}`;
+      // Usamos fechaDespacho en lugar de fechaCreacion
+      lista = lista.filter(p => p.fechaDespacho === fechaFiltroStr);
+    }
+
+    if (filtroStatus !== 'Todos') {
+      if (filtroStatus === 'Validados') {
+        lista = lista.filter(p => p.status === 'Validado');
+      } else {
+        lista = lista.filter(p => p.status === filtroStatus);
+      }
+    }
+
+    lista.sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+    return lista;
+  }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus]);
 
   useEffect(() => {
     if (!formData.carritoObj) return;
@@ -383,7 +426,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       
       cancelarEdicion();
       setVista('historial');
-      setTextoCrudo(''); // Se limpia automáticamente después de procesar
+      setTextoCrudo(''); 
     } catch (e) { console.error(e); dialogs.alert("Error de guardado.", "Error"); }
     setEnviando(false);
   };
@@ -401,37 +444,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
     window.open(`https://wa.me/${cleanPhone}?text=${mensaje}`, '_blank');
   };
-
-  // --- LÓGICA DEL HISTORIAL MEJORADA ---
-  const pedidosHistorialOrganizados = useMemo(() => {
-    let lista = pedidos.filter(p => !p.esPublico);
-
-    // 1. Aplicar filtro de búsqueda por cliente
-    if (busquedaCliente.trim()) {
-      const b = busquedaCliente.toLowerCase();
-      lista = lista.filter(p => p.clienteNombre?.toLowerCase().includes(b));
-    }
-
-    // 2. Aplicar filtro de fecha
-    if (fechaHistorial) {
-      const fSelected = new Date(fechaHistorial + 'T00:00:00').getTime();
-      const fSelectedEnd = new Date(fechaHistorial + 'T23:59:59').getTime();
-      lista = lista.filter(p => p.fechaCreacion >= fSelected && p.fechaCreacion <= fSelectedEnd);
-    }
-
-    // 3. Aplicar filtro de status
-    if (filtroStatus !== 'Todos') {
-      if (filtroStatus === 'Validados') {
-        lista = lista.filter(p => p.status === 'Validado');
-      } else {
-        lista = lista.filter(p => p.status === filtroStatus);
-      }
-    }
-
-    // 4. Ordenar ascendente por fechaCreacion (el más viejo del día será el N° 1)
-    lista.sort((a, b) => a.fechaCreacion - b.fechaCreacion);
-    return lista;
-  }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus]);
 
   return (
     <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-3xl border dark:border-slate-700 shadow-sm transition-colors">
@@ -717,7 +729,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                   
                   {/* NÚMERO DE VENTA DEL DÍA */}
                   <div className="absolute top-4 lg:top-6 left-2 lg:left-3 bg-[#003366] dark:bg-sky-600 text-white w-6 h-6 rounded-full flex items-center justify-center font-black text-xs shadow-sm">
-                    {index + 1}
+                    {numeracionDiaria[p.id] || index + 1}
                   </div>
 
                   <div className="lg:col-span-4 flex flex-col justify-start pl-8 lg:pl-10">

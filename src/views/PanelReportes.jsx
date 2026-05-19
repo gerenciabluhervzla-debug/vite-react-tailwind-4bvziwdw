@@ -14,13 +14,9 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const [fechaFin, setFechaFin] = useState(getLocalToday());
 
   const rol = perfil?.role;
-  
-  // Solo el administrador ve el valor total del inventario
   const verTotalInventario = rol === ROLES.ADMIN;
-  // Ahora permitimos que Despacho también vea las métricas de dinero y el botón de imprimir PDF
   const verDinero = true; 
 
-  // --- CORRECCIÓN: SOLO SE INCLUYEN PEDIDOS VALIDADOS O DESPACHADOS ---
   const validados = useMemo(() => {
     return pedidos.filter(p => 
       p.status !== 'Pendiente' && 
@@ -30,31 +26,50 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     );
   }, [pedidos]);
 
+  // --- NUEVA LÓGICA: FILTRAR REPORTES USANDO FECHA DE DESPACHO ---
+  const parseDateVzla = (dateStr) => {
+     if (!dateStr || dateStr === 'Sin Fecha') return 0;
+     const parts = dateStr.split('/');
+     return parts.length === 3 ? new Date(parts[2], parts[1] - 1, parts[0]).getTime() : 0;
+  };
+
   const pedidosFiltrados = useMemo(() => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    const startOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    const startOfMonth = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
-    const startOfYear = new Date(d.getFullYear(), 0, 1).getTime();
-
+    
     return validados.filter(p => {
-      if (rangoRango === 'hoy') return p.fechaCreacion >= startOfDay;
-      if (rangoRango === 'mes') return p.fechaCreacion >= startOfMonth;
-      if (rangoRango === 'año') return p.fechaCreacion >= startOfYear;
+      if (rangoRango === 'hoy') {
+         const todayStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+         return p.fechaDespacho === todayStr;
+      }
+      if (rangoRango === 'mes') {
+         const [, dMes, dAno] = (p.fechaDespacho || '').split('/');
+         return dMes === String(d.getMonth()+1).padStart(2,'0') && dAno === String(d.getFullYear());
+      }
+      if (rangoRango === 'año') {
+         const [, , dAno] = (p.fechaDespacho || '').split('/');
+         return dAno === String(d.getFullYear());
+      }
       if (rangoRango === 'todo') return true;
       if (rangoRango === 'custom') {
+        const pTime = parseDateVzla(p.fechaDespacho);
         const start = fechaInicio ? new Date(fechaInicio + 'T00:00:00').getTime() : 0;
         const end = fechaFin ? new Date(fechaFin + 'T23:59:59').getTime() : Infinity;
-        return p.fechaCreacion >= start && p.fechaCreacion <= end;
+        return pTime >= start && pTime <= end;
       }
       return true;
     });
   }, [validados, rangoRango, fechaInicio, fechaFin]);
 
   const ventasMesUsdPDF = useMemo(() => {
-    const now = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const currentMonth = String(d.getMonth() + 1).padStart(2, '0');
+    const currentYear = String(d.getFullYear());
+    
     return validados
-      .filter(p => p.fechaCreacion >= startOfMonth)
+      .filter(p => {
+         const [, dMes, dAno] = (p.fechaDespacho || '').split('/');
+         return dMes === currentMonth && dAno === currentYear;
+      })
       .reduce((sum, p) => sum + (p.montoUsd || 0), 0);
   }, [validados]);
 
@@ -177,7 +192,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        periodoEtiqueta = `Del ${fechaInicio.split('-').reverse().join('/')} al ${fechaFin.split('-').reverse().join('/')}`;
     }
 
-    // --- CÁLCULO DE PRODUCTOS VENDIDOS CON VALOR REAL PARA EL PDF ---
     const productosDetallados = {};
     pedidosFiltrados.forEach(p => {
        if (p.esRegalo) return; 
@@ -355,7 +369,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
        const isZelle = p.moneda === 'ZELLE';
        html += `<tr>
-         <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${new Date(p.fechaCreacion).toLocaleDateString('es-VE')}</span><br><span style="font-size:10px; font-weight:bold;">Asesora: ${p.asesora}</span></td>
+         <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${p.fechaDespacho}</span><br><span style="font-size:10px; font-weight:bold;">Asesora: ${p.asesora}</span></td>
          <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia || 'N/A'}</span><br><span style="font-size:9px; font-weight:bold; color:#4338ca; display:block; margin-top:4px;">${p.origenPedido || 'Sin Origen'}</span></td>
          <td class="products-list">${prodsFormat}</td>
          <td style="text-align:right; font-weight:bold; color:#059669;">${isZelle ? '-' : (p.montoVes || 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
@@ -385,7 +399,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
           <div>
             <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-2"><CalendarDays className="text-sky-600"/> Período del Reporte</h2>
-            <p className="text-xs font-medium text-slate-500">Las métricas se recalcularán basadas en las fechas seleccionadas.</p>
+            <p className="text-xs font-medium text-slate-500">Las métricas se recalcularán basadas en las fechas de despacho seleccionadas.</p>
           </div>
           
           <div className="flex flex-col sm:flex-row gap-4 w-full xl:w-auto items-start sm:items-center">
