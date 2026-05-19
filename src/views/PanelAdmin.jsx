@@ -16,7 +16,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const [modalValidacion, setModalValidacion] = useState(null);
   const [backupLoading, setBackupLoading] = useState(false);
 
-  // NUEVOS ESTADOS PARA BUSCADOR Y ANULADOS
+  // ESTADOS PARA BUSCADOR Y ANULADOS
   const [busqueda, setBusqueda] = useState('');
   const [mostrarAnulados, setMostrarAnulados] = useState(false);
 
@@ -25,6 +25,18 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   };
   const hoyStr = getVeneziaDate();
+
+  // NUEVA FUNCIÓN: Calcula la fecha operativa (corte a las 12:30 PM)
+  const getFechaOperativaObj = (timestamp) => {
+    const d = new Date(new Date(timestamp).toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    // Si es después de las 12:30 PM, cuenta para el día siguiente
+    if (d.getHours() > 12 || (d.getHours() === 12 && d.getMinutes() >= 30)) {
+      d.setDate(d.getDate() + 1);
+    }
+    const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const visual = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    return { iso, visual };
+  };
   
   const [fechaInicio, setFechaInicio] = useState(hoyStr);
   const [fechaFin, setFechaFin] = useState(hoyStr);
@@ -143,29 +155,29 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const pendientesOrdenados = useMemo(() => {
     return pedidos
       .filter(p => p.status === 'Pendiente')
-      .sort((a, b) => a.fechaCreacion - b.fechaCreacion); // El más antiguo primero
+      .sort((a, b) => a.fechaCreacion - b.fechaCreacion); 
   }, [pedidos]);
   
-  // --- FILTRADO DEL HISTORIAL ---
+  // --- FILTRADO DEL HISTORIAL CON FECHA OPERATIVA ---
   const historialFiltrado = useMemo(() => {
     let todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
     
-    // Ocultar anulados a menos que el switch esté activo
     if (!mostrarAnulados) {
       todosHistorial = todosHistorial.filter(p => p.status !== 'Anulado');
     }
 
     if (fechaInicio && fechaFin) {
-      const fInicio = new Date(fechaInicio + 'T00:00:00').getTime();
-      const fFin = new Date(fechaFin + 'T23:59:59').getTime();
-      todosHistorial = todosHistorial.filter(p => p.fechaCreacion >= fInicio && p.fechaCreacion <= fFin);
+      // Evaluamos la fecha operativa para que coincida con el corte de las 12:30 PM
+      todosHistorial = todosHistorial.filter(p => {
+         const opIso = getFechaOperativaObj(p.fechaCreacion).iso;
+         return opIso >= fechaInicio && opIso <= fechaFin;
+      });
     }
     
-    // El historial sí lo ordenamos mostrando lo más reciente primero
     return todosHistorial.sort((a, b) => b.fechaCreacion - a.fechaCreacion);
   }, [pedidos, fechaInicio, fechaFin, mostrarAnulados]);
 
-  // --- APLICAR BUSCADOR GLOBAL A LA VISTA SELECCIONADA ---
+  // --- APLICAR BUSCADOR GLOBAL ---
   const listado = useMemo(() => {
     const base = vistaAdmin === 'pendientes' ? pendientesOrdenados : historialFiltrado;
     if (!busqueda.trim()) return base;
@@ -313,17 +325,20 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Nuevo Comentario");
   };
 
+  // --- AGRUPACIÓN DE AUDITORÍA CON FECHA OPERATIVA ---
   const diasAuditoria = useMemo(() => {
     const dias = {};
     pedidos.forEach(p => {
-       const d = new Date(p.fechaCreacion).toLocaleDateString('es-VE');
-       if (!dias[d]) dias[d] = { fecha: d, total: 0, auditados: 0, fallas: 0, pedidos: [] };
-       dias[d].total++;
-       if (p.auditado) dias[d].auditados++;
-       if (p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado' || p.status === 'Anulado') dias[d].fallas++;
-       dias[d].pedidos.push(p);
+       // Usamos la fecha operativa calculada
+       const { iso, visual } = getFechaOperativaObj(p.fechaCreacion);
+       if (!dias[iso]) dias[iso] = { isoKey: iso, fecha: visual, total: 0, auditados: 0, fallas: 0, pedidos: [] };
+       dias[iso].total++;
+       if (p.auditado) dias[iso].auditados++;
+       if (p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado' || p.status === 'Anulado') dias[iso].fallas++;
+       dias[iso].pedidos.push(p);
     });
-    return Object.values(dias).sort((a,b) => b.fecha.localeCompare(a.fecha)); 
+    // Ordenamos descendente por el ISO para que los días más recientes queden arriba
+    return Object.values(dias).sort((a,b) => b.isoKey.localeCompare(a.isoKey)); 
   }, [pedidos]);
 
   const fechaHoy = new Date().toLocaleDateString('es-VE');
@@ -452,7 +467,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                <input type="date" value={fechaFin} onChange={e=>setFechaFin(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors" />
             </div>
             <div className="flex items-center gap-4 w-full md:w-auto">
-               {/* TOGGLE PARA MOSTRAR ANULADOS */}
                <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600 px-4 py-3 rounded-xl font-bold text-sm select-none transition-colors w-full sm:w-auto justify-center">
                  <input type="checkbox" className="w-4 h-4 accent-sky-500 rounded" checked={mostrarAnulados} onChange={(e) => setMostrarAnulados(e.target.checked)}/>
                  Mostrar Anulados
@@ -472,7 +486,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             ) : listado.map((p, index) => (
               <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-6 p-6 md:p-8 transition-all border-2 rounded-[2rem] shadow-sm bg-white dark:bg-slate-800 ${vistaAdmin === 'historial' && !p.auditado && p.status !== 'Anulado' ? 'border-amber-300 dark:border-amber-700' : 'border-slate-200 dark:border-slate-600 hover:border-sky-300'}`}>
                  
-                 {/* CÍRCULO NUMERADOR IDENTIFICADOR */}
                  <div className="absolute -top-3 -left-3 bg-[#003366] dark:bg-sky-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md z-10">
                     {index + 1}
                  </div>
@@ -481,9 +494,16 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
                  <div className="lg:col-span-5 flex flex-col justify-start">
                    <div className="font-bold text-xl text-slate-800 dark:text-slate-100 pr-24 leading-tight">{p.clienteNombre}</div>
-                   <div className="text-[11px] font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1 mb-3">
-                     Ingreso: {new Date(p.fechaCreacion).toLocaleDateString('es-VE')} {new Date(p.fechaCreacion).toLocaleTimeString('es-VE', {hour: '2-digit', minute:'2-digit'})}
+                   
+                   {/* MODIFICACIÓN: Indicador visual de la fecha operativa */}
+                   <div className="text-[11px] font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1 mb-3 flex items-center flex-wrap gap-2">
+                     <span>Ingreso: {new Date(p.fechaCreacion).toLocaleDateString('es-VE')} {new Date(p.fechaCreacion).toLocaleTimeString('es-VE', {hour: '2-digit', minute:'2-digit'})}</span>
+                     {/* Solo mostramos la etiqueta si la fecha operativa difiere de la fecha real de creación */}
+                     {getFechaOperativaObj(p.fechaCreacion).visual !== new Date(p.fechaCreacion).toLocaleDateString('es-VE') && (
+                        <span className="bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-700">Operativo: {getFechaOperativaObj(p.fechaCreacion).visual}</span>
+                     )}
                    </div>
+                   
                    <div className="text-xs font-semibold text-slate-500 flex items-center gap-2 mb-4">
                      <span className="bg-slate-100 dark:bg-slate-700 px-3 py-1.5 rounded-lg">Asesora: {p.asesora}</span>
                      {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-3 py-1.5 rounded-lg font-black uppercase tracking-widest border border-yellow-300">MercadoLibre</span>}
