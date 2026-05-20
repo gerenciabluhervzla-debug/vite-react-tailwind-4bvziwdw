@@ -1,11 +1,55 @@
-import React, { useState, useEffect } from 'react';
-import { AlertTriangle, MessageSquare } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { AlertTriangle, MessageSquare, TrendingDown, TrendingUp, ArrowRightLeft } from 'lucide-react';
 import { setDoc, doc } from 'firebase/firestore';
 
-export default function SubPanelStock({ lista, notas, stock, db, appId, puedeEditar, loggear, dialogs }) {
+export default function SubPanelStock({ lista, notas, stock, movimientos, pedidos = [], db, appId, puedeEditar, loggear, dialogs }) {
   const [localStock, setLocalStock] = useState({});
   const [notaActiva, setNotaActiva] = useState(null); 
   const [textoNota, setTextoNota] = useState('');
+
+  // Helpers para fechas
+  const getHoyDDMMYYYY = () => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  };
+  const getHoyISO = () => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  // CÁLCULO DINÁMICO DE MÉTRICAS DEL DÍA
+  const metricasDia = useMemo(() => {
+    const hoyDDMM = getHoyDDMMYYYY();
+    const hoyISO = getHoyISO();
+    const map = {};
+    lista.forEach(i => map[i.key] = { ingresos: 0, traslados: 0, ventas: 0 });
+
+    // 1. Sumar Ventas del Día
+    pedidos.forEach(p => {
+       if (p.status !== 'Anulado' && p.status !== 'Rechazado' && (p.fechaDespacho === hoyDDMM || new Date(p.fechaCreacion).toLocaleDateString('es-VE') === new Date().toLocaleDateString('es-VE'))) {
+          Object.entries(p.carritoObj || {}).forEach(([key, qty]) => {
+             if (map[key]) map[key].ventas += qty;
+          });
+       }
+    });
+
+    // 2. Sumar Movimientos del Día
+    movimientos?.forEach(m => {
+       const isToday = m.fecha === hoyISO || m.fecha === hoyDDMM || new Date(m.fechaCreacion || Date.now()).toLocaleDateString('es-VE') === new Date().toLocaleDateString('es-VE');
+       if (isToday) {
+          const type = (m.tipo || '').toUpperCase();
+          const itemsObj = m.carritoObj || m.items || {};
+          Object.entries(itemsObj).forEach(([key, qty]) => {
+             if (map[key]) {
+                if (type.includes('INGRESO')) map[key].ingresos += qty;
+                if (type.includes('TRASLADO') || type.includes('RECEPCION')) map[key].traslados += qty;
+             }
+          });
+       }
+    });
+
+    return map;
+  }, [pedidos, movimientos, lista]);
 
   useEffect(() => {
     const format = {};
@@ -36,49 +80,63 @@ export default function SubPanelStock({ lista, notas, stock, db, appId, puedeEdi
   };
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
-      <table className="w-full text-left text-sm border-collapse min-w-[800px]">
+    <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm animate-in fade-in">
+      <div className="p-4 bg-sky-50 dark:bg-sky-900/20 border-b border-sky-100 dark:border-sky-800 text-sky-800 dark:text-sky-300 font-bold text-sm flex items-center justify-between">
+         <span>Resumen Operativo de Hoy: {getHoyDDMMYYYY()}</span>
+         <span className="text-xs font-semibold bg-white dark:bg-slate-800 px-3 py-1 rounded-lg shadow-sm border border-sky-200 dark:border-sky-700">Edición en tiempo real activada</span>
+      </div>
+      <table className="w-full text-left text-sm border-collapse min-w-[1000px]">
          <thead>
-           <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
-             <th className="p-4 border-b dark:border-slate-700 font-bold tracking-wide">Producto</th>
-             <th className="p-4 border-b dark:border-slate-700 text-center border-l border-slate-100 dark:border-slate-700 bg-sky-50/50 dark:bg-sky-900/10 font-bold tracking-wide text-sky-800 dark:text-sky-400">Almacén: ENVÍOS</th>
-             <th className="p-4 border-b dark:border-slate-700 text-center border-l border-slate-100 dark:border-slate-700 bg-purple-50/50 dark:bg-purple-900/10 font-bold tracking-wide text-purple-800 dark:text-purple-400">Almacén: RECEPCIÓN</th>
-             <th className="p-4 border-b dark:border-slate-700 border-l border-slate-100 dark:border-slate-700 font-bold tracking-wide">Notas del Auditor</th>
+           <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 text-[11px] uppercase tracking-wider">
+             <th className="p-4 border-b dark:border-slate-700 font-black">Producto</th>
+             <th className="p-4 border-b dark:border-slate-700 text-center font-black text-slate-400">Inicio Día</th>
+             <th className="p-4 border-b dark:border-slate-700 text-center font-black text-emerald-600 dark:text-emerald-400">Ingresos (+)</th>
+             <th className="p-4 border-b dark:border-slate-700 text-center font-black text-amber-600 dark:text-amber-400">A Recepción (-)</th>
+             <th className="p-4 border-b dark:border-slate-700 text-center font-black text-rose-600 dark:text-rose-400">Ventas (-)</th>
+             <th className="p-4 border-b dark:border-slate-700 text-center border-l border-slate-200 dark:border-slate-600 bg-sky-100/50 dark:bg-sky-900/30 font-black text-sky-800 dark:text-sky-300">Cierre ENVÍOS</th>
+             <th className="p-4 border-b dark:border-slate-700 text-center bg-purple-50/50 dark:bg-purple-900/10 font-black text-purple-800 dark:text-purple-400">Cierre RECEPCIÓN</th>
            </tr>
          </thead>
          <tbody>
-           {lista.map(item => (
+           {lista.map(item => {
+             const m = metricasDia[item.key];
+             // Math: Inicio = Final + Ventas + Traslados - Ingresos
+             const inicioEnvios = item.envios + m.ventas + m.traslados - m.ingresos;
+
+             return (
              <tr key={item.key} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                <td className="p-4">
-                 <div className="font-bold text-slate-800 dark:text-slate-100 text-base">{item.nom}</div>
-                 <div className="text-xs bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold px-2 py-0.5 rounded inline-block mt-1">{item.pres}</div>
+                 <div className="font-bold text-slate-800 dark:text-slate-100 text-sm">{item.nom}</div>
+                 <div className="text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-black px-2 py-0.5 rounded inline-block mt-1 uppercase tracking-widest">{item.pres}</div>
                </td>
-               <td className="p-4 text-center border-l border-slate-50 dark:border-slate-700 bg-sky-50/20 dark:bg-sky-900/5">
+               
+               <td className="p-4 text-center font-black text-slate-400 text-lg">{inicioEnvios}</td>
+               
+               <td className="p-4 text-center">
+                 {m.ingresos > 0 ? <span className="font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-lg text-sm flex items-center justify-center gap-1"><TrendingUp size={14}/> {m.ingresos}</span> : <span className="text-slate-300 dark:text-slate-600 font-bold">-</span>}
+               </td>
+               
+               <td className="p-4 text-center">
+                 {m.traslados > 0 ? <span className="font-black text-amber-600 bg-amber-50 dark:bg-amber-900/30 px-2 py-1 rounded-lg text-sm flex items-center justify-center gap-1"><ArrowRightLeft size={14}/> {m.traslados}</span> : <span className="text-slate-300 dark:text-slate-600 font-bold">-</span>}
+               </td>
+               
+               <td className="p-4 text-center">
+                 {m.ventas > 0 ? <span className="font-black text-rose-600 bg-rose-50 dark:bg-rose-900/30 px-2 py-1 rounded-lg text-sm flex items-center justify-center gap-1"><TrendingDown size={14}/> {m.ventas}</span> : <span className="text-slate-300 dark:text-slate-600 font-bold">-</span>}
+               </td>
+
+               <td className="p-4 text-center border-l border-slate-200 dark:border-slate-600 bg-sky-50/30 dark:bg-sky-900/10">
                  {puedeEditar ? (
-                   <input type="number" min="0" value={localStock[item.key]?.envios ?? item.envios} onChange={e=>handleStockChange(item.key, 'envios', e.target.value)} onBlur={()=>guardarStock(item.key)} className="w-20 border-2 border-slate-200 dark:border-slate-600 bg-transparent focus:border-sky-500 text-center font-bold rounded-lg p-2 outline-none transition-colors dark:text-white" />
+                   <input type="number" min="0" value={localStock[item.key]?.envios ?? item.envios} onChange={e=>handleStockChange(item.key, 'envios', e.target.value)} onBlur={()=>guardarStock(item.key)} className="w-20 border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:border-sky-500 text-center font-black rounded-lg p-1.5 outline-none transition-colors dark:text-white shadow-inner" />
                  ) : <span className="font-black text-xl text-sky-800 dark:text-sky-400">{item.envios}</span>}
                </td>
-               <td className="p-4 text-center border-l border-slate-50 dark:border-slate-700 bg-purple-50/20 dark:bg-purple-900/5">
+               
+               <td className="p-4 text-center bg-purple-50/20 dark:bg-purple-900/5">
                  {puedeEditar ? (
-                   <input type="number" min="0" value={localStock[item.key]?.recepcion ?? item.recepcion} onChange={e=>handleStockChange(item.key, 'recepcion', e.target.value)} onBlur={()=>guardarStock(item.key)} className="w-20 border-2 border-slate-200 dark:border-slate-600 bg-transparent focus:border-purple-500 text-center font-bold rounded-lg p-2 outline-none transition-colors dark:text-white" />
+                   <input type="number" min="0" value={localStock[item.key]?.recepcion ?? item.recepcion} onChange={e=>handleStockChange(item.key, 'recepcion', e.target.value)} onBlur={()=>guardarStock(item.key)} className="w-20 border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:border-purple-500 text-center font-black rounded-lg p-1.5 outline-none transition-colors dark:text-white shadow-inner" />
                  ) : <span className="font-black text-xl text-purple-800 dark:text-purple-400">{item.recepcion}</span>}
                </td>
-               <td className="p-4 border-l border-slate-50 dark:border-slate-700 w-1/3">
-                 {item.nota && <div className="text-xs bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 p-3 rounded-lg border border-amber-200 dark:border-amber-800 mb-3 whitespace-pre-wrap flex items-start gap-2 shadow-sm font-medium"><AlertTriangle size={16} className="shrink-0 text-amber-500"/> {item.nota}</div>}
-                 {puedeEditar && notaActiva === item.key ? (
-                   <div className="flex flex-col gap-2">
-                     <textarea value={textoNota} onChange={e=>setTextoNota(e.target.value)} placeholder="Escribe anomalía u observación..." className="text-sm border-2 border-slate-200 dark:border-slate-600 bg-transparent dark:text-white rounded-lg p-2 w-full outline-none focus:border-sky-500 transition-colors" rows="2" />
-                     <div className="flex gap-2">
-                       <button onClick={()=>guardarNota(item.key)} className="text-xs bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded-lg font-bold shadow-sm transition-colors">Guardar</button>
-                       <button onClick={()=>setNotaActiva(null)} className="text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white px-3 py-1.5 rounded-lg font-bold transition-colors">Cancelar</button>
-                     </div>
-                   </div>
-                 ) : puedeEditar && !item.nota && (
-                   <button onClick={()=>{setNotaActiva(item.key); setTextoNota('');}} className="text-xs text-slate-400 hover:text-amber-600 flex items-center gap-1 font-semibold transition-colors"><MessageSquare size={14}/> Agregar nota / observación</button>
-                 )}
-               </td>
              </tr>
-           ))}
+           )})}
          </tbody>
       </table>
     </div>

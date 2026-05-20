@@ -15,7 +15,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', pagoEnvio: 'COD', origenPedido: '',
     direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '', 
     montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false, 
-    descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '' 
+    descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '', numeroControlML: '' // <--- AGREGADO: Campo de Control ML
   };
   
   const [formData, setFormData] = useState(defaultForm);
@@ -225,7 +225,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     setFormData({
       clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, pagoEnvio: pedido.pagoEnvio || 'COD', origenPedido: pedido.origenPedido || '', direccion: pedido.direccion,
       productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD', 
-      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: ''
+      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: '',
+      numeroControlML: pedido.numeroControlML || '' // <--- AGREGADO: Cargar dato en corrección
     });
     setEditId(pedido.id);
     setPedidoDevuelto(pedido);
@@ -565,12 +566,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
              <div className="md:col-span-2 flex flex-wrap items-center gap-6 mt-2 mb-2">
                <div className="flex items-center gap-3">
                  <input type="checkbox" id="ml-check" checked={formData.esMercadoLibre} onChange={(e) => setFormData({...formData, esMercadoLibre: e.target.checked})} className="w-5 h-5 accent-sky-600 cursor-pointer rounded" />
-                 <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Envío MercadoLibre (PDF/Imagen)</label>
+                 <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Envío MercadoLibre</label>
                </div>
                
+               {/* --- MODIFICACIÓN 2: Input para N° Control ML --- */}
                {formData.esMercadoLibre && (
-                 <div className="animate-in fade-in slide-in-from-top-2 ml-8 mb-2">
-                    <label className={`flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-xs ${formData.linkGuiaML ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-sky-300 dark:border-sky-700 text-sky-600 hover:border-sky-50 dark:hover:bg-sky-900/20'}`}>
+                 <div className="animate-in fade-in slide-in-from-top-2 ml-8 mb-2 flex flex-col md:flex-row gap-4 w-full">
+                    <div className="w-full md:w-1/2">
+                      <Input label="N° de Control ML (Opcional)" value={formData.numeroControlML || ''} onChange={(e) => setFormData({...formData, numeroControlML: e.target.value})} placeholder="Ej: 102938475" />
+                    </div>
+                    <label className={`flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors font-bold text-xs w-full md:w-1/2 mt-1 md:mt-0 h-max self-end ${formData.linkGuiaML ? 'border-emerald-500 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'border-sky-300 dark:border-sky-700 text-sky-600 hover:border-sky-50 dark:hover:bg-sky-900/20'}`}>
                        {subiendoML ? <Loader2 size={16} className="animate-spin"/> : (formData.linkGuiaML ? <CheckCircle size={16}/> : <FileType size={16}/>)}
                        {formData.linkGuiaML ? 'Archivo Cargado y Listo' : 'Adjuntar Guía PDF o Imagen'}
                        <input type="file" accept="image/*,application/pdf" className="hidden" onChange={handleFileUploadML} disabled={subiendoML}/>
@@ -750,12 +755,41 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                        )}
                     </div>
 
+                    {/* --- MODIFICACIÓN 2: Renderizar N° Control ML en el historial --- */}
+                    {p.esMercadoLibre && p.numeroControlML && (
+                       <div className="text-[11px] font-bold text-yellow-700 dark:text-yellow-500 mt-1 flex items-center gap-1">
+                          <Package size={12}/> N° Control ML: {p.numeroControlML}
+                       </div>
+                    )}
+
                     <div className="text-xs font-semibold text-slate-400 mt-1">
                       {new Date(p.fechaCreacion).toLocaleDateString()} a las {new Date(p.fechaCreacion).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                     </div>
+                    
                     <div className="mt-3 text-[12px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300 font-medium">
                        {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
                     </div>
+
+                    {/* --- MODIFICACIÓN 1: Visor de Fotos / Recibos en el Historial --- */}
+                    {(p.linkGuiaML || p.linkGuia || p.linkComprobantePago) && (
+                       <div className="flex flex-wrap gap-2 mt-3">
+                          {p.linkComprobantePago && (
+                             <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg dark:bg-emerald-900/30 dark:border-emerald-800 dark:text-emerald-400 hover:bg-emerald-100 transition-colors shadow-sm">
+                                <FileText size={14}/> Ver Recibo Pago
+                             </a>
+                          )}
+                          {p.linkGuiaML && (
+                             <a href={p.linkGuiaML} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2.5 py-1.5 rounded-lg dark:bg-sky-900/30 dark:border-sky-800 dark:text-sky-400 hover:bg-sky-100 transition-colors shadow-sm">
+                                <FileText size={14}/> Ver Guía ML
+                             </a>
+                          )}
+                          {p.linkGuia && p.linkGuia.startsWith('http') && (
+                             <a href={p.linkGuia} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-lg dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400 hover:bg-amber-100 transition-colors shadow-sm">
+                                <Package size={14}/> Ver Paquete
+                             </a>
+                          )}
+                       </div>
+                    )}
                   </div>
 
                   <div className="lg:col-span-3 flex flex-col justify-start mt-2 lg:mt-0">

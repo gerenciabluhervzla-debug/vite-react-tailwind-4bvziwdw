@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban, Search } from 'lucide-react';
+import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban, Search, Edit3 } from 'lucide-react';
 import { StatusBadge, InputDark } from '../components/ui';
 import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
@@ -172,7 +172,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       });
     }
     
-    // CORRECCIÓN: Orden ascendente para que el más antiguo sea el primero (index 1)
+    // ORDENAMIENTO ASCENDENTE (MÁS ANTIGUOS PRIMERO)
     return todosHistorial.sort((a, b) => a.fechaCreacion - b.fechaCreacion);
   }, [pedidos, fechaInicio, fechaFin, mostrarAnulados]);
 
@@ -223,7 +223,30 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Apagar Campaña");
   };
 
-  const abrirModalValidacion = (pedido) => setModalValidacion({ pedido: pedido, sobrante: '', file: null, previewUrl: '', subiendo: false });
+  // --- MODIFICACIÓN: ABRIR MODAL CON PARÁMETROS FLEXIBLES Y MODO EDICIÓN ---
+  const abrirModalValidacion = (pedido, isEdit = false) => {
+    let tipo = 'ninguno';
+    let monto = '';
+    
+    if (pedido.sobranteUsd > 0) {
+       tipo = 'sobrante';
+       monto = pedido.sobranteUsd.toString();
+    } else if (pedido.faltanteUsd > 0) {
+       tipo = 'faltante';
+       monto = pedido.faltanteUsd.toString();
+    }
+
+    setModalValidacion({ 
+      pedido: pedido, 
+      tipoDiferencia: tipo,
+      montoDiferencia: monto,
+      monedaDiferencia: 'USD',
+      file: null, 
+      previewUrl: isEdit && pedido.linkComprobanteAdmin ? pedido.linkComprobanteAdmin : '', 
+      subiendo: false,
+      isEdit: isEdit 
+    });
+  };
 
   const handlePasteComprobante = (e) => {
     const items = e.clipboardData?.items;
@@ -237,12 +260,20 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }
   };
 
+  // --- MODIFICACIÓN: PROCESAMIENTO DEFINITIVO DE VALIDACIÓN ---
   const procesarValidacionDefinitiva = async () => {
     if (!modalValidacion) return;
-    const { pedido, sobrante, file } = modalValidacion;
+    const { pedido, tipoDiferencia, montoDiferencia, monedaDiferencia, file, isEdit } = modalValidacion;
+    
+    if (tipoDiferencia !== 'ninguno' && (!montoDiferencia || parseFloat(montoDiferencia) <= 0)) {
+        return dialogs.alert("Debes ingresar un monto válido para el faltante o sobrante.", "Monto Inválido");
+    }
+
     setModalValidacion(prev => ({ ...prev, subiendo: true }));
     try {
-      let urlComprobanteAdmin = '';
+      let urlComprobanteAdmin = pedido.linkComprobanteAdmin || '';
+      
+      // 1. Subir la imagen si hay una nueva
       if (file && URL_GOOGLE_SCRIPT) {
         const base64Data = await compressImage(file, 800, 0.7);
         const response = await fetch(URL_GOOGLE_SCRIPT, {
@@ -253,20 +284,47 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         if (result.url) urlComprobanteAdmin = result.url;
       }
 
-      const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
-      const updates = {};
-      Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { updates[itemKey] = { envios: increment(-qty) }; });
-      if (Object.keys(updates).length > 0) { await setDoc(stockRef, updates, { merge: true }); }
+      // 2. Descontar Inventario SOLO si NO es una edición (para no descontar dos veces)
+      if (!isEdit) {
+         const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
+         const updates = {};
+         Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { updates[itemKey] = { envios: increment(-qty) }; });
+         if (Object.keys(updates).length > 0) { await setDoc(stockRef, updates, { merge: true }); }
+      }
 
-      const sobranteUsd = parseFloat(sobrante.replace(',', '.')) || 0;
-      const payloadPedido = { status: 'Validado', sobranteUsd };
+      // 3. Cálculos de moneda
+      let montoCalculadoUsd = 0;
+      if (tipoDiferencia !== 'ninguno' && montoDiferencia) {
+         const montoNum = parseFloat(montoDiferencia.replace(',', '.')) || 0;
+         if (monedaDiferencia === 'VES') {
+            const tasaAUsar = pedido.tasaAplicada || config.tasaDia || 1;
+            montoCalculadoUsd = montoNum / tasaAUsar;
+         } else {
+            montoCalculadoUsd = montoNum;
+         }
+      }
+
+      const sobranteUsd = tipoDiferencia === 'sobrante' ? Number(montoCalculadoUsd.toFixed(2)) : 0;
+      const faltanteUsd = tipoDiferencia === 'faltante' ? Number(montoCalculadoUsd.toFixed(2)) : 0;
+
+      const payloadPedido = { 
+          status: 'Validado', 
+          sobranteUsd: sobranteUsd, 
+          faltanteUsd: faltanteUsd 
+      };
+      
       if (urlComprobanteAdmin) payloadPedido.linkComprobanteAdmin = urlComprobanteAdmin;
 
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), payloadPedido);
-      loggear('PAGO_VALIDADO', `Aprobación y descuento de stock: ${pedido.clienteNombre}`);
-      dialogs.alert("El pago fue aprobado, el extracto guardado y el inventario descontado exitosamente.", "Pago Validado");
+      
+      loggear(isEdit ? 'PAGO_CORREGIDO' : 'PAGO_VALIDADO', `${isEdit ? 'Corrección de validación' : 'Aprobación y descuento de stock'}: ${pedido.clienteNombre}`);
+      dialogs.alert(isEdit ? "La validación fue actualizada correctamente." : "El pago fue aprobado, el extracto guardado y el inventario descontado exitosamente.", "Éxito");
       setModalValidacion(null);
-    } catch(e) { console.error(e); dialogs.alert("Ocurrió un error al validar el pago o subir el archivo.", "Error"); setModalValidacion(prev => ({ ...prev, subiendo: false })); }
+    } catch(e) { 
+      console.error(e); 
+      dialogs.alert("Ocurrió un error al validar el pago o subir el archivo.", "Error"); 
+      setModalValidacion(prev => ({ ...prev, subiendo: false })); 
+    }
   };
 
   const rechazarPago = (pedido) => {
@@ -322,6 +380,20 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           loggear('AUDITORIA_NOTA', `Añadió comentario a: ${pedido.clienteNombre}`);
        } catch(e) { console.error(e); }
     }, "Nuevo Comentario");
+  };
+
+  // --- MODIFICACIÓN: Comentario Complementario (No audita) ---
+  const dejarComentarioComplementario = async (pedido) => {
+    dialogs.prompt("Escribe un comentario o nota complementaria para este pedido:", async (nota) => {
+       if(!nota) return;
+       try {
+          const notasExistentes = pedido.notasAuditoria || [];
+          // Agregamos la nota, pero no modificamos "auditado"
+          const nuevasNotas = [...notasExistentes, { fecha: Date.now(), texto: `Nota Complementaria: ${nota}`, autor: perfil.nombre }];
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { notasAuditoria: nuevasNotas });
+          loggear('NOTA_COMPLEMENTARIA', `Añadió nota complementaria a: ${pedido.clienteNombre}`);
+       } catch(e) { console.error(e); dialogs.alert("Error guardando el comentario."); }
+    }, "Añadir Comentario");
   };
 
   // --- AGRUPACIÓN DE AUDITORÍA (Orden ascendente también) ---
@@ -446,10 +518,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                 />
              </div>
 
-             <div className="flex overflow-x-auto scrollbar-hide gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full sm:w-max">
-               {esAdmin && <button onClick={() => setVistaAdmin('pendientes')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Pendientes ({pendientesOrdenados.length})</button>}
-               <button onClick={() => setVistaAdmin('historial')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial General</button>
-               {esAuditor && <button onClick={() => setVistaAdmin('auditoria')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all ${vistaAdmin === 'auditoria' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Diario de Auditoría</button>}
+             {/* --- MODIFICACIÓN: flex-wrap para evitar el desbordamiento del menú --- */}
+             <div className="flex flex-wrap sm:flex-nowrap overflow-x-auto scrollbar-hide gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full xl:w-max">
+               {esAdmin && <button onClick={() => setVistaAdmin('pendientes')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Pendientes ({pendientesOrdenados.length})</button>}
+               <button onClick={() => setVistaAdmin('historial')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial General</button>
+               {esAuditor && <button onClick={() => setVistaAdmin('auditoria')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'auditoria' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Diario de Auditoría</button>}
              </div>
           </div>
         </div>
@@ -561,9 +634,16 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                      
                      {esAdmin && p.status === 'Pendiente' && (
                        <div className="flex flex-col gap-3 w-full mt-auto">
-                         <button onClick={()=>abrirModalValidacion(p)} className="bg-sky-600 text-white py-3.5 rounded-xl font-black text-sm shadow-lg hover:bg-sky-700 hover:-translate-y-0.5 transition-all w-full uppercase tracking-wider">Validar Pago</button>
+                         <button onClick={()=>abrirModalValidacion(p, false)} className="bg-sky-600 text-white py-3.5 rounded-xl font-black text-sm shadow-lg hover:bg-sky-700 hover:-translate-y-0.5 transition-all w-full uppercase tracking-wider">Validar Pago</button>
                          <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-200 text-red-600 py-3 rounded-xl font-bold text-sm hover:bg-red-50 transition-colors w-full">Devolver a Ventas</button>
                        </div>
+                     )}
+
+                     {/* --- MODIFICACIÓN: Corrección de validación para Admins en el Historial --- */}
+                     {vistaAdmin === 'historial' && esAdmin && p.status === 'Validado' && !p.auditado && (
+                        <button onClick={()=>abrirModalValidacion(p, true)} className="mt-auto mb-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm w-full">
+                           <Edit3 size={16}/> Corregir Validación
+                        </button>
                      )}
                      
                      {p.status !== 'Pendiente' && p.notasAuditoria && p.notasAuditoria.length > 0 && (
@@ -578,6 +658,13 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                            ))}
                          </div>
                        </div>
+                     )}
+
+                     {/* --- MODIFICACIÓN: Acción de añadir nota complementaria sin auditar --- */}
+                     {esAdmin && !esAuditor && p.status !== 'Pendiente' && p.status !== 'Anulado' && (
+                        <button onClick={()=>dejarComentarioComplementario(p)} className="mb-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border-2 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm w-full">
+                           <MessageSquare size={16}/> Añadir Comentario
+                        </button>
                      )}
 
                      {esAuditor && p.status !== 'Pendiente' && p.status !== 'Anulado' && (
@@ -654,7 +741,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in">
            <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 border border-slate-200 dark:border-slate-700">
               <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
-                 <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><CheckCircle className="text-sky-600"/> Confirmar Pago</h3>
+                 <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><CheckCircle className="text-sky-600"/> {modalValidacion.isEdit ? 'Corregir Validación' : 'Confirmar Pago'}</h3>
                  <button onClick={() => setModalValidacion(null)} className="p-2 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20}/></button>
               </div>
               <div className="p-6">
@@ -669,8 +756,34 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                     </div>
                  </div>
                  
-                 <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-1 block">¿Sobrante ($)? (Opcional)</label>
-                 <input type="number" step="0.01" value={modalValidacion.sobrante} onChange={e=>setModalValidacion(prev=>({...prev, sobrante: e.target.value}))} className="w-full border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 dark:text-white p-3.5 rounded-xl mb-6 outline-none focus:border-sky-500 font-bold" placeholder="0.00" />
+                 {/* --- MODIFICACIÓN: Selector visual de tipo de diferencia (Exacto, Sobrante, Faltante) --- */}
+                 <div className="mb-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block mb-3">¿Diferencia en el pago?</label>
+                    <div className="flex flex-wrap sm:flex-nowrap gap-3 mb-4">
+                       <label className={`flex-1 flex items-center justify-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer font-bold text-xs transition-colors ${modalValidacion.tipoDiferencia === 'ninguno' ? 'bg-sky-50 border-sky-500 text-sky-700 dark:bg-sky-900/30 dark:border-sky-500 dark:text-sky-300' : 'bg-white border-slate-200 text-slate-500 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400'}`}>
+                          <input type="radio" className="hidden" checked={modalValidacion.tipoDiferencia === 'ninguno'} onChange={() => setModalValidacion(p=>({...p, tipoDiferencia: 'ninguno'}))}/>
+                          Pago Exacto
+                       </label>
+                       <label className={`flex-1 flex items-center justify-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer font-bold text-xs transition-colors ${modalValidacion.tipoDiferencia === 'sobrante' ? 'bg-purple-50 border-purple-500 text-purple-700 dark:bg-purple-900/30 dark:border-purple-500 dark:text-purple-300' : 'bg-white border-slate-200 text-slate-500 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400'}`}>
+                          <input type="radio" className="hidden" checked={modalValidacion.tipoDiferencia === 'sobrante'} onChange={() => setModalValidacion(p=>({...p, tipoDiferencia: 'sobrante'}))}/>
+                          Sobrante
+                       </label>
+                       <label className={`flex-1 flex items-center justify-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer font-bold text-xs transition-colors ${modalValidacion.tipoDiferencia === 'faltante' ? 'bg-red-50 border-red-500 text-red-700 dark:bg-red-900/30 dark:border-red-500 dark:text-red-300' : 'bg-white border-slate-200 text-slate-500 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400'}`}>
+                          <input type="radio" className="hidden" checked={modalValidacion.tipoDiferencia === 'faltante'} onChange={() => setModalValidacion(p=>({...p, tipoDiferencia: 'faltante'}))}/>
+                          Faltante
+                       </label>
+                    </div>
+
+                    {modalValidacion.tipoDiferencia !== 'ninguno' && (
+                       <div className="flex gap-3 animate-in fade-in slide-in-from-top-2">
+                          <input type="number" step="0.01" value={modalValidacion.montoDiferencia} onChange={e=>setModalValidacion(prev=>({...prev, montoDiferencia: e.target.value}))} className="w-full border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 dark:text-white p-3 rounded-xl outline-none focus:border-sky-500 font-bold" placeholder="Monto (Ej: 5.50)" />
+                          <select value={modalValidacion.monedaDiferencia} onChange={e=>setModalValidacion(prev=>({...prev, monedaDiferencia: e.target.value}))} className="w-32 border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 dark:text-white p-3 rounded-xl outline-none focus:border-sky-500 font-bold">
+                             <option value="USD">$ USD</option>
+                             <option value="VES">Bs (VES)</option>
+                          </select>
+                       </div>
+                    )}
+                 </div>
 
                  <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-1 flex items-center justify-between">
                     <span>Extracto Bancario (Recomendado)</span>
@@ -698,7 +811,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  </div>
                  
                  <button onClick={procesarValidacionDefinitiva} disabled={modalValidacion.subiendo} className="w-full bg-[#003366] hover:bg-[#002244] dark:bg-sky-600 dark:hover:bg-sky-700 text-white font-black py-4 rounded-xl mt-6 shadow-xl transition-transform hover:-translate-y-0.5 disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest">
-                   {modalValidacion.subiendo ? <><Loader2 className="animate-spin"/> Guardando...</> : 'Aprobar y Descontar'}
+                   {modalValidacion.subiendo ? <><Loader2 className="animate-spin"/> Guardando...</> : (modalValidacion.isEdit ? 'Guardar Cambios' : 'Aprobar y Descontar')}
                  </button>
               </div>
            </div>
