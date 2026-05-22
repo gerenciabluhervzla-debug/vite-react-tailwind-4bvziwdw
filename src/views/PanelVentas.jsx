@@ -771,21 +771,34 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                     </div>
 
                     {/* --- MODIFICACIÓN 1: Visor de Fotos / Recibos en el Historial --- */}
-                    {(p.linkGuiaML || p.linkGuia || p.linkComprobantePago) && (
+                    {(p.linkGuiaML || p.linkGuia || p.linkComprobantePago || p.linkFotoProductos) && (
                        <div className="flex flex-wrap gap-2 mt-3">
+                          
+                          {/* 1. Comprobante de Pago del Cliente */}
                           {p.linkComprobantePago && (
                              <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg dark:bg-emerald-900/30 dark:border-emerald-800 dark:text-emerald-400 hover:bg-emerald-100 transition-colors shadow-sm">
                                 <FileText size={14}/> Ver Recibo Pago
                              </a>
                           )}
+                          
+                          {/* 2. Guía PDF de MercadoLibre */}
                           {p.linkGuiaML && (
                              <a href={p.linkGuiaML} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2.5 py-1.5 rounded-lg dark:bg-sky-900/30 dark:border-sky-800 dark:text-sky-400 hover:bg-sky-100 transition-colors shadow-sm">
                                 <FileText size={14}/> Ver Guía ML
                              </a>
                           )}
-                          {p.linkGuia && p.linkGuia.startsWith('http') && (
-                             <a href={p.linkGuia} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-lg dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400 hover:bg-amber-100 transition-colors shadow-sm">
-                                <Package size={14}/> Ver Paquete
+                          
+                          {/* 3. Foto de la Guía de la Agencia Courier (Subida por Despacho) */}
+                          {p.linkGuia && p.linkGuia.startsWith('http') && !p.linkGuiaML && (
+                             <a href={p.linkGuia} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1.5 rounded-lg dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400 hover:bg-indigo-100 transition-colors shadow-sm">
+                                <FileText size={14}/> Ver Foto Guía
+                             </a>
+                          )}
+
+                          {/* 4. Foto de la Caja / Paquete Físico (Subida por Despacho) */}
+                          {p.linkFotoProductos && (
+                             <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-lg dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400 hover:bg-amber-100 transition-colors shadow-sm">
+                                <Package size={14}/> Ver Paquete Físico
                              </a>
                           )}
                        </div>

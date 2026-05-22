@@ -10,6 +10,7 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
   const rol = perfil?.role;
   const puedeHacerIngreso = [ROLES.ADMIN, ROLES.DESPACHO].includes(rol);
   const puedeTransferir = [ROLES.ADMIN, ROLES.DESPACHO].includes(rol);
+  const puedeHacerSalida = [ROLES.ADMIN, ROLES.DESPACHO, ROLES.ADMINISTRACION].includes(rol);
   const esRecepcion = [ROLES.ADMIN, ROLES.ADMINISTRACION].includes(rol);
   const esAdmin = [ROLES.ADMIN].includes(rol);
   
@@ -19,7 +20,6 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
         const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
         const updates = {};
         
-        // CORRECCIÓN QA: Actualización Segura (Permite puntos decimales en el nombre)
         Object.entries(mov.items).forEach(([key, qty]) => { 
            updates[key] = { recepcion: increment(qty) }; 
         });
@@ -32,6 +32,31 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
         loggear('TRANSFERENCIA_APROBADA', `Recepción aprobó entrada de transferencia enviada por ${mov.creadoPor}`);
       } catch(e) { console.error(e); }
     }, "Aprobar Recepción");
+  };
+
+  // NUEVA FUNCIÓN: Aprobar Salida de Inventario (Mermas / Daños)
+  const aprobarSalida = async (mov) => {
+    dialogs.confirm("¿Confirmas que deseas aprobar esta SALIDA de inventario? Las cantidades se RESTARÁN permanentemente del sistema.", async () => {
+      try {
+        const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
+        const updates = {};
+        
+        // Asumimos que la salida se resta de 'recepcion', pero si tu modal define un origen, lo toma dinámicamente.
+        const origenStock = mov.origen ? mov.origen.toLowerCase() : 'recepcion';
+        
+        Object.entries(mov.items).forEach(([key, qty]) => { 
+           // IMPORTANTE: Aquí se resta usando -qty
+           updates[key] = { [origenStock]: increment(-qty) }; 
+        });
+        
+        if(Object.keys(updates).length > 0){ 
+           await setDoc(stockRef, updates, { merge: true }); 
+        }
+
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'movimientos', mov.id), { status: 'COMPLETADO', fechaAprobacion: Date.now(), aprobadoPor: perfil.nombre });
+        loggear('SALIDA_APROBADA', `Admin aprobó salida de inventario por daños/mermas registrada por ${mov.creadoPor}`);
+      } catch(e) { console.error(e); }
+    }, "Aprobar Salida de Inventario");
   };
 
   const eliminarMovimiento = (id, tipo) => {
@@ -47,8 +72,9 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
   return (
     <div className="animate-in fade-in">
       <div className="flex flex-wrap gap-4 mb-8">
-        {puedeHacerIngreso && <button onClick={()=>setModalType('INGRESO')} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl shadow-md flex items-center gap-2 transition-all hover:-translate-y-0.5"><PlusCircle size={18}/> Cargar Ingreso (Proveedor)</button>}
+        {puedeHacerIngreso && <button onClick={()=>setModalType('INGRESO')} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl shadow-md flex items-center gap-2 transition-all hover:-translate-y-0.5"><PlusCircle size={18}/> Cargar Ingreso</button>}
         {puedeTransferir && <button onClick={()=>setModalType('TRANSFERENCIA')} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-md flex items-center gap-2 transition-all hover:-translate-y-0.5"><ArrowRightLeft size={18}/> Enviar a Recepción</button>}
+        {puedeHacerSalida && <button onClick={()=>setModalType('SALIDA')} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl shadow-md flex items-center gap-2 transition-all hover:-translate-y-0.5"><AlertTriangle size={18}/> Registrar Salida (Daños)</button>}
       </div>
 
       <h3 className="font-black text-slate-800 dark:text-slate-100 mb-4 text-lg">Historial de Operaciones</h3>
@@ -63,14 +89,25 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
                   <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">Generado por: <span className="font-semibold text-slate-700 dark:text-slate-300">{m.creadoPor}</span></div>
                 </td>
                 <td className="p-4">
-                  <span className={`px-2.5 py-1 rounded-md text-[10px] font-black tracking-widest uppercase border ${m.tipo === 'INGRESO' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' : 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800'}`}>{m.tipo}</span>
-                  <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-2 flex items-center gap-1">Hacia: <span className="text-slate-800 dark:text-slate-200">Almacén {m.destino}</span></div>
+                  {/* Etiqueta dinámica dependiendo del tipo de movimiento */}
+                  <span className={`px-2.5 py-1 rounded-md text-[10px] font-black tracking-widest uppercase border 
+                    ${m.tipo === 'INGRESO' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' : 
+                      m.tipo === 'SALIDA' ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800' :
+                      'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800'}`}>
+                    {m.tipo}
+                  </span>
+                  
+                  {m.destino && (
+                     <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-2 flex items-center gap-1">Destino: <span className="text-slate-800 dark:text-slate-200">Almacén {m.destino}</span></div>
+                  )}
+                  {m.tipo === 'SALIDA' && (
+                     <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-2 flex items-center gap-1">Causa: <span className="text-slate-800 dark:text-slate-200">Ajuste / Daños</span></div>
+                  )}
                 </td>
                 <td className="p-4 text-sm font-medium text-slate-700 dark:text-slate-300 bg-[#f0f4f8] dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 m-2 rounded-lg shadow-inner">
                   {Object.entries(m.items).map(([k,q]) => <div key={k} className="flex gap-2 mb-1"><span className="font-bold text-slate-800 dark:text-slate-100">{q}x</span> <span>{k.replace('|', ' ')}</span></div>)}
                 </td>
                 <td className="p-4">
-                  {/* LECTURA DEL ARREGLO DE FOTOS */}
                   {m.fotos && m.fotos.length > 0 ? (
                      <div className="flex flex-col gap-1.5">
                         {m.fotos.map((url, idx) => (
@@ -95,8 +132,15 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
                     </div>
                   ) : (
                     <div className="flex flex-col items-end gap-2">
-                      <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 px-3 py-1 rounded-md text-xs font-bold border border-amber-200 dark:border-amber-800">En Tránsito (Pendiente)</span>
-                      {esRecepcion && <button onClick={()=>aprobarTransferencia(m)} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-2 rounded-lg font-bold shadow-md transition-colors mt-1">Aprobar Llegada</button>}
+                      <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 px-3 py-1 rounded-md text-xs font-bold border border-amber-200 dark:border-amber-800">En Revisión (Pendiente)</span>
+                      
+                      {/* Botón de aprobación dinámico según el tipo */}
+                      {m.tipo === 'TRANSFERENCIA' && esRecepcion && (
+                         <button onClick={()=>aprobarTransferencia(m)} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-2 rounded-lg font-bold shadow-md transition-colors mt-1">Aprobar Llegada</button>
+                      )}
+                      {m.tipo === 'SALIDA' && esAdmin && (
+                         <button onClick={()=>aprobarSalida(m)} className="bg-red-600 hover:bg-red-700 text-white text-xs px-4 py-2 rounded-lg font-bold shadow-md transition-colors mt-1">Aprobar Salida</button>
+                      )}
                     </div>
                   )}
                   {esAdmin && (

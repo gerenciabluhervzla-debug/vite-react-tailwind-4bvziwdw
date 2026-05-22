@@ -10,6 +10,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const esAuditorPuro = perfil?.role === ROLES.AUDITORIA;
   const puedeAnular = [ROLES.ADMIN, ROLES.DESPACHO].includes(perfil?.role);
   
+  // NUEVAS VALIDACIONES DE ROLES
+  const esSoloLectura = perfil?.role === ROLES.ADMINISTRACION;
+  const puedeHacerCierre = [ROLES.ADMIN, ROLES.DESPACHO].includes(perfil?.role);
+  
   const [vistaDespacho, setVistaDespacho] = useState(esAuditorPuro ? 'historial_cierres' : 'pendientes');
   const [filtroFechaHistorial, setFiltroFechaHistorial] = useState('');
 
@@ -58,7 +62,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const hoyKardex = useMemo(() => {
     const aggr = {};
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
-        aggr[`${p.nombre}|${pres}`] = { ventas: 0, recepcion: 0, ingresos: 0 };
+        aggr[`${p.nombre}|${pres}`] = { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
     })));
 
     const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -77,7 +81,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
        }
     });
 
-    // 2. Sumar Transferencias y Nuevos Ingresos del Día
+    // 2. Sumar Transferencias, Ingresos y SALIDAS del Día
     movimientos.forEach(m => {
        if (m.fechaCreacion >= startOfDay) {
            if (m.tipo === 'TRANSFERENCIA') {
@@ -87,6 +91,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
            } else if (m.tipo === 'INGRESO') {
                Object.entries(m.items || {}).forEach(([k, qty]) => {
                    if (aggr[k]) aggr[k].ingresos += qty;
+               });
+           } else if (m.tipo === 'SALIDA' && m.status === 'COMPLETADO') {
+               Object.entries(m.items || {}).forEach(([k, qty]) => {
+                   if (aggr[k]) aggr[k].salidas += qty;
                });
            }
        }
@@ -151,6 +159,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   };
 
   const guardarAvance = async (pedido) => {
+    if (esSoloLectura) return;
     const inputData = guiasInput[pedido.id] || {};
     const updateData = {};
     if (inputData.guia !== undefined) updateData.guia = inputData.guia;
@@ -166,6 +175,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   };
 
   const guardarGuia = async (pedido) => {
+    if (esSoloLectura) return;
     const inputData = guiasInput[pedido.id] || {};
     const guiaFinal = inputData.guia !== undefined ? inputData.guia : pedido.guia;
     const linkFinal = (pedido.esMercadoLibre && pedido.linkGuiaML) ? pedido.linkGuiaML : (inputData.link !== undefined ? inputData.link : pedido.linkGuia);
@@ -204,7 +214,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const marcarGuiaMLImpresa = async (pedido) => {
     if (pedido.linkGuiaML) {
       window.open(pedido.linkGuiaML, '_blank');
-      if (!pedido.guiaMLImpresa) {
+      if (!pedido.guiaMLImpresa && !esSoloLectura) {
          try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { guiaMLImpresa: true }); } 
          catch(e) { console.error(e); }
       }
@@ -214,6 +224,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   };
 
   const anularEnvio = (pedido) => {
+    if (esSoloLectura) return;
     dialogs.prompt(`Estás a punto de CANCELAR el envío de ${pedido.clienteNombre}.\n\nIMPORTANTE: Como esta orden ya estaba en preparación, el sistema DEVOLVERÁ automáticamente los productos al inventario.\n\nEscribe el motivo de la cancelación a última hora:`, async (motivo) => {
       if (!motivo) return;
       
@@ -261,36 +272,11 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     setConteoFisico(prev => ({ ...prev, [key]: isNaN(num) ? 0 : num }));
   };
 
-  const auditarCierreRapido = async (cierre) => {
-    if(!esAuditor) return;
-    try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
-        auditado: true, auditadoPor: perfil?.nombre || 'Auditor', fechaAuditoria: Date.now() 
-      });
-      loggear('AUDITORIA_CIERRE_RAPIDA', `Cierre de ${cierre.fecha} validado.`);
-    } catch(e) { console.error(e); }
-  };
-
-  const auditarCierreConNota = (cierre) => {
-    if(!esAuditor) return;
-    dialogs.prompt("Escribe una observación de auditoría para este cierre:", async (nota) => {
-       if(!nota) return;
-       try {
-          const notasExistentes = cierre.notasAuditoria || [];
-          const nuevasNotas = [...notasExistentes, { fecha: Date.now(), texto: nota, autor: perfil?.nombre || 'Auditor' }];
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
-             auditado: true, auditadoPor: perfil?.nombre || 'Auditor', notasAuditoria: nuevasNotas, fechaAuditoria: Date.now() 
-          });
-          loggear('AUDITORIA_CIERRE_NOTA', `Cierre de ${cierre.fecha} auditado con nota.`);
-       } catch(e) { console.error(e); }
-    }, "Añadir Nota de Auditoría");
-  };
-
   const generarCSV = (cierre) => {
-    let csv = 'Categoria,Producto,Presentacion,Inicio Dia,Ingresos,Recepcion,Ventas,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
+    let csv = 'Categoria,Producto,Presentacion,Inicio Dia,Ingresos,Recepcion,Salidas,Ventas,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
     cierre.productos.forEach(p => {
       const estatus = p.diferencia === 0 ? 'OK' : (p.diferencia > 0 ? 'SOBRANTE' : 'FALTANTE');
-      csv += `"${p.categoria}","${p.nombre}","${p.presentacion}",${p.inicioDia||0},${p.ingresos||0},${p.recepcion||0},${p.ventas||0},${p.sistema},${p.fisico},${p.diferencia},"${estatus}","${p.nota}"\n`;
+      csv += `"${p.categoria}","${p.nombre}","${p.presentacion}",${p.inicioDia||0},${p.ingresos||0},${p.recepcion||0},${p.salidas||0},${p.ventas||0},${p.sistema},${p.fisico},${p.diferencia},"${estatus}","${p.nota}"\n`;
     });
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' }); 
     const url = URL.createObjectURL(blob);
@@ -313,7 +299,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         <title>Reporte de Cierre - ${cierre.fecha}</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-          body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 1000px; margin: 0 auto; }
+          body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 1050px; margin: 0 auto; }
           .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0ea5e9; padding-bottom: 20px; margin-bottom: 20px; }
           .logo { height: 60px; object-fit: contain; }
           h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; }
@@ -353,7 +339,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
            </div>
         </div>
         <div class="status-box" style="background: ${cierre.auditado ? '#dcfce7' : '#fffbeb'}; color: ${cierre.auditado ? '#166534' : '#b45309'};">
-           ${cierre.auditado ? 'AUDITORÍA VALIDADA POR: ' + cierre.auditadoPor.toUpperCase() : 'CIERRE PENDIENTE DE AUDITORÍA OFICIAL'}
+           ${cierre.auditado ? 'AUDITORÍA VALIDADA POR: ' + (cierre.auditadoPor || 'AUDITOR').toUpperCase() : 'CIERRE PENDIENTE DE AUDITORÍA OFICIAL'}
         </div>
         <table>
           <thead>
@@ -363,9 +349,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
               <th style="text-align:center;">Inicio Día</th>
               <th style="text-align:center; color:#2563eb;">Ingresos</th>
               <th style="text-align:center; color:#9333ea;">Recepción</th>
+              <th style="text-align:center; color:#ea580c;">Salidas</th>
               <th style="text-align:center; color:#059669;">Ventas</th>
-              <th style="text-align:center; background:#f8fafc;">Stock Final (Sistema)</th>
-              <th style="text-align:center;">Físico Real (Validado)</th>
+              <th style="text-align:center; background:#f8fafc;">Stock Final (Sis)</th>
+              <th style="text-align:center;">Físico Real</th>
               <th style="text-align:center;">Dif.</th>
               <th>Notas</th>
             </tr>
@@ -378,6 +365,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
        const ini = p.inicioDia !== undefined ? p.inicioDia : '-';
        const ing = p.ingresos !== undefined ? p.ingresos : '-';
        const rec = p.recepcion !== undefined ? p.recepcion : '-';
+       const sal = p.salidas !== undefined ? p.salidas : '-';
        const vta = p.ventas !== undefined ? p.ventas : '-';
 
        html += `<tr>
@@ -386,6 +374,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
          <td style="text-align:center;">${ini}</td>
          <td style="text-align:center; color:#2563eb; font-weight:bold;">${ing}</td>
          <td style="text-align:center; color:#9333ea; font-weight:bold;">${rec}</td>
+         <td style="text-align:center; color:#ea580c; font-weight:bold;">${sal}</td>
          <td style="text-align:center; color:#059669; font-weight:bold;">${vta}</td>
          <td style="text-align:center; font-weight:bold; font-size:13px; background:#f8fafc;">${p.sistema}</td>
          <td style="text-align:center; font-weight:900; font-size:13px;">${p.fisico}</td>
@@ -409,10 +398,11 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       
       catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
         const key = `${p.nombre}|${pres}`;
-        const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0 };
+        const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
         
         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
-        const inicioDia = sistema + kData.ventas + kData.recepcion - kData.ingresos;
+        // Formula actualizada tomando en cuenta salidas del día
+        const inicioDia = sistema + kData.ventas + kData.recepcion + kData.salidas - kData.ingresos;
         const fisico = conteoFisico[key] || 0;
         const diferencia = fisico - sistema; 
         
@@ -424,6 +414,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
            presentacion: pres, 
            inicioDia,
            recepcion: kData.recepcion,
+           salidas: kData.salidas,
            ventas: kData.ventas,
            ingresos: kData.ingresos,
            sistema, 
@@ -441,6 +432,31 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         dialogs.confirm("Cierre guardado con éxito. ¿Deseas descargar el reporte en PDF ahora?", () => { imprimirPDF(nuevoCierre); }, "Reporte Listo");
       } catch (error) { console.error(error); }
     }, "Confirmar Cierre");
+  };
+
+  const auditarCierreRapido = async (cierre) => {
+    if(!esAuditor) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
+        auditado: true, auditadoPor: perfil?.nombre || 'Auditor', fechaAuditoria: Date.now() 
+      });
+      loggear('AUDITORIA_CIERRE_RAPIDA', `Cierre de ${cierre.fecha} validado.`);
+    } catch(e) { console.error(e); }
+  };
+
+  const auditarCierreConNota = (cierre) => {
+    if(!esAuditor) return;
+    dialogs.prompt("Escribe una observación de auditoría para este cierre:", async (nota) => {
+       if(!nota) return;
+       try {
+          const notasExistentes = cierre.notasAuditoria || [];
+          const nuevasNotas = [...notasExistentes, { fecha: Date.now(), texto: nota, autor: perfil?.nombre || 'Auditor' }];
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
+             auditado: true, auditadoPor: perfil?.nombre || 'Auditor', notasAuditoria: nuevasNotas, fechaAuditoria: Date.now() 
+          });
+          loggear('AUDITORIA_CIERRE_NOTA', `Cierre de ${cierre.fecha} auditado con nota.`);
+       } catch(e) { console.error(e); }
+    }, "Añadir Nota de Auditoría");
   };
 
   const cierresFiltrados = cierres.filter(c => {
@@ -492,7 +508,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           <div className="flex bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl w-full md:w-max overflow-x-auto scrollbar-hide">
             {!esAuditorPuro && <button onClick={() => setVistaDespacho('pendientes')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Por Empacar ({pedidosValidados.length})</button>}
             {!esAuditorPuro && <button onClick={() => setVistaDespacho('historial')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Enviados</button>}
-            {!esAuditorPuro && <button onClick={() => setVistaDespacho('inventario')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'inventario' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Cierre Físico</button>}
+            {!esAuditorPuro && puedeHacerCierre && <button onClick={() => setVistaDespacho('inventario')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'inventario' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Cierre Físico</button>}
             <button onClick={() => setVistaDespacho('historial_cierres')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'historial_cierres' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>{esAuditorPuro ? 'Auditar Cierres' : 'Historial de Cierres'}</button>
           </div>
         </div>
@@ -511,7 +527,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
              </div>
            )}
 
-           {['pendientes', 'historial'].includes(vistaDespacho) && (
+           {['pendientes', 'historial'].includes(vistaDespacho) && !esSoloLectura && (
              <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm w-full md:w-auto justify-center shrink-0">
                <Printer size={18} /> Imprimir Etiquetas ({todayStr})
              </button>
@@ -519,7 +535,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       </div>
 
-      {pedidosPendientes > 0 && vistaDespacho === 'pendientes' && (
+      {pedidosPendientes > 0 && vistaDespacho === 'pendientes' && !esSoloLectura && (
         <div className="mb-8 bg-sky-50/50 dark:bg-sky-900/20 border border-sky-100 dark:border-sky-800 p-5 rounded-xl flex items-start gap-4 shadow-sm animate-in fade-in">
           <div className="p-2 bg-sky-100 dark:bg-sky-900/50 rounded-full text-sky-600 dark:text-sky-400 shrink-0"><Clock size={20} /></div>
           <div>
@@ -583,11 +599,12 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                 <div className="lg:col-span-5 flex flex-col justify-start mt-2 lg:mt-0">
                   {p.esMercadoLibre && vistaDespacho === 'pendientes' && (
                     <button 
-                      onClick={() => marcarGuiaMLImpresa(p)}
-                      className={`mb-3 w-full text-left p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider transition-colors ${p.guiaMLImpresa ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-yellow-400 text-slate-900 animate-pulse'}`}
+                      onClick={() => !esSoloLectura && marcarGuiaMLImpresa(p)}
+                      disabled={esSoloLectura}
+                      className={`mb-3 w-full text-left p-3 rounded-xl text-xs font-black flex items-center gap-2 shadow-md uppercase tracking-wider transition-colors ${p.guiaMLImpresa ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-yellow-400 text-slate-900 animate-pulse'} ${esSoloLectura ? 'opacity-75 cursor-default' : ''}`}
                     >
                       {p.guiaMLImpresa ? <CheckCircle size={18} className="shrink-0" /> : <AlertTriangle size={18} className="shrink-0" />}
-                      {p.guiaMLImpresa ? 'PEGA LA GUÍA DE MERCADOLIBRE' : '¡MERCADOLIBRE! IMPRIMIR GUÍA'}
+                      {p.guiaMLImpresa ? 'GUÍA DE MERCADOLIBRE (IMPRESA)' : (esSoloLectura ? 'MERCADOLIBRE (PENDIENTE)' : '¡MERCADOLIBRE! IMPRIMIR GUÍA')}
                     </button>
                   )}
 
@@ -604,60 +621,90 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                   {p.status === 'Despachado' ? (
                     <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm w-full h-full flex flex-col">
                       <div className="text-sm mb-4"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100 text-lg break-all">{p.guia}</span></div>
-                      <div className="flex flex-col gap-3 mb-5">
-                        {p.linkGuia && <a href={p.linkGuia} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors truncate"><FileText size={16} className="shrink-0"/> Ver Recibo Digital</a>}
-                        {p.linkFotoProductos && <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="text-xs text-sky-600 dark:text-sky-400 hover:text-sky-800 font-bold flex items-center gap-2 bg-sky-50 dark:bg-sky-900/30 p-2 rounded-lg transition-colors truncate"><Camera size={16} className="shrink-0"/> Ver Foto del Paquete</a>}
+                      
+                      {/* MINIATURAS MEJORADAS (VISTA ENVIADOS) */}
+                      <div className="flex gap-3 mt-1 mb-5">
+                          {p.linkGuia && !p.esMercadoLibre && (
+                              <div className="flex-1 relative group cursor-pointer" title="Ver comprobante de envío">
+                                  <span className="text-[10px] font-bold text-slate-500 mb-1 block uppercase tracking-widest">Recibo:</span>
+                                  <a href={p.linkGuia} target="_blank" rel="noreferrer" className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
+                                      <img src={p.linkGuia} alt="Recibo" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <Eye className="text-white" size={28} />
+                                      </div>
+                                  </a>
+                              </div>
+                          )}
+                          {p.linkFotoProductos && (
+                              <div className="flex-1 relative group cursor-pointer" title="Ver foto del paquete">
+                                  <span className="text-[10px] font-bold text-slate-500 mb-1 block uppercase tracking-widest">Paquete:</span>
+                                  <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
+                                      <img src={p.linkFotoProductos} alt="Paquete" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <Eye className="text-white" size={28} />
+                                      </div>
+                                  </a>
+                              </div>
+                          )}
                       </div>
+
                       <div className="text-xs text-emerald-600 dark:text-emerald-400 font-black mb-auto uppercase tracking-widest flex items-center gap-1"><CheckCircle size={14}/> Despachado OK</div>
                       
-                      <div className="flex flex-col lg:flex-row gap-3 mt-4">
-                        <button onClick={() => cambiarEstado(p.id, 'Validado')} className="flex-1 text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors text-left lg:text-center">Corregir</button>
-                        {puedeAnular && (
-                           <button onClick={() => anularEnvio(p)} className="flex-1 text-red-400 hover:text-red-600 dark:hover:text-red-400 text-xs font-bold flex items-center justify-start lg:justify-end gap-1 transition-colors"><Ban size={14}/> Cancelar Envío</button>
-                        )}
-                      </div>
+                      {!esSoloLectura && (
+                        <div className="flex flex-col lg:flex-row gap-3 mt-4">
+                          <button onClick={() => cambiarEstado(p.id, 'Validado')} className="flex-1 text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 text-xs font-bold underline decoration-slate-300 transition-colors text-left lg:text-center">Corregir</button>
+                          {puedeAnular && (
+                             <button onClick={() => anularEnvio(p)} className="flex-1 text-red-400 hover:text-red-600 dark:hover:text-red-400 text-xs font-bold flex items-center justify-start lg:justify-end gap-1 transition-colors"><Ban size={14}/> Cancelar Envío</button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border-2 border-sky-100 dark:border-slate-700 shadow-sm flex flex-col gap-3 w-full h-full justify-between">
-                      <input type="text" placeholder="N° de Guía Tracking" className="w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none focus:border-sky-500 bg-slate-50 dark:bg-slate-900 dark:text-white transition-colors" value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} />
+                      <input type="text" placeholder="N° de Guía Tracking" className={`w-full text-sm p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl font-bold outline-none transition-colors bg-slate-50 dark:bg-slate-900 dark:text-white ${esSoloLectura ? 'opacity-80' : 'focus:border-sky-500'}`} value={valorGuia} onChange={(e) => handleGuiaChange(p.id, 'guia', e.target.value)} readOnly={esSoloLectura} />
                       
                       <div className="flex flex-col lg:flex-row gap-3">
                           <div className="flex-1 relative w-full">
-                            <input type="text" placeholder="URL Recibo" readOnly={isLinkML} className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'} ${isLinkML ? 'opacity-70 cursor-not-allowed' : ''}`} value={valorLinkGuia} onChange={(e) => !isLinkML && handleGuiaChange(p.id, 'link', e.target.value)} />
-                            <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg transition-colors shadow-sm ${isLinkML ? 'cursor-not-allowed bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'cursor-pointer'} ${valorLinkGuia && !isLinkML ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title={isLinkML ? "Guía provista por Ventas" : "Subir Recibo Agencia"}>
-                              {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkGuia ? <CheckCircle size={16}/> : <UploadCloud size={16} />)}
-                              <input type="file" accept="image/*" className="hidden" onChange={(e) => !isLinkML && handleFileUpload(e, p.id, 'link')} disabled={isLinkML || subiendo.field !== null} />
-                            </label>
+                            <input type="text" placeholder="URL Recibo" readOnly={isLinkML || esSoloLectura} className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none font-semibold transition-colors dark:bg-slate-900 dark:text-white ${valorLinkGuia ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'} ${(isLinkML || esSoloLectura) ? 'opacity-70 cursor-not-allowed' : 'focus:border-sky-500'}`} value={valorLinkGuia} onChange={(e) => !isLinkML && handleGuiaChange(p.id, 'link', e.target.value)} />
+                            {!esSoloLectura && (
+                                <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg transition-colors shadow-sm ${isLinkML ? 'cursor-not-allowed bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'cursor-pointer'} ${valorLinkGuia && !isLinkML ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title={isLinkML ? "Guía provista por Ventas" : "Subir Recibo Agencia"}>
+                                  {subiendo.id === p.id && subiendo.field === 'link' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkGuia ? <CheckCircle size={16}/> : <UploadCloud size={16} />)}
+                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => !isLinkML && handleFileUpload(e, p.id, 'link')} disabled={isLinkML || subiendo.field !== null} />
+                                </label>
+                            )}
                           </div>
                           <div className="flex-1 relative w-full">
-                            <input type="text" placeholder="URL Foto Caja" className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none focus:border-sky-500 dark:bg-slate-900 dark:text-white font-semibold transition-colors ${valorLinkFoto ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'}`} value={valorLinkFoto} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
-                            <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkFoto ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto del Paquete">
-                              {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkFoto ? <CheckCircle size={16}/> : <Camera size={16} />)}
-                              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} disabled={subiendo.field !== null} />
-                            </label>
+                            <input type="text" placeholder="URL Foto Caja" readOnly={esSoloLectura} className={`w-full text-xs p-3 border-2 rounded-xl pr-12 outline-none font-semibold transition-colors dark:bg-slate-900 dark:text-white ${valorLinkFoto ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800/50' : 'border-slate-200 dark:border-slate-600 bg-slate-50'} ${esSoloLectura ? 'opacity-70 cursor-not-allowed' : 'focus:border-sky-500'}`} value={valorLinkFoto} onChange={(e) => handleGuiaChange(p.id, 'fotoProductos', e.target.value)} />
+                            {!esSoloLectura && (
+                                <label className={`absolute right-1.5 top-1.5 p-2 rounded-lg cursor-pointer transition-colors shadow-sm ${valorLinkFoto ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-400 hover:bg-sky-600 hover:text-white'}`} title="Subir Foto del Paquete">
+                                  {subiendo.id === p.id && subiendo.field === 'fotoProductos' ? <Loader2 size={16} className="animate-spin" /> : (valorLinkFoto ? <CheckCircle size={16}/> : <Camera size={16} />)}
+                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, p.id, 'fotoProductos')} disabled={subiendo.field !== null} />
+                                </label>
+                            )}
                           </div>
                       </div>
 
+                      {/* MINIATURAS MEJORADAS (VISTA PENDIENTES) */}
                       {(valorLinkGuia || valorLinkFoto) && (
                         <div className="flex gap-3 mt-1 mb-1">
                             {valorLinkGuia && !isLinkML && (
                                 <div className="flex-1 relative group cursor-pointer" title="Ver comprobante de envío">
-                                    <span className="text-[10px] font-bold text-slate-500 mb-1 block">Foto Recibo:</span>
-                                    <a href={valorLinkGuia} target="_blank" rel="noreferrer" className="block relative h-20 w-full overflow-hidden rounded-xl border-2 border-slate-100 dark:border-slate-700 shadow-sm">
-                                        <img src={valorLinkGuia} alt="Recibo" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                    <span className="text-[10px] font-bold text-slate-500 mb-1 block uppercase tracking-widest">Recibo:</span>
+                                    <a href={valorLinkGuia} target="_blank" rel="noreferrer" className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
+                                        <img src={valorLinkGuia} alt="Recibo" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
                                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <Eye className="text-white" size={20} />
+                                            <Eye className="text-white" size={28} />
                                         </div>
                                     </a>
                                 </div>
                             )}
                             {valorLinkFoto && (
                                 <div className="flex-1 relative group cursor-pointer" title="Ver foto del paquete">
-                                    <span className="text-[10px] font-bold text-slate-500 mb-1 block">Foto Paquete:</span>
-                                    <a href={valorLinkFoto} target="_blank" rel="noreferrer" className="block relative h-20 w-full overflow-hidden rounded-xl border-2 border-slate-100 dark:border-slate-700 shadow-sm">
-                                        <img src={valorLinkFoto} alt="Paquete" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                    <span className="text-[10px] font-bold text-slate-500 mb-1 block uppercase tracking-widest">Paquete:</span>
+                                    <a href={valorLinkFoto} target="_blank" rel="noreferrer" className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
+                                        <img src={valorLinkFoto} alt="Paquete" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
                                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <Eye className="text-white" size={20} />
+                                            <Eye className="text-white" size={28} />
                                         </div>
                                     </a>
                                 </div>
@@ -665,22 +712,24 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                         </div>
                       )}
 
-                      <div className="flex flex-col gap-2 mt-2">
-                         <div className="flex flex-col lg:flex-row gap-2">
-                           <button onClick={() => guardarAvance(p)} className="flex-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                             <Save size={16}/> Guardar Avance
-                           </button>
-                           <button onClick={() => guardarGuia(p)} className="flex-1 bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white text-xs font-bold py-3 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
-                             <Truck size={16}/> Archivar
-                           </button>
-                         </div>
-                         
-                         {puedeAnular && (
-                            <button onClick={() => anularEnvio(p)} className="w-full bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:hover:bg-red-900/40 dark:text-red-400 py-2.5 rounded-xl text-xs font-bold transition-colors border border-red-200 dark:border-red-800/50 flex justify-center items-center gap-1.5 mt-1">
-                               <Ban size={14}/> Cancelar Envío (Devolver Inventario)
-                            </button>
-                         )}
-                      </div>
+                      {!esSoloLectura && (
+                        <div className="flex flex-col gap-2 mt-2">
+                           <div className="flex flex-col lg:flex-row gap-2">
+                             <button onClick={() => guardarAvance(p)} className="flex-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                               <Save size={16}/> Guardar Avance
+                             </button>
+                             <button onClick={() => guardarGuia(p)} className="flex-1 bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white text-xs font-bold py-3 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
+                               <Truck size={16}/> Archivar
+                             </button>
+                           </div>
+                           
+                           {puedeAnular && (
+                              <button onClick={() => anularEnvio(p)} className="w-full bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:hover:bg-red-900/40 dark:text-red-400 py-2.5 rounded-xl text-xs font-bold transition-colors border border-red-200 dark:border-red-800/50 flex justify-center items-center gap-1.5 mt-1">
+                                 <Ban size={14}/> Cancelar Envío (Devolver Inventario)
+                              </button>
+                           )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -690,7 +739,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {vistaDespacho === 'inventario' && (
+      {vistaDespacho === 'inventario' && puedeHacerCierre && !esSoloLectura && (
         <div className="animate-in fade-in">
           {!conteoActivo ? (
             <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700">
@@ -715,13 +764,14 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
               </div>
 
               <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                 <table className="w-full text-left text-sm border-collapse min-w-[800px]">
+                 <table className="w-full text-left text-sm border-collapse min-w-[900px]">
                    <thead>
                      <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                        <th className="p-4 font-black">Producto</th>
                        <th className="p-4 font-black text-center w-24">Inicio Día</th>
                        <th className="p-4 font-black text-center w-24 text-blue-600">Ingresos</th>
                        <th className="p-4 font-black text-center w-24 text-purple-600">Recepción</th>
+                       <th className="p-4 font-black text-center w-24 text-orange-600">Salidas</th>
                        <th className="p-4 font-black text-center w-24 text-emerald-600">Ventas</th>
                        <th className="p-4 font-black text-center w-24">Stock Final</th>
                        <th className="p-4 font-black text-center bg-sky-100 dark:bg-sky-900/40 w-32">Validación Física</th>
@@ -732,10 +782,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                    <tbody>
                      {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
                         const key = `${p.nombre}|${pres}`;
-                        const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0 };
+                        const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
                         
                         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
-                        const inicioDia = sistema + kData.ventas + kData.recepcion - kData.ingresos;
+                        const inicioDia = sistema + kData.ventas + kData.recepcion + kData.salidas - kData.ingresos;
                         const fisico = conteoFisico[key] ?? sistema;
                         const diferencia = fisico - sistema;
                         
@@ -752,6 +802,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                              <td className="p-4 text-center font-bold text-lg text-slate-500">{inicioDia}</td>
                              <td className="p-4 text-center font-bold text-lg text-blue-600">{kData.ingresos}</td>
                              <td className="p-4 text-center font-bold text-lg text-purple-600">{kData.recepcion}</td>
+                             <td className="p-4 text-center font-bold text-lg text-orange-600">{kData.salidas}</td>
                              <td className="p-4 text-center font-bold text-lg text-emerald-600">{kData.ventas}</td>
                              <td className="p-4 text-center font-black text-lg text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-900/30">{sistema}</td>
                              <td className="p-4 text-center bg-sky-50 dark:bg-sky-900/20">
