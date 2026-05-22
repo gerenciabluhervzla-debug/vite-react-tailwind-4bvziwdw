@@ -88,9 +88,10 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
              <th className="p-4 border-b dark:border-slate-700 text-center font-black text-emerald-600 dark:text-emerald-400">Ingresos (+)</th>
              <th className="p-4 border-b dark:border-slate-700 text-center font-black text-amber-600 dark:text-amber-400">A Recepción (-)</th>
              <th className="p-4 border-b dark:border-slate-700 text-center font-black text-rose-600 dark:text-rose-400">Ventas (-)</th>
+             <th className="p-4 border-b dark:border-slate-700 text-center font-black text-orange-600 dark:text-orange-400">Salidas/Daños (-)</th>
              <th className="p-4 border-b dark:border-slate-700 text-center border-l border-slate-200 dark:border-slate-600 bg-sky-100/50 dark:bg-sky-900/30 font-black text-sky-800 dark:text-sky-300">Stock Final</th>
              {/* COLUMNA MOVIDA: Relacionada directamente con Recepción */}
-             <th className="p-4 border-b dark:border-slate-700 text-center font-black text-orange-600 dark:text-orange-400">Salidas/Daños (-)</th>
+             
              <th className="p-4 border-b dark:border-slate-700 text-center bg-purple-50/50 dark:bg-purple-900/10 font-black text-purple-800 dark:text-purple-400">Cierre RECEPCIÓN</th>
            </tr>
          </thead>
@@ -121,12 +122,12 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
                  {m.ventas > 0 ? <span className="font-black text-rose-600 bg-rose-50 dark:bg-rose-900/30 px-2 py-1 rounded-lg text-sm flex items-center justify-center gap-1"><TrendingDown size={14}/> {m.ventas}</span> : <span className="text-slate-300 dark:text-slate-600 font-bold">-</span>}
                </td>
 
-               <td className="p-4 text-center border-l border-slate-200 dark:border-slate-600 bg-sky-50/30 dark:bg-sky-900/10">
-                 <span className="font-black text-xl text-sky-800 dark:text-sky-400">{item.envios}</span>
-               </td>
-
                <td className="p-4 text-center">
                  {m.salidas > 0 ? <span className="font-black text-orange-600 bg-orange-50 dark:bg-orange-900/30 px-2 py-1 rounded-lg text-sm flex items-center justify-center gap-1"><TrendingDown size={14}/> {m.salidas}</span> : <span className="text-slate-300 dark:text-slate-600 font-bold">-</span>}
+               </td>
+               
+               <td className="p-4 text-center border-l border-slate-200 dark:border-slate-600 bg-sky-50/30 dark:bg-sky-900/10">
+                 <span className="font-black text-xl text-sky-800 dark:text-sky-400">{item.envios}</span>
                </td>
                
                <td className="p-4 text-center bg-purple-50/20 dark:bg-purple-900/5">
