@@ -26,7 +26,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   };
   const hoyStr = getVeneziaDate();
 
-  // Función: Calcula la fecha operativa
+  // Función: Calcula la fecha operativa basada en creación (corte a las 12:30 PM)
   const getFechaOperativaObj = (timestamp) => {
     const d = new Date(new Date(timestamp).toLocaleString("en-US", {timeZone: "America/Caracas"}));
     if (d.getHours() > 12 || (d.getHours() === 12 && d.getMinutes() >= 30)) {
@@ -35,6 +35,18 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const visual = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
     return { iso, visual };
+  };
+
+  // Función: Determina la fecha real para los filtros e informes dando prioridad a la fecha de despacho
+  const getFechaFiltroObj = (pedido) => {
+    if (pedido.fechaDespacho && pedido.fechaDespacho.includes('/')) {
+       const [dd, mm, yyyy] = pedido.fechaDespacho.split('/');
+       return { 
+         iso: `${yyyy}-${mm}-${dd}`, 
+         visual: pedido.fechaDespacho 
+       };
+    }
+    return getFechaOperativaObj(pedido.fechaCreacion);
   };
  
   const [fechaInicio, setFechaInicio] = useState(hoyStr);
@@ -150,35 +162,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     e.target.value = '';
   };
 
-  // --- SCRIPT PARA CORREGIR VIERNES VIEJOS ---
-  const fixFridayDates = async () => {
-     dialogs.confirm("¿Corregir fechas de despacho para pedidos antiguos creados los viernes después de las 12:30 PM?", async () => {
-       let count = 0;
-       setBackupLoading(true);
-       try {
-         for (const p of pedidos) {
-            const dVzla = new Date(new Date(p.fechaCreacion).toLocaleString("en-US", {timeZone: "America/Caracas"}));
-            if (dVzla.getDay() === 5 && (dVzla.getHours() > 12 || (dVzla.getHours() === 12 && dVzla.getMinutes() >= 30))) {
-               const targetDate = new Date(dVzla);
-               targetDate.setDate(targetDate.getDate() + 3); // Lunes
-               const dd = String(targetDate.getDate()).padStart(2, '0');
-               const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
-               const yyyy = targetDate.getFullYear();
-               const correctDateStr = `${dd}/${mm}/${yyyy}`;
-               if (p.fechaDespacho !== correctDateStr) {
-                  await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', p.id), { fechaDespacho: correctDateStr });
-                  count++;
-               }
-            }
-         }
-         dialogs.alert(`Se corrigieron ${count} pedidos antiguos exitosamente.`, "Actualización Finalizada");
-       } catch(e) {
-         dialogs.alert("Error actualizando la base de datos.");
-       }
-       setBackupLoading(false);
-     });
-  };
-
   // --- ORDENAMIENTO DE PENDIENTES (ASCENDENTE) ---
   const pendientesOrdenados = useMemo(() => {
     return pedidos
@@ -186,7 +169,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       .sort((a, b) => a.fechaCreacion - b.fechaCreacion); 
   }, [pedidos]);
  
-  // --- FILTRADO DEL HISTORIAL CON FECHA OPERATIVA Y ORDEN ASCENDENTE ---
+  // --- FILTRADO DEL HISTORIAL CON FECHA DESPACHO/OPERATIVA Y ORDEN ASCENDENTE ---
   const historialFiltrado = useMemo(() => {
     let todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
    
@@ -196,7 +179,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
     if (fechaInicio && fechaFin) {
       todosHistorial = todosHistorial.filter(p => {
-         const opIso = getFechaOperativaObj(p.fechaCreacion).iso;
+         const opIso = getFechaFiltroObj(p).iso;
          return opIso >= fechaInicio && opIso <= fechaFin;
       });
     }
@@ -424,7 +407,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const diasAuditoria = useMemo(() => {
     const dias = {};
     pedidos.forEach(p => {
-       const { iso, visual } = getFechaOperativaObj(p.fechaCreacion);
+       const { iso, visual } = getFechaFiltroObj(p);
        if (!dias[iso]) dias[iso] = { isoKey: iso, fecha: visual, total: 0, auditados: 0, fallas: 0, pedidos: [] };
        dias[iso].total++;
        if (p.auditado) dias[iso].auditados++;
@@ -516,9 +499,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                          <input type="file" accept=".json" className="hidden" onChange={handleRestaurarBackup} disabled={backupLoading} />
                        </label>
                     </div>
-                    <button onClick={fixFridayDates} disabled={backupLoading} className="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-3 rounded-xl shadow-md transition-all text-xs w-full">
-                       Corregir Viernes Antiguos
-                    </button>
                  </div>
               </div>
             </div>
