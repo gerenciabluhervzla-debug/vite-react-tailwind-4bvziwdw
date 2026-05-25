@@ -10,12 +10,28 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const esAuditorPuro = perfil?.role === ROLES.AUDITORIA;
   const puedeAnular = [ROLES.ADMIN, ROLES.DESPACHO].includes(perfil?.role);
   
-  // NUEVAS VALIDACIONES DE ROLES
   const esSoloLectura = perfil?.role === ROLES.ADMINISTRACION;
   const puedeHacerCierre = [ROLES.ADMIN, ROLES.DESPACHO].includes(perfil?.role);
   
   const [vistaDespacho, setVistaDespacho] = useState(esAuditorPuro ? 'historial_cierres' : 'pendientes');
   const [filtroFechaHistorial, setFiltroFechaHistorial] = useState('');
+  const [previewImage, setPreviewImage] = useState(null);
+
+  const getDirectUrl = (url) => {
+    if (!url) return null;
+    let id = null;
+    if (url.includes('/d/')) {
+      const match = url.match(/\/d\/(.+?)\//);
+      if (match && match[1]) id = match[1];
+    } else if (url.includes('id=')) {
+      const match = url.match(/[?&]id=([^&]+)/);
+      if (match && match[1]) id = match[1];
+    }
+    if (id) {
+      return `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
+    }
+    return url;
+  };
 
   const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
   const pedidosDespachados = pedidos.filter(p => p.status === 'Despachado');
@@ -56,9 +72,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return () => { unsubCierres(); unsubMovs(); };
   }, [db, appId]);
 
-  // =========================================================================
-  // LÓGICA DE KARDEX DIARIO (Cálculo de Trazabilidad para Auditoría)
-  // =========================================================================
   const hoyKardex = useMemo(() => {
     const aggr = {};
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
@@ -70,7 +83,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     const todayStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
     const startOfDay = new Date(tDate.getFullYear(), tDate.getMonth(), tDate.getDate()).getTime();
 
-    // 1. Sumar Ventas del Día
     pedidos.forEach(p => {
        if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr) {
            if (p.carritoObj) {
@@ -81,7 +93,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
        }
     });
 
-    // 2. Sumar Transferencias, Ingresos y SALIDAS del Día
     movimientos.forEach(m => {
        if (m.fechaCreacion >= startOfDay) {
            if (m.tipo === 'TRANSFERENCIA') {
@@ -102,7 +113,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     
     return aggr;
   }, [pedidos, movimientos, catalogo]);
-  // =========================================================================
 
   const handleGuiaChange = (id, field, value) => setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
 
@@ -401,7 +411,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
         
         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
-        // Formula actualizada tomando en cuenta salidas del día
         const inicioDia = sistema + kData.ventas + kData.recepcion + kData.salidas - kData.ingresos;
         const fisico = conteoFisico[key] || 0;
         const diferencia = fisico - sistema; 
@@ -473,9 +482,9 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   }, []);
 
   const parseDateVzla = (dateStr) => {
-     if (!dateStr || dateStr === 'Sin Fecha') return 0;
-     const parts = dateStr.split('/');
-     return parts.length === 3 ? new Date(parts[2], parts[1] - 1, parts[0]).getTime() : 0;
+      if (!dateStr || dateStr === 'Sin Fecha') return 0;
+      const parts = dateStr.split('/');
+      return parts.length === 3 ? new Date(parts[2], parts[1] - 1, parts[0]).getTime() : 0;
   };
 
   const pedidosAMostrar = useMemo(() => {
@@ -491,11 +500,11 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   }, [vistaDespacho, pedidosValidados, pedidosDespachados, filtroFechaHistorial]);
   
   const pedidosOrdenados = useMemo(() => {
-     return [...pedidosAMostrar].sort((a, b) => {
-        const numA = numeracionDiaria[a.id] || 999999;
-        const numB = numeracionDiaria[b.id] || 999999;
-        return numA - numB;
-     });
+      return [...pedidosAMostrar].sort((a, b) => {
+         const numA = numeracionDiaria[a.id] || 999999;
+         const numB = numeracionDiaria[b.id] || 999999;
+         return numA - numB;
+      });
   }, [pedidosAMostrar, numeracionDiaria]);
 
   return (
@@ -611,6 +620,17 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                   <div className="font-medium bg-[#f0f4f8] dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700/50 mb-3 whitespace-pre-wrap shadow-inner text-[13px] leading-relaxed text-slate-700 dark:text-slate-300">
                     {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
                   </div>
+
+                  {p.notaVentas && (
+                      <div className="mt-1 mb-3 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 p-3 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50 flex items-start gap-2 shadow-sm w-full">
+                        <MessageSquare size={16} className="shrink-0 mt-0.5" />
+                        <div className="flex-1 whitespace-pre-wrap font-bold">
+                          <span className="uppercase tracking-widest text-[9px] block mb-0.5 opacity-70">Nota de Ventas:</span>
+                          {p.notaVentas}
+                        </div>
+                      </div>
+                  )}
+
                   <div className="text-[13px] font-semibold text-slate-600 dark:text-slate-400 flex items-start gap-2 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border border-slate-100 dark:border-slate-700/50">
                     <div className="mt-0.5 text-sky-600"><Package size={16}/></div>
                     {p.direccion}
@@ -627,23 +647,23 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                           {p.linkGuia && !p.esMercadoLibre && (
                               <div className="flex-1 relative group cursor-pointer" title="Ver comprobante de envío">
                                   <span className="text-[10px] font-bold text-slate-500 mb-1 block uppercase tracking-widest">Recibo:</span>
-                                  <a href={p.linkGuia} target="_blank" rel="noreferrer" className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
-                                      <img src={p.linkGuia} alt="Recibo" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                                  <div onClick={() => setPreviewImage(p.linkGuia)} className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm cursor-pointer">
+                                      <img src={getDirectUrl(p.linkGuia)} alt="Recibo" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
                                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                           <Eye className="text-white" size={28} />
                                       </div>
-                                  </a>
+                                  </div>
                               </div>
                           )}
                           {p.linkFotoProductos && (
                               <div className="flex-1 relative group cursor-pointer" title="Ver foto del paquete">
                                   <span className="text-[10px] font-bold text-slate-500 mb-1 block uppercase tracking-widest">Paquete:</span>
-                                  <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
-                                      <img src={p.linkFotoProductos} alt="Paquete" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                                  <div onClick={() => setPreviewImage(p.linkFotoProductos)} className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm cursor-pointer">
+                                      <img src={getDirectUrl(p.linkFotoProductos)} alt="Paquete" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
                                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                           <Eye className="text-white" size={28} />
                                       </div>
-                                  </a>
+                                  </div>
                               </div>
                           )}
                       </div>
@@ -690,23 +710,23 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                             {valorLinkGuia && !isLinkML && (
                                 <div className="flex-1 relative group cursor-pointer" title="Ver comprobante de envío">
                                     <span className="text-[10px] font-bold text-slate-500 mb-1 block uppercase tracking-widest">Recibo:</span>
-                                    <a href={valorLinkGuia} target="_blank" rel="noreferrer" className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
-                                        <img src={valorLinkGuia} alt="Recibo" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                                    <div onClick={() => setPreviewImage(valorLinkGuia)} className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
+                                        <img src={getDirectUrl(valorLinkGuia)} alt="Recibo" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
                                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                             <Eye className="text-white" size={28} />
                                         </div>
-                                    </a>
+                                    </div>
                                 </div>
                             )}
                             {valorLinkFoto && (
                                 <div className="flex-1 relative group cursor-pointer" title="Ver foto del paquete">
                                     <span className="text-[10px] font-bold text-slate-500 mb-1 block uppercase tracking-widest">Paquete:</span>
-                                    <a href={valorLinkFoto} target="_blank" rel="noreferrer" className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
-                                        <img src={valorLinkFoto} alt="Paquete" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
+                                    <div onClick={() => setPreviewImage(valorLinkFoto)} className="block relative h-28 sm:h-32 w-full overflow-hidden rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
+                                        <img src={getDirectUrl(valorLinkFoto)} alt="Paquete" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" />
                                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                             <Eye className="text-white" size={28} />
                                         </div>
-                                    </a>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -933,6 +953,28 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
+      {/* MODAL PARA PREVISUALIZACIÓN DE IMÁGENES */}
+      {previewImage && (
+        <div className="fixed inset-0 z-[400] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center p-4">
+          <button 
+            onClick={() => setPreviewImage(null)} 
+            className="absolute top-6 right-6 text-white bg-white/20 p-2 rounded-full hover:bg-white/40 transition-colors">
+            <X size={24}/>
+          </button>
+          <img 
+            src={getDirectUrl(previewImage)} 
+            alt="Vista previa" 
+            className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain"
+          />
+          <a 
+            href={previewImage} 
+            target="_blank" 
+            rel="noreferrer" 
+            className="mt-6 bg-sky-600 hover:bg-sky-500 text-white font-bold px-6 py-3 rounded-xl flex items-center gap-2 transition-colors">
+            Abrir Original en Google Drive
+          </a>
+        </div>
+      )}
     </div>
   );
 }

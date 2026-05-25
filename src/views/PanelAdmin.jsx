@@ -26,7 +26,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   };
   const hoyStr = getVeneziaDate();
 
-  // Función: Calcula la fecha operativa (corte a las 12:30 PM)
+  // Función: Calcula la fecha operativa
   const getFechaOperativaObj = (timestamp) => {
     const d = new Date(new Date(timestamp).toLocaleString("en-US", {timeZone: "America/Caracas"}));
     if (d.getHours() > 12 || (d.getHours() === 12 && d.getMinutes() >= 30)) {
@@ -36,7 +36,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     const visual = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
     return { iso, visual };
   };
-  
+ 
   const [fechaInicio, setFechaInicio] = useState(hoyStr);
   const [fechaFin, setFechaFin] = useState(hoyStr);
 
@@ -84,7 +84,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                 })
             });
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { ultimaFechaBackup: hoyStr }, { merge: true });
-            
+           
             if(isAuto) { loggear('BACKUP_AUTO', 'Respaldo automático del día guardado en Drive.'); } 
             else {
                 loggear('BACKUP_MANUAL', 'El administrador generó un respaldo manual.');
@@ -146,8 +146,37 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             reader.readAsText(file);
         } catch (err) { setBackupLoading(false); dialogs.alert("Error leyendo el archivo."); }
     }, "Confirmación Requerida");
-    
+   
     e.target.value = '';
+  };
+
+  // --- SCRIPT PARA CORREGIR VIERNES VIEJOS ---
+  const fixFridayDates = async () => {
+     dialogs.confirm("¿Corregir fechas de despacho para pedidos antiguos creados los viernes después de las 12:30 PM?", async () => {
+       let count = 0;
+       setBackupLoading(true);
+       try {
+         for (const p of pedidos) {
+            const dVzla = new Date(new Date(p.fechaCreacion).toLocaleString("en-US", {timeZone: "America/Caracas"}));
+            if (dVzla.getDay() === 5 && (dVzla.getHours() > 12 || (dVzla.getHours() === 12 && dVzla.getMinutes() >= 30))) {
+               const targetDate = new Date(dVzla);
+               targetDate.setDate(targetDate.getDate() + 3); // Lunes
+               const dd = String(targetDate.getDate()).padStart(2, '0');
+               const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
+               const yyyy = targetDate.getFullYear();
+               const correctDateStr = `${dd}/${mm}/${yyyy}`;
+               if (p.fechaDespacho !== correctDateStr) {
+                  await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', p.id), { fechaDespacho: correctDateStr });
+                  count++;
+               }
+            }
+         }
+         dialogs.alert(`Se corrigieron ${count} pedidos antiguos exitosamente.`, "Actualización Finalizada");
+       } catch(e) {
+         dialogs.alert("Error actualizando la base de datos.");
+       }
+       setBackupLoading(false);
+     });
   };
 
   // --- ORDENAMIENTO DE PENDIENTES (ASCENDENTE) ---
@@ -156,11 +185,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       .filter(p => p.status === 'Pendiente')
       .sort((a, b) => a.fechaCreacion - b.fechaCreacion); 
   }, [pedidos]);
-  
+ 
   // --- FILTRADO DEL HISTORIAL CON FECHA OPERATIVA Y ORDEN ASCENDENTE ---
   const historialFiltrado = useMemo(() => {
     let todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
-    
+   
     if (!mostrarAnulados) {
       todosHistorial = todosHistorial.filter(p => p.status !== 'Anulado');
     }
@@ -171,7 +200,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
          return opIso >= fechaInicio && opIso <= fechaFin;
       });
     }
-    
+   
     // ORDENAMIENTO ASCENDENTE (MÁS ANTIGUOS PRIMERO)
     return todosHistorial.sort((a, b) => a.fechaCreacion - b.fechaCreacion);
   }, [pedidos, fechaInicio, fechaFin, mostrarAnulados]);
@@ -180,7 +209,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const listado = useMemo(() => {
     const base = vistaAdmin === 'pendientes' ? pendientesOrdenados : historialFiltrado;
     if (!busqueda.trim()) return base;
-    
+   
     const busquedaMinuscula = busqueda.toLowerCase();
     return base.filter(p => p.clienteNombre?.toLowerCase().includes(busquedaMinuscula));
   }, [vistaAdmin, pendientesOrdenados, historialFiltrado, busqueda]);
@@ -223,11 +252,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Apagar Campaña");
   };
 
-  // --- MODIFICACIÓN: ABRIR MODAL CON PARÁMETROS FLEXIBLES Y MODO EDICIÓN ---
   const abrirModalValidacion = (pedido, isEdit = false) => {
     let tipo = 'ninguno';
     let monto = '';
-    
+   
     if (pedido.sobranteUsd > 0) {
        tipo = 'sobrante';
        monto = pedido.sobranteUsd.toString();
@@ -260,11 +288,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }
   };
 
-  // --- MODIFICACIÓN: PROCESAMIENTO DEFINITIVO DE VALIDACIÓN ---
   const procesarValidacionDefinitiva = async () => {
     if (!modalValidacion) return;
     const { pedido, tipoDiferencia, montoDiferencia, monedaDiferencia, file, isEdit } = modalValidacion;
-    
+   
     if (tipoDiferencia !== 'ninguno' && (!montoDiferencia || parseFloat(montoDiferencia) <= 0)) {
         return dialogs.alert("Debes ingresar un monto válido para el faltante o sobrante.", "Monto Inválido");
     }
@@ -272,7 +299,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     setModalValidacion(prev => ({ ...prev, subiendo: true }));
     try {
       let urlComprobanteAdmin = pedido.linkComprobanteAdmin || '';
-      
+     
       // 1. Subir la imagen si hay una nueva
       if (file && URL_GOOGLE_SCRIPT) {
         const base64Data = await compressImage(file, 800, 0.7);
@@ -312,11 +339,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           sobranteUsd: sobranteUsd, 
           faltanteUsd: faltanteUsd 
       };
-      
+     
       if (urlComprobanteAdmin) payloadPedido.linkComprobanteAdmin = urlComprobanteAdmin;
 
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), payloadPedido);
-      
+     
       loggear(isEdit ? 'PAGO_CORREGIDO' : 'PAGO_VALIDADO', `${isEdit ? 'Corrección de validación' : 'Aprobación y descuento de stock'}: ${pedido.clienteNombre}`);
       dialogs.alert(isEdit ? "La validación fue actualizada correctamente." : "El pago fue aprobado, el extracto guardado y el inventario descontado exitosamente.", "Éxito");
       setModalValidacion(null);
@@ -382,13 +409,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Nuevo Comentario");
   };
 
-  // --- MODIFICACIÓN: Comentario Complementario (No audita) ---
   const dejarComentarioComplementario = async (pedido) => {
     dialogs.prompt("Escribe un comentario o nota complementaria para este pedido:", async (nota) => {
        if(!nota) return;
        try {
           const notasExistentes = pedido.notasAuditoria || [];
-          // Agregamos la nota, pero no modificamos "auditado"
           const nuevasNotas = [...notasExistentes, { fecha: Date.now(), texto: `Nota Complementaria: ${nota}`, autor: perfil.nombre }];
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { notasAuditoria: nuevasNotas });
           loggear('NOTA_COMPLEMENTARIA', `Añadió nota complementaria a: ${pedido.clienteNombre}`);
@@ -396,7 +421,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Añadir Comentario");
   };
 
-  // --- AGRUPACIÓN DE AUDITORÍA (Orden ascendente también) ---
   const diasAuditoria = useMemo(() => {
     const dias = {};
     pedidos.forEach(p => {
@@ -407,7 +431,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
        if (p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado' || p.status === 'Anulado') dias[iso].fallas++;
        dias[iso].pedidos.push(p);
     });
-    // Ordenamos cronológicamente ascendente para consistencia general
     return Object.values(dias).sort((a,b) => a.isoKey.localeCompare(b.isoKey)); 
   }, [pedidos]);
 
@@ -459,11 +482,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                   </form>
                 )}
               </div>
-           </div>
-         )}
+            </div>
+          )}
 
-         {esAdminSupremo && (
-           <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl relative overflow-hidden border-4 border-slate-700 flex flex-col h-full">
+          {esAdminSupremo && (
+            <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl relative overflow-hidden border-4 border-slate-700 flex flex-col h-full">
               <Database size={120} className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none"/>
               <div className="flex justify-between items-start mb-4 relative z-10">
                  <div>
@@ -480,21 +503,26 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-0.5">Último backup exportado:</div>
                    <div className="text-sm font-black text-emerald-300">{config?.ultimaFechaBackup === hoyStr ? 'Hoy, sistema respaldado.' : (config?.ultimaFechaBackup || 'Nunca')}</div>
                  </div>
-                 <div className="flex gap-2">
-                    <button onClick={()=>triggerBackup(false)} disabled={backupLoading} className="bg-sky-500 hover:bg-sky-600 text-white font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 shadow-md transition-all flex-1 text-xs disabled:opacity-50">
-                      {backupLoading ? <Loader2 size={16} className="animate-spin"/> : <DownloadCloud size={16}/>} 
-                      {backupLoading ? 'Generando...' : 'Backup'}
-                    </button>
+                 <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                       <button onClick={()=>triggerBackup(false)} disabled={backupLoading} className="bg-sky-500 hover:bg-sky-600 text-white font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 shadow-md transition-all flex-1 text-xs disabled:opacity-50">
+                         {backupLoading ? <Loader2 size={16} className="animate-spin"/> : <DownloadCloud size={16}/>} 
+                         {backupLoading ? 'Generando...' : 'Backup'}
+                       </button>
 
-                    <label className="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 shadow-md transition-all flex-1 cursor-pointer text-xs">
-                      {backupLoading ? <Loader2 size={16} className="animate-spin"/> : <Upload size={16}/>} 
-                      {backupLoading ? 'Cargando...' : 'Restaurar'}
-                      <input type="file" accept=".json" className="hidden" onChange={handleRestaurarBackup} disabled={backupLoading} />
-                    </label>
+                       <label className="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 shadow-md transition-all flex-1 cursor-pointer text-xs">
+                         {backupLoading ? <Loader2 size={16} className="animate-spin"/> : <Upload size={16}/>} 
+                         {backupLoading ? 'Cargando...' : 'Restaurar'}
+                         <input type="file" accept=".json" className="hidden" onChange={handleRestaurarBackup} disabled={backupLoading} />
+                       </label>
+                    </div>
+                    <button onClick={fixFridayDates} disabled={backupLoading} className="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-3 rounded-xl shadow-md transition-all text-xs w-full">
+                       Corregir Viernes Antiguos
+                    </button>
                  </div>
               </div>
-           </div>
-         )}
+            </div>
+          )}
        </div>
 
       <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-sm">
@@ -506,7 +534,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           
           <div className="flex flex-col sm:flex-row items-center gap-4 w-full xl:w-auto">
              
-             {/* BARRA DE BÚSQUEDA APLICADA */}
              <div className="relative w-full sm:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
                 <input 
@@ -518,7 +545,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                 />
              </div>
 
-             {/* --- MODIFICACIÓN: flex-wrap para evitar el desbordamiento del menú --- */}
              <div className="flex flex-wrap sm:flex-nowrap overflow-x-auto scrollbar-hide gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full xl:w-max">
                {esAdmin && <button onClick={() => setVistaAdmin('pendientes')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Pendientes ({pendientesOrdenados.length})</button>}
                <button onClick={() => setVistaAdmin('historial')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial General</button>
@@ -568,9 +594,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    
                    <div className="text-[11px] font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1 mb-3 flex items-center flex-wrap gap-2">
                      <span>Ingreso: {new Date(p.fechaCreacion).toLocaleDateString('es-VE')} {new Date(p.fechaCreacion).toLocaleTimeString('es-VE', {hour: '2-digit', minute:'2-digit'})}</span>
-                     {getFechaOperativaObj(p.fechaCreacion).visual !== new Date(p.fechaCreacion).toLocaleDateString('es-VE') && (
-                        <span className="bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-700">Operativo: {getFechaOperativaObj(p.fechaCreacion).visual}</span>
-                     )}
+                     <span className="bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-700">Despacho pautado: {p.fechaDespacho || 'No asignado'}</span>
                    </div>
                    
                    <div className="text-xs font-semibold text-slate-500 flex items-center gap-2 mb-4">
@@ -582,6 +606,16 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                      <span className="font-black text-sky-700 dark:text-sky-400 flex items-center gap-1.5 mb-2 uppercase tracking-wider text-[10px]"><Package size={14}/> Productos Facturados:</span>
                      {p.productos ? <div className="whitespace-pre-wrap leading-relaxed">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div> : 'Sin detalle.'}
                    </div>
+
+                   {p.notaVentas && (
+                      <div className="mt-3 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 p-3 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50 flex items-start gap-2 shadow-sm w-full">
+                        <MessageSquare size={16} className="shrink-0 mt-0.5" />
+                        <div className="flex-1 whitespace-pre-wrap font-bold">
+                          <span className="uppercase tracking-widest text-[9px] block mb-0.5 opacity-70">Nota de Ventas:</span>
+                          {p.notaVentas}
+                        </div>
+                      </div>
+                   )}
                  </div>
 
                  <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0">
@@ -639,7 +673,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        </div>
                      )}
 
-                     {/* --- MODIFICACIÓN: Corrección de validación para Admins en el Historial --- */}
                      {vistaAdmin === 'historial' && esAdmin && p.status === 'Validado' && !p.auditado && (
                         <button onClick={()=>abrirModalValidacion(p, true)} className="mt-auto mb-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm w-full">
                            <Edit3 size={16}/> Corregir Validación
@@ -660,7 +693,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                        </div>
                      )}
 
-                     {/* --- MODIFICACIÓN: Acción de añadir nota complementaria sin auditar --- */}
                      {esAdmin && !esAuditor && p.status !== 'Pendiente' && p.status !== 'Anulado' && (
                         <button onClick={()=>dejarComentarioComplementario(p)} className="mb-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border-2 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm w-full">
                            <MessageSquare size={16}/> Añadir Comentario
@@ -756,7 +788,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                     </div>
                  </div>
                  
-                 {/* --- MODIFICACIÓN: Selector visual de tipo de diferencia (Exacto, Sobrante, Faltante) --- */}
                  <div className="mb-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
                     <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block mb-3">¿Diferencia en el pago?</label>
                     <div className="flex flex-wrap sm:flex-nowrap gap-3 mb-4">

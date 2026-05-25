@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, UploadCloud, FileType, Ban } from 'lucide-react';
+import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, UploadCloud, FileType, Ban, MessageSquare } from 'lucide-react';
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
 import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
@@ -16,7 +16,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', pagoEnvio: 'COD', origenPedido: '',
    direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '',
    montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false,
-   descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '', numeroControlML: '' 
+   descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '', numeroControlML: '', notaVentas: '' 
  };
 
  const [formData, setFormData] = useState(defaultForm);
@@ -214,7 +214,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, pagoEnvio: pedido.pagoEnvio || 'COD', origenPedido: pedido.origenPedido || '', direccion: pedido.direccion,
      productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD',
      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: '',
-     numeroControlML: pedido.numeroControlML || '' 
+     numeroControlML: pedido.numeroControlML || '', notaVentas: pedido.notaVentas || '' 
    });
    setEditId(pedido.id);
    setPedidoDevuelto(pedido);
@@ -358,11 +358,12 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      finalCarrito["Concentrado|Unidad"] = (finalCarrito["Concentrado|Unidad"] || 0) + countBoosters;
      if (!finalProductosText.includes("Concentrado (Unidad)")) finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Auto]`;
    }
+   
+   // LÓGICA DE FECHAS (Incluye validación viernes > 12:30pm)
    const getVeneziaTime = () => {
      const now = new Date();
      return new Date(now.toLocaleString("en-US", {timeZone: "America/Caracas"}));
    };
-   
    const targetDate = getVeneziaTime();
    const hora = targetDate.getHours();
    const minutos = targetDate.getMinutes();
@@ -387,6 +388,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
    const yyyy = targetDate.getFullYear();
    const fechaDespachoStr = `${dd}/${mm}/${yyyy}`;
+
    try {
      if (editId) {
        let updateData = {
@@ -576,9 +578,15 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                 <label htmlFor="regalo-check" className="text-sm font-bold text-purple-700 dark:text-purple-400 cursor-pointer uppercase tracking-wider flex items-center gap-1"><Gift size={16}/> Es Regalo / Obsequio VIP</label>
               </div>
             </div>
+            
             <div className="md:col-span-2">
               <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors block">Dirección de Envío Completa</label>
               <textarea name="direccion" value={formData.direccion} onChange={(e)=>setFormData({...formData, direccion: e.target.value})} required rows={2} className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm"></textarea>
+            </div>
+
+            <div className="md:col-span-2 mt-2">
+              <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 block">Nota del Pedido (Opcional)</label>
+              <textarea name="notaVentas" value={formData.notaVentas} onChange={(e)=>setFormData({...formData, notaVentas: e.target.value})} rows={2} placeholder="Observación adicional para administración o despacho..." className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm"></textarea>
             </div>
            
             <div className="md:col-span-2 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl border-2 border-slate-100 dark:border-slate-700">
@@ -740,6 +748,17 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                    <div className="mt-3 text-[12px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300 font-medium">
                       {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
                    </div>
+
+                   {p.notaVentas && (
+                      <div className="mt-3 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 p-3 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50 flex items-start gap-2 shadow-sm w-full">
+                        <MessageSquare size={16} className="shrink-0 mt-0.5" />
+                        <div className="flex-1 whitespace-pre-wrap font-bold">
+                          <span className="uppercase tracking-widest text-[9px] block mb-0.5 opacity-70">Nota de Ventas:</span>
+                          {p.notaVentas}
+                        </div>
+                      </div>
+                   )}
+
                    {(p.linkGuiaML || p.linkGuia || p.linkComprobantePago || p.linkFotoProductos) && (
                       <div className="flex flex-wrap gap-2 mt-3">
                         
@@ -850,6 +869,15 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                     <div className="text-[12px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300 font-medium">
                       {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
                     </div>
+                    {p.notaVentas && (
+                      <div className="mt-3 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 p-3 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50 flex items-start gap-2 shadow-sm w-full">
+                        <MessageSquare size={16} className="shrink-0 mt-0.5" />
+                        <div className="flex-1 whitespace-pre-wrap font-bold">
+                          <span className="uppercase tracking-widest text-[9px] block mb-0.5 opacity-70">Nota de Ventas:</span>
+                          {p.notaVentas}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2 shrink-0">
                     <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm hover:bg-amber-200 transition-colors w-full sm:w-auto">Modificar</button>
@@ -874,6 +902,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                     <div className="text-xs font-semibold text-emerald-600 mt-1">Total Cotizado: ${p.montoUsd}</div>
                     <div className="text-xs text-slate-500 mt-2 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg whitespace-pre-wrap">{p.productos}</div>
                    
+                    {p.notaVentas && (
+                      <div className="mt-3 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 p-3 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50 flex items-start gap-2 shadow-sm w-full">
+                        <MessageSquare size={16} className="shrink-0 mt-0.5" />
+                        <div className="flex-1 whitespace-pre-wrap font-bold">
+                          <span className="uppercase tracking-widest text-[9px] block mb-0.5 opacity-70">Nota de Ventas:</span>
+                          {p.notaVentas}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex flex-col gap-1 mt-3">
                        <div className="text-xs font-bold text-slate-700 dark:text-slate-300">Ref: {p.referencia}</div>
                        {p.linkComprobantePago && <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="text-xs text-sky-600 hover:underline flex items-center gap-1"><FileText size={12}/> Ver Comprobante Subido</a>}
