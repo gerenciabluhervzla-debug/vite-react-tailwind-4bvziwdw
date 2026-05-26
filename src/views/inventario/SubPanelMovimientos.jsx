@@ -34,26 +34,30 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
     }, "Aprobar Recepción");
   };
 
-  // NUEVA FUNCIÓN: Aprobar Salida de Inventario (Mermas / Daños)
+  // FUNCIÓN ACTUALIZADA: Aprobar Salida de Inventario (Mermas / Daños)
   const aprobarSalida = async (mov) => {
     dialogs.confirm("¿Confirmas que deseas aprobar esta SALIDA de inventario? Las cantidades se RESTARÁN permanentemente del sistema.", async () => {
       try {
         const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
         const updates = {};
         
-        // Asumimos que la salida se resta de 'recepcion', pero si tu modal define un origen, lo toma dinámicamente.
+        // Toma el origen directamente del movimiento que ahora enviamos desde el Modal
         const origenStock = mov.origen ? mov.origen.toLowerCase() : 'recepcion';
         
+        // Usamos notación de puntos para actualizar solo el almacén específico sin sobreescribir
         Object.entries(mov.items).forEach(([key, qty]) => { 
-           // IMPORTANTE: Aquí se resta usando -qty
-           updates[key] = { [origenStock]: increment(-qty) }; 
+           updates[`${key}.${origenStock}`] = increment(-qty); 
         });
         
         if(Object.keys(updates).length > 0){ 
-           await setDoc(stockRef, updates, { merge: true }); 
+           await updateDoc(stockRef, updates); 
         }
 
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'movimientos', mov.id), { status: 'COMPLETADO', fechaAprobacion: Date.now(), aprobadoPor: perfil.nombre });
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'movimientos', mov.id), { 
+            status: 'COMPLETADO', 
+            fechaAprobacion: Date.now(), 
+            aprobadoPor: perfil.nombre 
+        });
         loggear('SALIDA_APROBADA', `Admin aprobó salida de inventario por daños/mermas registrada por ${mov.creadoPor}`);
       } catch(e) { console.error(e); }
     }, "Aprobar Salida de Inventario");
@@ -89,7 +93,6 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
                   <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">Generado por: <span className="font-semibold text-slate-700 dark:text-slate-300">{m.creadoPor}</span></div>
                 </td>
                 <td className="p-4">
-                  {/* Etiqueta dinámica dependiendo del tipo de movimiento */}
                   <span className={`px-2.5 py-1 rounded-md text-[10px] font-black tracking-widest uppercase border 
                     ${m.tipo === 'INGRESO' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' : 
                       m.tipo === 'SALIDA' ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800' :
@@ -134,7 +137,6 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
                     <div className="flex flex-col items-end gap-2">
                       <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 px-3 py-1 rounded-md text-xs font-bold border border-amber-200 dark:border-amber-800">En Revisión (Pendiente)</span>
                       
-                      {/* Botón de aprobación dinámico según el tipo */}
                       {m.tipo === 'TRANSFERENCIA' && esRecepcion && (
                          <button onClick={()=>aprobarTransferencia(m)} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-2 rounded-lg font-bold shadow-md transition-colors mt-1">Aprobar Llegada</button>
                       )}

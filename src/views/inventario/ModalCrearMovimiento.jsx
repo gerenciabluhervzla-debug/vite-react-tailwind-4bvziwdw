@@ -8,27 +8,28 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
   const [carrito, setCarrito] = useState({});
   const [fotosUrls, setFotosUrls] = useState([]);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
-  const [busqueda, setBusqueda] = useState(''); // ESTADO DEL BUSCADOR
+  const [busqueda, setBusqueda] = useState(''); 
+  
+  // NUEVO ESTADO: Para elegir el almacén de origen en caso de una SALIDA
+  const [origenSalida, setOrigenSalida] = useState('recepcion'); 
 
   const isTransfer = tipo === 'TRANSFERENCIA';
   const isSalida = tipo === 'SALIDA';
 
-  // Función para obtener la disponibilidad según el tipo de operación
+  // Función para obtener la disponibilidad leyendo del almacén dinámico
   const getMaxDisp = (key) => {
     const itemStock = stock[key] || 0;
     if (typeof itemStock !== 'object') return itemStock;
-    if (isTransfer) return itemStock.envios || 0; // Envía desde el almacén de envíos
-    if (isSalida) return itemStock.recepcion || 0; // Salida se descuenta del almacén principal/recepción
-    return 999999; // INGRESO no tiene límite
+    if (isTransfer) return itemStock.envios || 0; 
+    if (isSalida) return itemStock[origenSalida] || 0; // Lee del almacén seleccionado
+    return 999999; 
   };
 
-  // Agregamos isConcentrado para ignorar el límite si es verdadero
   const updateQty = (key, delta, isConcentrado = false) => {
     setCarrito(prev => {
       const actual = prev[key] || 0;
       const nuevo = Math.max(0, actual + delta);
       
-      // Si no es un concentrado, validamos contra el máximo disponible
       if ((isTransfer || isSalida) && delta > 0 && !isConcentrado) {
         if (nuevo > getMaxDisp(key)) return prev; 
       }
@@ -38,12 +39,10 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
     });
   };
 
-  // Agregamos isConcentrado para ignorar el límite si es verdadero
   const handleDirectInput = (key, val, isConcentrado = false) => {
     let num = parseInt(val, 10);
     if (isNaN(num) || num < 0) num = 0;
     
-    // Si no es un concentrado, validamos contra el máximo disponible
     if ((isTransfer || isSalida) && !isConcentrado) {
       const maxDisp = getMaxDisp(key);
       if (num > maxDisp) num = maxDisp; 
@@ -102,7 +101,8 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), {
         tipo, 
-        origen: isSalida ? 'RECEPCION' : (isTransfer ? 'ENVIOS' : 'PROVEEDOR'), 
+        // ACTUALIZADO: Envía a la base de datos el origen seleccionado dinámicamente
+        origen: isSalida ? origenSalida.toUpperCase() : (isTransfer ? 'ENVIOS' : 'PROVEEDOR'), 
         destino: isSalida ? 'AJUSTE/MERMAS' : (isTransfer ? 'RECEPCION' : 'ENVIOS'),
         items: carrito, 
         fotos: fotosUrls, 
@@ -141,7 +141,6 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[80] flex items-center justify-center p-2 md:p-4 animate-in fade-in">
       <div className="bg-white dark:bg-slate-800 rounded-2xl md:rounded-3xl shadow-2xl w-full max-w-4xl h-[98vh] md:h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-200 dark:border-slate-700">
         
-        {/* ENCABEZADO Y BUSCADOR (Reducido el padding para dar más espacio) */}
         <div className="border-b dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col">
            <div className="px-4 py-4 md:px-6 md:py-5 flex justify-between items-center">
              <h2 className="text-xl md:text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2 md:gap-3">
@@ -152,9 +151,9 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
              <button onClick={onClose} className="p-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full transition-colors"><X size={20} className="text-slate-500 dark:text-slate-400"/></button>
            </div>
            
-           {/* BARRA DE BÚSQUEDA */}
-           <div className="px-4 pb-3 md:px-6 md:pb-4">
-              <div className="relative">
+           {/* BARRA DE BÚSQUEDA Y SELECTOR DE ALMACÉN */}
+           <div className="px-4 pb-3 md:px-6 md:pb-4 flex flex-col md:flex-row gap-3">
+              <div className="relative flex-1">
                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                  <input 
                    type="text" 
@@ -164,22 +163,37 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
                    className="w-full pl-11 pr-4 py-2.5 md:py-3 bg-slate-100 dark:bg-slate-900 border-none rounded-xl text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-sky-500 outline-none transition-all shadow-inner text-sm md:text-base"
                  />
               </div>
+              
+              {/* SELECTOR DE ORIGEN (Solo visible en Salidas) */}
+              {isSalida && (
+                 <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-900 rounded-xl px-2 shadow-inner">
+                    <label className="text-[11px] md:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest pl-2 whitespace-nowrap">Origen:</label>
+                    <select
+                      value={origenSalida}
+                      onChange={(e) => {
+                         setOrigenSalida(e.target.value);
+                         setCarrito({}); // Limpiamos el carrito al cambiar de almacén para evitar errores
+                      }}
+                      className="bg-transparent border-none text-slate-800 dark:text-slate-100 focus:ring-0 outline-none py-2.5 md:py-3 pr-4 text-sm md:text-base font-semibold cursor-pointer"
+                    >
+                      <option value="recepcion">Recepción</option>
+                      <option value="envios">Envíos</option>
+                    </select>
+                 </div>
+              )}
            </div>
         </div>
 
-        {/* LISTA DE PRODUCTOS FILTRADOS (Ajuste en grid y gaps) */}
         <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-[#f8fafc] dark:bg-slate-900 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 items-start content-start">
           {categoriasFiltradas.length === 0 ? (
              <div className="col-span-1 md:col-span-2 text-center py-12 text-slate-400 font-bold">No se encontraron productos con "{busqueda}"</div>
           ) : categoriasFiltradas.map(cat => {
-            // Validamos a nivel de categoría si pertenece a concentrados
             const esCatConcentrado = cat.categoria.toLowerCase().includes('concentrado');
             
             return (
             <div key={cat.categoria} className="bg-white dark:bg-slate-800 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
               <h3 className="font-bold text-[10px] md:text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700 pb-2 mb-3 md:mb-4">{cat.categoria}</h3>
               {cat.productos.map(prod => {
-                // También validamos si el nombre del producto incluye la palabra
                 const isConcentrado = esCatConcentrado || prod.nombre.toLowerCase().includes('concentrado');
                 
                 return (
@@ -220,9 +234,7 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
           )})}
         </div>
 
-        {/* SECCIÓN DE FOTOS Y BOTÓN GUARDAR (Hecha mucho más compacta) */}
         <div className="p-3 md:p-5 border-t dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col gap-3 md:gap-4">
-          
           <div className={`${isSalida ? 'bg-red-50 dark:bg-red-900/20 border-red-100' : isTransfer ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-100' : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100'} p-3 md:p-4 border rounded-xl md:rounded-2xl flex flex-col gap-2 transition-colors`}>
             <label className={`text-[10px] md:text-xs font-bold uppercase tracking-widest block ${isSalida ? 'text-red-800 dark:text-red-400' : isTransfer ? 'text-purple-800 dark:text-purple-400' : 'text-emerald-800 dark:text-emerald-400'}`}>
               Evidencias Fotográficas (Mínimo 1)
