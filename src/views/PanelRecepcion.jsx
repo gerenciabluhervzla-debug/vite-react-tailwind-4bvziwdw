@@ -28,9 +28,12 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
      if (vista === 'entregados') filtrados = filtrados.filter(p => p.status === 'Despachado');
 
      if (busqueda.trim()) {
-        const b = busqueda.toLowerCase();
-        filtrados = filtrados.filter(p => p.clienteNombre?.toLowerCase().includes(b) || p.retiroNombre?.toLowerCase().includes(b));
-     }
+      const b = busqueda.toLowerCase();
+      filtrados = filtrados.filter(p => 
+         String(p.clienteNombre || '').toLowerCase().includes(b) || 
+         String(p.retiroNombre || '').toLowerCase().includes(b)
+      );
+   }
      return filtrados;
   }, [pedidosRecepcion, vista, busqueda]);
 

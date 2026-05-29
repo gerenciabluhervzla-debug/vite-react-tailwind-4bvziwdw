@@ -7,7 +7,7 @@ import {
 } from 'firebase/firestore';
 import { 
   ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users, 
-  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X, PackageCheck, Contact 
+  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X, Inbox, UserSquare 
 } from 'lucide-react';
 
 import { auth, db, googleProvider, appId } from './config/firebase';
@@ -356,13 +356,13 @@ export default function App() {
               
               {/* LÓGICA DE BADGES DIVIDIDA POR TIPO DE DESPACHO */}
               {showDespacho && <TabButton active={activeTab === 'despacho'} onClick={() => handleTabClick('despacho')} icon={<Truck size={18} />} label={`Despacho Nacional`} badge={pedidos.filter(p=>p.status==='Validado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')).length} />}
-              {showRecepcion && <TabButton active={activeTab === 'recepcion'} onClick={() => handleTabClick('recepcion')} icon={<PackageCheck size={18} />} label={`Recepción (Tienda)`} badge={pedidos.filter(p=>['Tienda', 'Delivery'].includes(p.tipoDespacho) && p.status==='Validado').length} />}
+              {showRecepcion && <TabButton active={activeTab === 'recepcion'} onClick={() => handleTabClick('recepcion')} icon={<Inbox size={18} />} label={`Recepción (Tienda)`} badge={pedidos.filter(p=>['Tienda', 'Delivery'].includes(p.tipoDespacho) && p.status==='Validado').length} />}
               
               {(showReportes || showClientes || showInventario || showUsuarios || showLogs) && <div className="my-4 border-t border-sky-800/50 dark:border-slate-800 mx-2"></div>}
               {(showReportes || showClientes || showInventario || showUsuarios || showLogs) && <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Gestión y Reportes</div>}
 
               {/* NUEVO MÓDULO CRM */}
-              {showClientes && <TabButton active={activeTab === 'clientes'} onClick={() => handleTabClick('clientes')} icon={<Contact size={18} />} label="CRM Clientes" />}
+              {showClientes && <TabButton active={activeTab === 'clientes'} onClick={() => handleTabClick('clientes')} icon={<UserSquare size={18} />} label="CRM Clientes" />}
               {showReportes && <TabButton active={activeTab === 'reportes'} onClick={() => handleTabClick('reportes')} icon={<FileSpreadsheet size={18} />} label="Reportes Financieros" />}
               {showInventario && <TabButton active={activeTab === 'inventario'} onClick={() => handleTabClick('inventario')} icon={<Archive size={18} />} label="Inventario Dual" badge={movimientos.filter(m=>m.status==='PENDIENTE').length} />}
               {showUsuarios && <TabButton active={activeTab === 'usuarios'} onClick={() => handleTabClick('usuarios')} icon={<Users size={18} />} label="Usuarios" badge={usuarios.filter(u=>!u.isApproved).length} />}

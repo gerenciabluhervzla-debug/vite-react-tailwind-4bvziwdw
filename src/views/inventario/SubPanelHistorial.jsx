@@ -90,42 +90,50 @@ export default function SubPanelHistorial({ lista, movimientos, pedidos = [], db
 
   // 3. AUTO-GUARDADO DEL CIERRE DIARIO (Solo para Hoy)
   useEffect(() => {
-    if (fechaConsulta !== hoyISO || !lista.length) return;
+   if (fechaConsulta !== hoyISO || !lista.length) return;
 
-    const timeoutId = setTimeout(async () => {
-       try {
-          const filas = lista.map(item => {
-             const m = metricasHoy[item.key];
-             // Cálculos matemáticos puros para el Snapshot del día
-             const inicioEnvios = item.envios + m.envios.ventas + m.envios.trasladosOut + m.envios.salidas - m.envios.ingresos;
-             const inicioRecepcion = item.recepcion + m.recepcion.ventas + m.recepcion.salidas - m.recepcion.trasladosIn;
+   const timeoutId = setTimeout(async () => {
+      try {
+         const filas = lista.map(item => {
+            const m = metricasHoy[item.key];
+            
+            // SANITIZACIÓN ESTRICTA: Forzamos a que si un valor no existe (undefined) sea 0
+            // Esto evita que Firebase bloquee el autoguardado y tire el error en la consola
+            const stockEnviosActual = item.envios || 0;
+            const stockRecepcionActual = item.recepcion || 0;
 
-             return {
-                key: item.key, nom: item.nom, pres: item.pres,
-                envios: {
-                   inicio: inicioEnvios,
-                   ingresos: m.envios.ingresos,
-                   trasladosOut: m.envios.trasladosOut,
-                   ventas: m.envios.ventas,
-                   salidas: m.envios.salidas,
-                   cierre: item.envios
-                },
-                recepcion: {
-                   inicio: inicioRecepcion,
-                   trasladosIn: m.recepcion.trasladosIn,
-                   ventas: m.recepcion.ventas,
-                   salidas: m.recepcion.salidas,
-                   cierre: item.recepcion
-                }
-             };
-          });
+            // Cálculos matemáticos puros para el Snapshot del día
+            const inicioEnvios = stockEnviosActual + (m.envios.ventas || 0) + (m.envios.trasladosOut || 0) + (m.envios.salidas || 0) - (m.envios.ingresos || 0);
+            const inicioRecepcion = stockRecepcionActual + (m.recepcion.ventas || 0) + (m.recepcion.salidas || 0) - (m.recepcion.trasladosIn || 0);
 
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', hoyISO), { filas, fechaUltimaAct: Date.now() }, { merge: true });
-       } catch (error) { console.error("Error en autoguardado de cierre:", error); }
-    }, 3000);
+            return {
+               key: item.key || 'Desconocido', 
+               nom: item.nom || 'Sin Nombre', 
+               pres: item.pres || 'N/A',
+               envios: {
+                  inicio: inicioEnvios || 0,
+                  ingresos: m.envios.ingresos || 0,
+                  trasladosOut: m.envios.trasladosOut || 0,
+                  ventas: m.envios.ventas || 0,
+                  salidas: m.envios.salidas || 0,
+                  cierre: stockEnviosActual
+               },
+               recepcion: {
+                  inicio: inicioRecepcion || 0,
+                  trasladosIn: m.recepcion.trasladosIn || 0,
+                  ventas: m.recepcion.ventas || 0,
+                  salidas: m.recepcion.salidas || 0,
+                  cierre: stockRecepcionActual
+               }
+            };
+         });
 
-    return () => clearTimeout(timeoutId);
-  }, [metricasHoy, lista, fechaConsulta, hoyISO, db, appId]);
+         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', hoyISO), { filas, fechaUltimaAct: Date.now() }, { merge: true });
+      } catch (error) { console.error("Error en autoguardado de cierre:", error); }
+   }, 3000);
+
+   return () => clearTimeout(timeoutId);
+ }, [metricasHoy, lista, fechaConsulta, hoyISO, db, appId]);
 
   // 4. CONSOLIDAR DATA A MOSTRAR (En vivo vs Histórico + Retrocompatibilidad)
   const dataMostrarAdaptada = useMemo(() => {

@@ -12,16 +12,21 @@ export default function PanelClientes({ pedidos }) {
         // Ignoramos pedidos no concretados
         if(p.status === 'Anulado' || p.status === 'Rechazado' || p.status === 'Pendiente' || p.esPublico) return;
         
+        // SANITIZACIÓN ESTRICTA: Forzamos a que todo sea texto para evitar el pantallazo blanco
+        const tlf = p.clienteTelefono ? String(p.clienteTelefono).trim() : '';
+        const ci = p.clienteCedula ? String(p.clienteCedula).trim() : '';
+        const nom = p.clienteNombre ? String(p.clienteNombre).trim() : 'Sin Nombre';
+
         // Estandarizar la llave del cliente (Prioridad: Teléfono -> Cédula -> Nombre)
-        const key = p.clienteTelefono ? p.clienteTelefono.trim() : (p.clienteCedula ? p.clienteCedula.trim() : p.clienteNombre.trim());
+        const key = tlf || ci || nom;
         if (!key) return;
 
         if (!map[key]) {
             map[key] = {
-                nombre: p.clienteNombre,
-                cedula: p.clienteCedula || 'S/N',
-                telefono: p.clienteTelefono,
-                direccion: p.direccion || 'No especificada',
+                nombre: nom,
+                cedula: ci || 'S/N',
+                telefono: tlf || 'S/N',
+                direccion: p.direccion ? String(p.direccion) : 'No especificada',
                 primeraCompra: p.fechaCreacion,
                 ultimaCompra: p.fechaCreacion,
                 totalCompras: 0,
@@ -31,22 +36,22 @@ export default function PanelClientes({ pedidos }) {
             };
         }
 
-        // Actualizar datos si el pedido es más reciente (mantenemos la info más fresca)
+        // Actualizar datos si el pedido es más reciente
         if (p.fechaCreacion > map[key].ultimaCompra) {
             map[key].ultimaCompra = p.fechaCreacion;
-            if (p.direccion) map[key].direccion = p.direccion;
-            map[key].nombre = p.clienteNombre; // Actualiza al último nombre usado
+            if (p.direccion) map[key].direccion = String(p.direccion);
+            map[key].nombre = nom; 
         }
 
         map[key].totalCompras += 1;
-        map[key].totalGastado += (p.montoUsd || 0);
+        map[key].totalGastado += (Number(p.montoUsd) || 0);
         if (p.asesora) map[key].asesoras.add(p.asesora);
 
         // Analizar productos comprados
         if (p.carritoObj) {
             Object.entries(p.carritoObj).forEach(([prodKey, qty]) => {
                 if (!map[key].historialProductos[prodKey]) map[key].historialProductos[prodKey] = 0;
-                map[key].historialProductos[prodKey] += qty;
+                map[key].historialProductos[prodKey] += Number(qty) || 0;
             });
         }
      });
@@ -68,13 +73,13 @@ export default function PanelClientes({ pedidos }) {
          };
      });
 
-     // Aplicar Filtro de Búsqueda
+     // Aplicar Filtro de Búsqueda Seguro
      if (busqueda.trim()) {
          const b = busqueda.toLowerCase();
          clientesArray = clientesArray.filter(c => 
-             c.nombre.toLowerCase().includes(b) || 
-             c.telefono.includes(b) || 
-             c.cedula.toLowerCase().includes(b)
+             String(c.nombre).toLowerCase().includes(b) || 
+             String(c.telefono).toLowerCase().includes(b) || 
+             String(c.cedula).toLowerCase().includes(b)
          );
      }
 
@@ -125,18 +130,18 @@ export default function PanelClientes({ pedidos }) {
                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">C.I: {c.cedula}</span>
                    </div>
                    {c.totalCompras >= 3 && (
-                      <span className="bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400 p-1.5 rounded-full" title="Cliente Recurrente VIP"><Award size={16}/></span>
+                      <span className="bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400 p-1.5 rounded-full shrink-0" title="Cliente Recurrente VIP"><Award size={16}/></span>
                    )}
                 </div>
 
                 <div className="space-y-2 mb-5 flex-grow">
                    <div className="flex gap-2 items-start text-xs font-medium text-slate-600 dark:text-slate-300">
-                      <span className="bg-slate-100 dark:bg-slate-900 p-1.5 rounded text-slate-400"><Search size={14}/></span>
+                      <span className="bg-slate-100 dark:bg-slate-900 p-1.5 rounded text-slate-400 shrink-0"><Search size={14}/></span>
                       <span className="mt-1">{c.telefono}</span>
                    </div>
                    <div className="flex gap-2 items-start text-xs font-medium text-slate-600 dark:text-slate-300 line-clamp-2">
-                      <span className="bg-slate-100 dark:bg-slate-900 p-1.5 rounded text-slate-400"><Store size={14}/></span>
-                      <span className="mt-1">{c.direccion}</span>
+                      <span className="bg-slate-100 dark:bg-slate-900 p-1.5 rounded text-slate-400 shrink-0"><Store size={14}/></span>
+                      <span className="mt-1 leading-snug">{c.direccion}</span>
                    </div>
                 </div>
 
