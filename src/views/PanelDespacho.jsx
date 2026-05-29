@@ -33,9 +33,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return url;
   };
 
-  const pedidosValidados = pedidos.filter(p => p.status === 'Validado');
-  const pedidosDespachados = pedidos.filter(p => p.status === 'Despachado');
-  const pedidosPendientes = pedidos.filter(p => p.status === 'Pendiente' || p.status === 'Rechazado').length;
+  // AISLAMIENTO DE ALMACÉN: Solo operamos Envíos Nacionales
+  const pedidosValidados = pedidos.filter(p => p.status === 'Validado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional'));
+  const pedidosDespachados = pedidos.filter(p => p.status === 'Despachado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional'));
+  const pedidosPendientes = pedidos.filter(p => (p.status === 'Pendiente' || p.status === 'Rechazado') && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')).length;
 
   const [guiasInput, setGuiasInput] = useState({});
   const [subiendo, setSubiendo] = useState({ id: null, field: null });
@@ -84,7 +85,8 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     const startOfDay = new Date(tDate.getFullYear(), tDate.getMonth(), tDate.getDate()).getTime();
 
     pedidos.forEach(p => {
-       if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr) {
+       // Kardex de Despacho solo resta Ventas de Envío Nacional
+       if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')) {
            if (p.carritoObj) {
                Object.entries(p.carritoObj).forEach(([k, qty]) => {
                    if (aggr[k]) aggr[k].ventas += qty;
@@ -97,13 +99,13 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
        if (m.fechaCreacion >= startOfDay) {
            if (m.tipo === 'TRANSFERENCIA') {
                Object.entries(m.items || {}).forEach(([k, qty]) => {
-                   if (aggr[k]) aggr[k].recepcion += qty;
+                   if (aggr[k]) aggr[k].recepcion += qty; // Esto actúa como Traslados Out
                });
            } else if (m.tipo === 'INGRESO') {
                Object.entries(m.items || {}).forEach(([k, qty]) => {
                    if (aggr[k]) aggr[k].ingresos += qty;
                });
-           } else if (m.tipo === 'SALIDA' && m.status === 'COMPLETADO') {
+           } else if (m.tipo === 'SALIDA' && m.status === 'COMPLETADO' && (!m.origen || m.origen === 'envios')) {
                Object.entries(m.items || {}).forEach(([k, qty]) => {
                    if (aggr[k]) aggr[k].salidas += qty;
                });
@@ -334,7 +336,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
         <div class="header">
           <div>
-            <h1>Reporte de Cierre de Inventario</h1>
+            <h1>Cierre de Inventario: Almacén Envíos</h1>
             <p style="color: #64748b; margin-top: 5px; font-size: 14px;">Departamento de Despacho & Logística</p>
           </div>
           <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
@@ -358,7 +360,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
               <th>Producto</th>
               <th style="text-align:center;">Inicio Día</th>
               <th style="text-align:center; color:#2563eb;">Ingresos</th>
-              <th style="text-align:center; color:#9333ea;">Recepción</th>
+              <th style="text-align:center; color:#9333ea;">A Recepción</th>
               <th style="text-align:center; color:#ea580c;">Salidas</th>
               <th style="text-align:center; color:#059669;">Ventas</th>
               <th style="text-align:center; background:#f8fafc;">Stock Final (Sis)</th>
@@ -512,7 +514,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end mb-8 border-b border-slate-100 dark:border-slate-700 pb-4 gap-4">
         <div className="w-full xl:w-auto">
-          <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3 mb-4"><Truck className="text-sky-600"/> Logística de Envíos</h2>
+          <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3 mb-4"><Truck className="text-sky-600"/> Logística de Envíos Nacionales</h2>
           
           <div className="flex bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl w-full md:w-max overflow-x-auto scrollbar-hide">
             {!esAuditorPuro && <button onClick={() => setVistaDespacho('pendientes')} className={`px-4 py-2 text-sm font-bold rounded-lg whitespace-nowrap transition-colors ${vistaDespacho === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Por Empacar ({pedidosValidados.length})</button>}
@@ -790,7 +792,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                        <th className="p-4 font-black">Producto</th>
                        <th className="p-4 font-black text-center w-24">Inicio Día</th>
                        <th className="p-4 font-black text-center w-24 text-blue-600">Ingresos</th>
-                       <th className="p-4 font-black text-center w-24 text-purple-600">Recepción</th>
+                       <th className="p-4 font-black text-center w-24 text-purple-600">A Recepción</th>
                        <th className="p-4 font-black text-center w-24 text-orange-600">Salidas</th>
                        <th className="p-4 font-black text-center w-24 text-emerald-600">Ventas</th>
                        <th className="p-4 font-black text-center w-24">Stock Final</th>

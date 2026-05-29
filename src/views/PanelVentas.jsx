@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, UploadCloud, FileType, Ban, MessageSquare } from 'lucide-react';
+import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, FileType, Ban, MessageSquare, Truck, Store as StoreIcon, Bike } from 'lucide-react';
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
 import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
@@ -12,7 +12,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
  const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
  const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial');
 
-  const defaultForm = {
+ const getLocalToday = () => {
+   const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+ };
+
+ const defaultForm = {
+   tipoDespacho: 'Nacional', // 'Nacional', 'Tienda', 'Delivery'
+   costoEnvio: '',
+   retiroNombre: '', retiroCedula: '', retiroTelefono: '',
+   deliveryFecha: getLocalToday(), deliveryHora: '',
    clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', pagoEnvio: 'COD', origenPedido: '',
    direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '',
    montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false,
@@ -27,11 +36,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
  const [textoCrudo, setTextoCrudo] = useState('');
  const [analizando, setAnalizando] = useState(false);
  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
-
- const getLocalToday = () => {
-   const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
- };
 
  const [busquedaCliente, setBusquedaCliente] = useState('');
  const [fechaHistorial, setFechaHistorial] = useState(getLocalToday());
@@ -85,7 +89,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
        lista = lista.filter(p => p.status === filtroStatus);
      }
    }
-   lista.sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+   lista.sort((a, b) => b.fechaCreacion - a.fechaCreacion); // Más recientes primero en la misma fecha
    return lista;
  }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus]);
 
@@ -99,7 +103,14 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
   
    const subConCampaña = sub * (1 - globalDiscountPercent / 100);
    const dExtra = parseFloat(formData.descuentoPorcentaje) || 0;
-   const final = subConCampaña * (1 - dExtra / 100);
+   const finalProducts = subConCampaña * (1 - dExtra / 100);
+
+   let costoEnvioFinal = 0;
+   if (formData.tipoDespacho === 'Delivery' || (formData.tipoDespacho === 'Nacional' && formData.pagoEnvio === 'PAGADO')) {
+       costoEnvioFinal = parseFloat(formData.costoEnvio) || 0;
+   }
+
+   const final = finalProducts + costoEnvioFinal;
   
    setFormData(prev => ({
      ...prev,
@@ -107,7 +118,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      moneda: prev.moneda === 'ZELLE' ? 'ZELLE' : 'USD',
      tasa: prev.tasa || config?.tasaDia
    }));
- }, [formData.carritoObj, formData.descuentoPorcentaje, config?.tasaDia, catalogo, globalDiscountPercent]);
+ }, [formData.carritoObj, formData.descuentoPorcentaje, formData.tipoDespacho, formData.pagoEnvio, formData.costoEnvio, config?.tasaDia, catalogo, globalDiscountPercent]);
 
  const copiarLinkTienda = () => {
    const linkTienda = `${window.location.origin}${window.location.pathname}#tienda`;
@@ -136,9 +147,10 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      3. MONTO TOTAL: En "montoPago", coloca la suma total de la venta o el total global indicado.
      4. MONEDA: Debe ser estrictamente "USD", "VES" o "ZELLE". Si habla de Zelle es "ZELLE", si es dólares en efectivo es "USD", si hay bolívares/Bs es "VES".
      5. PAGO ENVÍO: "COD" (cobro en destino) o "PAGADO" (envío pagado). Por defecto usa "COD".
-     6. TIPO DE ENVÍO: Si dice "MercadoLibre", esMercadoLibre=true.
-     7. ORIGEN: Extrae el origen si aparece (ej. "RECOMPRA").
-     8. ASESORA: Extrae el nombre de la asesora si aparece.
+     6. TIPO DE ENVÍO: Si dice "MercadoLibre", esMercadoLibre=true. 
+     7. TIPO DESPACHO: Si dice "delivery", tipoDespacho="Delivery". Si dice "retiro" o "tienda", tipoDespacho="Tienda". Si es por MRW, Zoom, Tealca, Domesa, es "Nacional".
+     8. ORIGEN: Extrae el origen si aparece (ej. "RECOMPRA").
+     9. ASESORA: Extrae el nombre de la asesora si aparece.
      productosCrudos: texto exacto original de los productos.
      carrito: mapea cantidades exactas a estas llaves válidas: [${llavesCatalogo}].
     
@@ -156,7 +168,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
              type: "OBJECT",
              properties: {
                clienteNombre: { type: "STRING" }, clienteCedula: { type: "STRING" }, clienteTelefono: { type: "STRING" },
-               courier: { type: "STRING" }, pagoEnvio: { type: "STRING" }, direccion: { type: "STRING" }, montoPago: { type: "STRING" }, moneda: { type: "STRING" }, referencia: { type: "STRING" }, asesora: { type: "STRING" }, productosCrudos: { type: "STRING" }, tasa: { type: "STRING" }, esMercadoLibre: { type: "BOOLEAN" },
+               courier: { type: "STRING" }, pagoEnvio: { type: "STRING" }, direccion: { type: "STRING" }, montoPago: { type: "STRING" }, moneda: { type: "STRING" }, referencia: { type: "STRING" }, asesora: { type: "STRING" }, productosCrudos: { type: "STRING" }, tasa: { type: "STRING" }, esMercadoLibre: { type: "BOOLEAN" }, tipoDespacho: { type: "STRING" },
                carrito: { type: "ARRAY", items: { type: "OBJECT", properties: { llave: { type: "STRING" }, cantidad: { type: "INTEGER" } } } }
              }
            }
@@ -190,6 +202,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
           moneda: Object.keys(nuevoCarritoObj).length > 0 && monedaSanitizada !== 'ZELLE' ? 'USD' : monedaSanitizada,
           esMercadoLibre: result.esMercadoLibre || false,
           pagoEnvio: result.pagoEnvio || 'COD',
+          tipoDespacho: result.tipoDespacho && ['Nacional', 'Tienda', 'Delivery'].includes(result.tipoDespacho) ? result.tipoDespacho : prev.tipoDespacho,
           productos: txtFormat || prev.productos,
           carritoObj: Object.keys(nuevoCarritoObj).length > 0 ? nuevoCarritoObj : prev.carritoObj
         }));
@@ -211,7 +224,14 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
  const cargarPedidoParaEditar = (pedido) => {
    setFormData({
-     clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier, pagoEnvio: pedido.pagoEnvio || 'COD', origenPedido: pedido.origenPedido || '', direccion: pedido.direccion,
+     tipoDespacho: pedido.tipoDespacho || 'Nacional',
+     costoEnvio: pedido.costoEnvio?.toString() || '0',
+     retiroNombre: pedido.retiroNombre || '',
+     retiroCedula: pedido.retiroCedula || '',
+     retiroTelefono: pedido.retiroTelefono || '',
+     deliveryFecha: pedido.deliveryFecha || getLocalToday(),
+     deliveryHora: pedido.deliveryHora || '',
+     clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier || '', pagoEnvio: pedido.pagoEnvio || 'COD', origenPedido: pedido.origenPedido || '', direccion: pedido.direccion,
      productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD',
      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: '',
      numeroControlML: pedido.numeroControlML || '', notaVentas: pedido.notaVentas || '' 
@@ -284,9 +304,17 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    e.preventDefault();
    if (!tasaActualizadaHoy && !editId) return dialogs.alert("NO puedes registrar ventas nuevas porque la Tasa del Día no ha sido actualizada hoy por Administración.", "Tasa Desactualizada");
    if (!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) return dialogs.alert("Debes seleccionar productos del Catálogo Visual.", "Carrito Vacío");
-   if (!formData.courier) return dialogs.alert("Por favor selecciona la Empresa de Envío.", "Falta Agencia");
    if (!formData.origenPedido) return dialogs.alert("Por favor selecciona de dónde viene el pedido.", "Falta Origen");
   
+   // Validaciones según el tipo de despacho
+   if (formData.tipoDespacho === 'Nacional' && !formData.courier) return dialogs.alert("Por favor selecciona la Empresa de Envío.", "Falta Agencia");
+   if (formData.tipoDespacho === 'Tienda') {
+      if (!formData.retiroNombre || !formData.retiroCedula || !formData.retiroTelefono) return dialogs.alert("Debes completar los datos de la persona que retira en tienda.", "Datos Incompletos");
+   }
+   if (formData.tipoDespacho === 'Delivery') {
+      if (!formData.deliveryFecha || !formData.deliveryHora) return dialogs.alert("Debes completar la fecha y hora requerida para el Delivery.", "Datos Incompletos");
+   }
+
    if (!formData.tasa || parseFloat(formData.tasa) <= 0) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
    if (!formData.moneda) return dialogs.alert("Por favor selecciona la moneda de pago.", "Falta Moneda");
   
@@ -332,6 +360,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    let montoNum = parseFloat(formData.montoPago) || 0;
    const tasa = parseFloat(formData.tasa) || 1;
    let descuento = parseFloat(formData.descuentoPorcentaje) || 0;
+   let costoEnvioFinal = parseFloat(formData.costoEnvio) || 0;
+
    let pagoExtUsd = 0;
    if (editId && pedidoDevuelto?.faltanteUsd > 0 && formData.pagoAdicional) {
      let extra = parseFloat(formData.pagoAdicional) || 0;
@@ -359,7 +389,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      if (!finalProductosText.includes("Concentrado (Unidad)")) finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Auto]`;
    }
    
-   // LÓGICA DE FECHAS (Incluye validación viernes > 12:30pm)
+   // LÓGICA DE FECHAS (Cortes de Despacho)
    const getVeneziaTime = () => {
      const now = new Date();
      return new Date(now.toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -369,46 +399,85 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    const minutos = targetDate.getMinutes();
    const currentDay = targetDate.getDay(); 
 
-   const isPastCutoff = hora > 12 || (hora === 12 && minutos >= 30);
-   let daysToAdd = 0;
+   let fechaDespachoObj = new Date(targetDate);
+   let outDeliveryFecha = formData.deliveryFecha;
 
-   if (currentDay === 5 && isPastCutoff) {
-     daysToAdd = 3; 
-   } else if (currentDay === 6) {
-     daysToAdd = 2; 
-   } else if (currentDay === 0) {
-     daysToAdd = 1; 
-   } else if (isPastCutoff) {
-     daysToAdd = 1; 
+   if (formData.tipoDespacho === 'Nacional') {
+      const isPastCutoff = hora > 12 || (hora === 12 && minutos >= 30);
+      let daysToAdd = 0;
+      if (currentDay === 5 && isPastCutoff) daysToAdd = 3; 
+      else if (currentDay === 6) daysToAdd = 2; 
+      else if (currentDay === 0) daysToAdd = 1; 
+      else if (isPastCutoff) daysToAdd = 1; 
+      fechaDespachoObj.setDate(fechaDespachoObj.getDate() + daysToAdd);
+   } else {
+      // Regla: Toda entrega en tienda o delivery agendada para sábado/domingo o después de las 5PM pasa al Lunes.
+      let baseDate = formData.tipoDespacho === 'Delivery' && formData.deliveryFecha ? new Date(formData.deliveryFecha + "T12:00:00") : new Date(targetDate);
+      let moveToMonday = false;
+      
+      if (baseDate.getDay() === 6 || baseDate.getDay() === 0) moveToMonday = true;
+      if (hora >= 17) moveToMonday = true;
+
+      if (moveToMonday) {
+          let d = new Date(targetDate);
+          let day = d.getDay();
+          let daysToMonday = day === 0 ? 1 : 8 - day;
+          d.setDate(d.getDate() + daysToMonday);
+          fechaDespachoObj = d;
+          
+          if (formData.tipoDespacho === 'Delivery') {
+              const ndd = String(fechaDespachoObj.getDate()).padStart(2, '0');
+              const nmm = String(fechaDespachoObj.getMonth() + 1).padStart(2, '0');
+              const nyyyy = fechaDespachoObj.getFullYear();
+              outDeliveryFecha = `${nyyyy}-${nmm}-${ndd}`;
+          }
+      } else {
+          fechaDespachoObj = baseDate;
+      }
    }
 
-   targetDate.setDate(targetDate.getDate() + daysToAdd);
-  
-   const dd = String(targetDate.getDate()).padStart(2, '0');
-   const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
-   const yyyy = targetDate.getFullYear();
+   const dd = String(fechaDespachoObj.getDate()).padStart(2, '0');
+   const mm = String(fechaDespachoObj.getMonth() + 1).padStart(2, '0');
+   const yyyy = fechaDespachoObj.getFullYear();
    const fechaDespachoStr = `${dd}/${mm}/${yyyy}`;
 
    try {
+     let dataAEnviar = {
+        ...formData,
+        deliveryFecha: outDeliveryFecha,
+        costoEnvio: costoEnvioFinal,
+        productos: finalProductosText,
+        carritoObj: finalCarrito,
+        monto: montoNum,
+        montoUsd: calculo.usd,
+        montoVes: calculo.ves,
+        tasaAplicada: tasa,
+        status: finalStatus,
+        descuentoPorcentaje: descuento
+     };
+
      if (editId) {
-       let updateData = {
-         ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, motivoRechazo: '', faltanteUsd: 0, descuentoPorcentaje: descuento
-       };
-       if (globalDiscountPercent > 0) updateData.descuentoGlobalAplicado = globalDiscountPercent;
+       dataAEnviar.motivoRechazo = '';
+       dataAEnviar.faltanteUsd = 0;
+       if (globalDiscountPercent > 0) dataAEnviar.descuentoGlobalAplicado = globalDiscountPercent;
        if (formData.refAdicional) {
-          updateData.referencia = `${formData.referencia} | EXTRA: ${formData.refAdicional}`;
-          updateData.pagoAdicionalUsd = pagoExtUsd;
+          dataAEnviar.referencia = `${formData.referencia} | EXTRA: ${formData.refAdicional}`;
+          dataAEnviar.pagoAdicionalUsd = pagoExtUsd;
        }
-       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', editId), updateData);
+       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', editId), dataAEnviar);
        loggear('PEDIDO_CORREGIDO', `Corregido pedido de ${formData.clienteNombre}`);
        dialogs.alert(`Actualizado con éxito.`, "Aviso");
      } else {
        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), {
-         ...formData, productos: finalProductosText, carritoObj: finalCarrito, monto: montoNum, montoUsd: calculo.usd, montoVes: calculo.ves, tasaAplicada: tasa, status: finalStatus, auditado: false, fechaCreacion: Date.now(), fechaDespacho: fechaDespachoStr, esPublico: false, descuentoPorcentaje: descuento,
+         ...dataAEnviar,
+         auditado: false,
+         fechaCreacion: Date.now(),
+         fechaDespacho: fechaDespachoStr,
+         esPublico: false,
          descuentoGlobalAplicado: globalDiscountPercent
        });
-       loggear('PEDIDO_CREADO', `Venta: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)})`);
-       dialogs.alert(finalStatus === 'Pendiente' ? `Venta registrada. Despacho pautado: ${fechaDespachoStr}` : `Guardado en Lista de Espera.`, "Aviso");
+       loggear('PEDIDO_CREADO', `Venta [${formData.tipoDespacho}]: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)})`);
+       dialogs.alert(finalStatus === 'Pendiente' ? `Venta registrada. Despacho/Entrega pautada: ${fechaDespachoStr}` : `Guardado en Lista de Espera.`, "Aviso");
      }
     
      cancelarEdicion();
@@ -519,6 +588,65 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                 <option value="RECOMPRA">RECOMPRA</option>
               </select>
             </div>
+
+            {/* SECCIÓN DE TIPO DE DESPACHO */}
+            <div className="flex flex-col md:col-span-2 mt-2 pt-4 border-t border-slate-100 dark:border-slate-700">
+               <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-2 ml-2 transition-colors">Tipo de Despacho</label>
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                 {['Nacional', 'Tienda', 'Delivery'].map(t => (
+                   <button type="button" key={t} onClick={() => setFormData({...formData, tipoDespacho: t})}
+                     className={`p-4 rounded-xl font-black uppercase tracking-wider text-sm border-2 transition-all flex items-center justify-center gap-2 ${formData.tipoDespacho === t ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300 shadow-sm' : 'border-slate-200 text-slate-400 dark:border-slate-700 hover:border-sky-200 dark:hover:border-sky-800'}`}>
+                     {t === 'Nacional' ? <Truck size={18}/> : t === 'Tienda' ? <StoreIcon size={18}/> : <Bike size={18}/>}
+                     {t === 'Nacional' ? 'Envío Nacional' : t === 'Tienda' ? 'Entrega en Tienda' : 'Delivery'}
+                   </button>
+                 ))}
+               </div>
+            </div>
+
+            {/* CAMPOS CONDICIONALES SEGÚN DESPACHO */}
+            {formData.tipoDespacho === 'Nacional' && (
+              <>
+                <div className="flex flex-col">
+                  <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Empresa de Envío</label>
+                  <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} className={`p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold cursor-pointer shadow-sm ${!formData.courier ? 'border-amber-300 text-slate-400' : 'border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200'}`}>
+                    <option value="" disabled>Seleccionar...</option> <option value="ZOOM">ZOOM</option> <option value="MRW">MRW</option> <option value="Tealca">Tealca</option> <option value="Domesa">Domesa</option>
+                  </select>
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Modalidad de Envío</label>
+                  <select name="pagoEnvio" value={formData.pagoEnvio} onChange={(e)=>setFormData({...formData, pagoEnvio: e.target.value})} className="p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold cursor-pointer shadow-sm border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+                    <option value="COD">Cobro en Destino (COD)</option>
+                    <option value="PAGADO">Envío Pagado</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            {formData.tipoDespacho === 'Tienda' && (
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-inner">
+                 <h4 className="md:col-span-3 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1"><StoreIcon size={14}/> Datos de quien retira</h4>
+                 <Input label="Nombre y Apellido" value={formData.retiroNombre} onChange={e=>setFormData({...formData, retiroNombre: e.target.value})} placeholder="Ej: Maria Perez" />
+                 <Input label="Cédula" value={formData.retiroCedula} onChange={e=>setFormData({...formData, retiroCedula: e.target.value})} placeholder="Ej: 12345678" />
+                 <Input label="Teléfono" value={formData.retiroTelefono} onChange={e=>setFormData({...formData, retiroTelefono: e.target.value})} placeholder="Ej: 04141234567" />
+              </div>
+            )}
+
+            {formData.tipoDespacho === 'Delivery' && (
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-inner">
+                 <h4 className="md:col-span-2 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1"><Bike size={14}/> Programación de Delivery</h4>
+                 <Input label="Fecha Programada" type="date" value={formData.deliveryFecha} onChange={e=>setFormData({...formData, deliveryFecha: e.target.value})} />
+                 <Input label="Hora Requerida" type="time" value={formData.deliveryHora} onChange={e=>setFormData({...formData, deliveryHora: e.target.value})} />
+              </div>
+            )}
+
+            {/* Campo Costo Envío si aplica */}
+            {((formData.tipoDespacho === 'Nacional' && formData.pagoEnvio === 'PAGADO') || formData.tipoDespacho === 'Delivery') && (
+              <div className="md:col-span-2 bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-xl border border-emerald-200 dark:border-emerald-800">
+                 <Input label="Costo del Despacho / Delivery ($)" type="number" step="0.01" value={formData.costoEnvio} onChange={e=>setFormData({...formData, costoEnvio: e.target.value})} placeholder="Ej: 5.00" />
+                 <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-1.5 ml-2 uppercase tracking-wide">Este monto se sumará automáticamente al Total a Pagar de la orden.</p>
+              </div>
+            )}
+
             <Input label="Nombre del Cliente" name="clienteNombre" value={formData.clienteNombre} onChange={(e)=>setFormData({...formData, clienteNombre: e.target.value})} required />
             <Input label="Cédula/RIF" name="clienteCedula" value={formData.clienteCedula} onChange={(e)=>setFormData({...formData, clienteCedula: e.target.value})} required />
            
@@ -527,27 +655,15 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                 <p className="text-[10px] text-slate-400 mt-1 ml-2 font-bold italic">NOTA: Ingresa el número sin el 0 inicial (Ej. 4141234567). El sistema le agregará el +58 automáticamente.</p>
             </div>
            
-            <div className="flex flex-col">
-              <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Empresa de Envío</label>
-              <select name="courier" value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} required className={`p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold cursor-pointer shadow-sm ${!formData.courier ? 'border-amber-300 text-slate-400' : 'border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200'}`}>
-                <option value="" disabled>Seleccionar...</option> <option value="ZOOM">ZOOM</option> <option value="MRW">MRW</option> <option value="Tealca">Tealca</option> <option value="Domesa">Domesa</option>
-              </select>
-            </div>
-            <div className="flex flex-col">
-              <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Modalidad de Envío</label>
-              <select name="pagoEnvio" value={formData.pagoEnvio} onChange={(e)=>setFormData({...formData, pagoEnvio: e.target.value})} className="p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold cursor-pointer shadow-sm border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200">
-                <option value="COD">Cobro en Destino (COD)</option>
-                <option value="PAGADO">Envío Pagado</option>
-              </select>
-            </div>
-           
             <div className="md:col-span-2 flex flex-wrap items-center gap-6 mt-2 mb-2">
-              <div className="flex items-center gap-3">
-                <input type="checkbox" id="ml-check" checked={formData.esMercadoLibre} onChange={(e) => setFormData({...formData, esMercadoLibre: e.target.checked})} className="w-5 h-5 accent-sky-600 cursor-pointer rounded" />
-                <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Envío MercadoLibre</label>
-              </div>
+              {formData.tipoDespacho === 'Nacional' && (
+                 <div className="flex items-center gap-3">
+                   <input type="checkbox" id="ml-check" checked={formData.esMercadoLibre} onChange={(e) => setFormData({...formData, esMercadoLibre: e.target.checked})} className="w-5 h-5 accent-sky-600 cursor-pointer rounded" />
+                   <label htmlFor="ml-check" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer uppercase tracking-wider">Envío MercadoLibre</label>
+                 </div>
+              )}
              
-              {formData.esMercadoLibre && (
+              {formData.esMercadoLibre && formData.tipoDespacho === 'Nacional' && (
                 <div className="animate-in fade-in slide-in-from-top-2 ml-8 mb-2 flex flex-col md:flex-row gap-4 w-full">
                    <div className="w-full md:w-1/2">
                      <Input label="N° de Control ML (Opcional)" value={formData.numeroControlML || ''} onChange={(e) => setFormData({...formData, numeroControlML: e.target.value})} placeholder="Ej: 102938475" />
@@ -578,9 +694,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                 <label htmlFor="regalo-check" className="text-sm font-bold text-purple-700 dark:text-purple-400 cursor-pointer uppercase tracking-wider flex items-center gap-1"><Gift size={16}/> Es Regalo / Obsequio VIP</label>
               </div>
             </div>
-            
+           
             <div className="md:col-span-2">
-              <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors block">Dirección de Envío Completa</label>
+              <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors block">Dirección de Envío / Destino</label>
               <textarea name="direccion" value={formData.direccion} onChange={(e)=>setFormData({...formData, direccion: e.target.value})} required rows={2} className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm"></textarea>
             </div>
 
@@ -726,16 +842,42 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                    </div>
                   
                    <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1.5 flex flex-wrap items-center gap-2">
-                      {p.courier}
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/50 dark:text-orange-400'}`}>
-                         {p.pagoEnvio === 'PAGADO' ? 'PAGADO' : 'COD'}
-                      </span>
+                      {p.tipoDespacho === 'Delivery' ? (
+                        <span className="bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/50 dark:text-fuchsia-400 px-1.5 py-0.5 rounded text-[9px] border border-fuchsia-200 dark:border-fuchsia-800 flex items-center gap-1">
+                           <Bike size={10}/> DELIVERY
+                        </span>
+                      ) : p.tipoDespacho === 'Tienda' ? (
+                        <span className="bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-400 px-1.5 py-0.5 rounded text-[9px] border border-purple-200 dark:border-purple-800 flex items-center gap-1">
+                           <StoreIcon size={10}/> TIENDA
+                        </span>
+                      ) : (
+                        <>
+                           {p.courier}
+                           <span className={`px-1.5 py-0.5 rounded text-[9px] border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/50 dark:text-orange-400'}`}>
+                              {p.pagoEnvio === 'PAGADO' ? 'PAGADO' : 'COD'}
+                           </span>
+                        </>
+                      )}
+                      
                       {p.origenPedido && (
                          <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-1.5 py-0.5 rounded text-[9px] border border-indigo-200 dark:border-indigo-800">
                             {p.origenPedido}
                          </span>
                       )}
                    </div>
+
+                   {/* Resumen especial si es Tienda/Delivery */}
+                   {p.tipoDespacho === 'Tienda' && p.retiroNombre && (
+                      <div className="text-[10px] font-bold text-purple-700 dark:text-purple-400 mt-1 flex items-center gap-1 bg-purple-50 dark:bg-purple-900/20 p-1.5 rounded w-max border border-purple-100 dark:border-purple-800/50">
+                         Retira: {p.retiroNombre} - {p.retiroCedula}
+                      </div>
+                   )}
+                   {p.tipoDespacho === 'Delivery' && p.deliveryFecha && (
+                      <div className="text-[10px] font-bold text-fuchsia-700 dark:text-fuchsia-400 mt-1 flex items-center gap-1 bg-fuchsia-50 dark:bg-fuchsia-900/20 p-1.5 rounded w-max border border-fuchsia-100 dark:border-fuchsia-800/50">
+                         Pautado: {p.deliveryFecha} a las {p.deliveryHora}
+                      </div>
+                   )}
+
                    {p.esMercadoLibre && p.numeroControlML && (
                       <div className="text-[11px] font-bold text-yellow-700 dark:text-yellow-500 mt-1 flex items-center gap-1">
                          <Package size={12}/> N° Control ML: {p.numeroControlML}
@@ -809,6 +951,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                       <>
                        <div className="font-black text-slate-800 dark:text-slate-100 text-xl">${(p.montoUsd||0).toFixed(2)}</div>
                        <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
+                       
+                       {p.costoEnvio > 0 && <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-1 uppercase">Incluye Despacho: ${p.costoEnvio}</div>}
+
                        {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
                          <div className="flex flex-col gap-1 mt-2 w-max">
                            {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800/50">Campaña: {p.descuentoGlobalAplicado}%</span>}
@@ -842,7 +987,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                        )}
                        {p.status === 'Despachado' && (
                          <>
-                           <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">Guía: {p.guia}</div>
+                           <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">Guía: {p.guia || '-'}</div>
                            <button onClick={() => enviarWhatsApp(p)} className="bg-[#25D366]/10 text-[#128C7E] dark:text-[#25D366] hover:bg-[#25D366]/20 text-xs font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-1.5 transition-colors w-full lg:w-auto mt-1"><MessageCircle size={16} /> Notificar</button>
                          </>
                        )}
@@ -918,7 +1063,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                     </div>
                   </div>
                   <div className="flex flex-col gap-2 shrink-0">
-                    <button onClick={() => {setFormData({...p, montoPago: p.montoUsd?.toString(), tasa: p.tasaAplicada?.toString() || config.tasaDia}); setEditId(p.id); setVista('nuevo');}} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-emerald-700 flex items-center gap-2 transition-colors shadow-md"><CheckCircle size={14}/> Validar Venta</button>
+                    <button onClick={() => {setFormData({...p, montoPago: p.montoUsd?.toString(), tasa: p.tasaAplicada?.toString() || config.tasaDia, tipoDespacho: 'Nacional'}); setEditId(p.id); setVista('nuevo');}} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-emerald-700 flex items-center gap-2 transition-colors shadow-md"><CheckCircle size={14}/> Validar Venta</button>
                     <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="bg-amber-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-amber-600 flex items-center gap-2 transition-colors shadow-md"><Clock size={14}/> Mover a Espera</button>
                     <button onClick={() => cambiarEstadoPedido(p.id, 'Rechazado')} className="bg-red-50 text-red-600 px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-red-100 flex items-center gap-2 transition-colors"><XCircle size={14}/> Descartar Web</button>
                   </div>

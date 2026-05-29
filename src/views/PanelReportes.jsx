@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users } from 'lucide-react';
+import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users, Truck } from 'lucide-react';
 import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
@@ -26,7 +26,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     );
   }, [pedidos]);
 
-  // --- NUEVA LÓGICA: FILTRAR REPORTES USANDO FECHA DE DESPACHO ---
+  // --- FILTRAR REPORTES USANDO FECHA DE DESPACHO ---
   const parseDateVzla = (dateStr) => {
      if (!dateStr || dateStr === 'Sin Fecha') return 0;
      const parts = dateStr.split('/');
@@ -75,6 +75,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
   const metricas = useMemo(() => {
     let ventasUSD = 0; let ventasVES = 0; let ventasZelle = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
+    let totalBrutoGeneralUsd = 0; let totalCobroEnviosUsd = 0;
 
     pedidosFiltrados.forEach(p => {
       let valorOriginalUsd = 0;
@@ -93,21 +94,29 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       if (p.esRegalo) {
         regalosUSD += valorOriginalUsd;
       } else {
+        const mUsd = p.montoUsd || 0;
+        const costoEnvio = parseFloat(p.costoEnvio) || 0;
+        
+        totalBrutoGeneralUsd += mUsd;
+        totalCobroEnviosUsd += costoEnvio;
+
         if (p.moneda === 'ZELLE') {
-           ventasZelle += (p.montoUsd || 0);
+           ventasZelle += mUsd;
         } else {
-           ventasUSD += (p.montoUsd || 0);
+           ventasUSD += mUsd;
            ventasVES += (p.montoVes || 0);
         }
 
-        if (p.esMercadoLibre) { mlUSD += (p.montoUsd || 0); mlVES += (p.montoVes || 0); }
+        if (p.esMercadoLibre) { mlUSD += mUsd; mlVES += (p.montoVes || 0); }
 
-        const diferencia = valorOriginalUsd - (p.montoUsd || 0);
-        if (diferencia > 0) descuentosUSD += diferencia;
+        const diferenciaReal = (valorOriginalUsd + costoEnvio) - mUsd;
+        if (diferenciaReal > 0) descuentosUSD += diferenciaReal;
       }
     });
 
-    return { ventasUSD, ventasVES, ventasZelle, mlUSD, mlVES, regalosUSD, descuentosUSD };
+    const totalNetoProductosUsd = totalBrutoGeneralUsd - totalCobroEnviosUsd;
+
+    return { ventasUSD, ventasVES, ventasZelle, mlUSD, mlVES, regalosUSD, descuentosUSD, totalBrutoGeneralUsd, totalCobroEnviosUsd, totalNetoProductosUsd };
   }, [pedidosFiltrados, catalogo]);
 
   const ventasPorAsesora = useMemo(() => {
@@ -130,7 +139,9 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              montoUsd: p.montoUsd || 0,
              montoVes: p.montoVes || 0,
              moneda: p.moneda,
-             origen: p.origenPedido || 'Sin Origen'
+             origen: p.origenPedido || 'Sin Origen',
+             costoEnvio: parseFloat(p.costoEnvio) || 0,
+             tipoDespacho: p.tipoDespacho || 'Nacional'
          });
       });
       return Object.values(map).sort((a,b) => (b.totalUsd + b.totalZelle) - (a.totalUsd + a.totalZelle));
@@ -239,15 +250,19 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           .logo { height: 60px; object-fit: contain; }
           h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; text-transform: uppercase; }
           
-          .kpi-container { display: flex; gap: 15px; margin-bottom: 30px; }
+          .kpi-container { display: flex; gap: 15px; margin-bottom: 15px; }
           .kpi-box { flex: 1; background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; }
           .kpi-box.main { background: #0f172a; color: white; border: none; }
+          .kpi-box.envios { background: #ea580c; color: white; border: none; }
+          .kpi-box.neto { background: #059669; color: white; border: none; }
           .kpi-box.zelle { background: #581c87; color: white; border: none; }
           .kpi-box h3 { margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
-          .kpi-box.main h3, .kpi-box.zelle h3 { color: #38bdf8; }
+          .kpi-box.main h3 { color: #94a3b8; }
+          .kpi-box.envios h3 { color: #fed7aa; }
+          .kpi-box.neto h3 { color: #a7f3d0; }
           .kpi-box.zelle h3 { color: #d8b4fe; }
           .kpi-box p { margin: 0; font-size: 20px; font-weight: 900; }
-          .kpi-box.main p, .kpi-box.zelle p { font-size: 26px; }
+          .kpi-box.main p, .kpi-box.neto p { font-size: 26px; }
           
           h2 { font-size: 16px; font-weight: 900; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-top: 40px;}
           table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
@@ -255,6 +270,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
           .products-list { color: #475569; line-height: 1.5; }
           .zelle-tag { background: #f3e8ff; color: #6b21a8; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 9px; }
+          .envio-tag { background: #fff7ed; color: #c2410c; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 9px; display: inline-block; margin-top: 4px; border: 1px solid #ffedd5; }
           
           @media print { body { padding: 0; } .no-print { display: none; } }
         </style>
@@ -273,11 +289,26 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
 
         <div class="kpi-container">
+           <div class="kpi-box main">
+              <h3>Ingreso Bruto Total ($)</h3>
+              <p>$${metricas.totalBrutoGeneralUsd.toFixed(2)}</p>
+           </div>
+           <div class="kpi-box envios">
+              <h3>Total Envíos/Delivery ($)</h3>
+              <p>$${metricas.totalCobroEnviosUsd.toFixed(2)}</p>
+           </div>
+           <div class="kpi-box neto">
+              <h3>Ventas Netas de Prod. ($)</h3>
+              <p>$${metricas.totalNetoProductosUsd.toFixed(2)}</p>
+           </div>
+        </div>
+
+        <div class="kpi-container">
            <div class="kpi-box">
               <h3>Ventas en Bs.</h3>
               <p>Bs. ${metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
            </div>
-           <div class="kpi-box main">
+           <div class="kpi-box">
               <h3>Ventas Efect/Transf ($)</h3>
               <p>$${metricas.ventasUSD.toFixed(2)}</p>
            </div>
@@ -315,7 +346,10 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              <td>${c.telefono}</td>
              <td><span style="background: #eef2ff; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; color: #4338ca;">${c.origen}</span></td>
              <td style="text-align:right; color:#059669;">${isZelle ? '-' : c.montoVes.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-             <td style="text-align:right; font-weight:bold;">$${c.montoUsd.toFixed(2)} ${isZelle ? '<span class="zelle-tag">ZELLE</span>' : ''}</td>
+             <td style="text-align:right; font-weight:bold;">
+                $${c.montoUsd.toFixed(2)} ${isZelle ? '<span class="zelle-tag">ZELLE</span>' : ''}
+                ${c.costoEnvio > 0 ? `<br><span class="envio-tag">Incluye Envío: $${c.costoEnvio.toFixed(2)}</span>` : ''}
+             </td>
           </tr>`;
        });
        html += `</tbody></table>`;
@@ -324,7 +358,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     html += `
         <h2 style="margin-top: 50px;">Resumen de Productos Vendidos</h2>
         <div style="font-size: 10px; color: #64748b; margin-top: -5px; margin-bottom: 10px;">
-           * El "Valor Real ($)" refleja lo que realmente ingresó por ese producto luego de aplicar descuentos si los hubo (No incluye mercancía de regalo).
+           * El "Valor Real ($)" refleja lo que realmente ingresó por ese producto luego de aplicar descuentos si los hubo (No incluye mercancía de regalo ni cobros por envío).
         </div>
         <table>
           <thead>
@@ -368,12 +402,17 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     pedidosFiltrados.forEach(p => {
        const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
        const isZelle = p.moneda === 'ZELLE';
+       const costoEnvio = parseFloat(p.costoEnvio) || 0;
+       
        html += `<tr>
          <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${p.fechaDespacho}</span><br><span style="font-size:10px; font-weight:bold;">Asesora: ${p.asesora}</span></td>
          <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia || 'N/A'}</span><br><span style="font-size:9px; font-weight:bold; color:#4338ca; display:block; margin-top:4px;">${p.origenPedido || 'Sin Origen'}</span></td>
          <td class="products-list">${prodsFormat}</td>
          <td style="text-align:right; font-weight:bold; color:#059669;">${isZelle ? '-' : (p.montoVes || 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-         <td style="text-align:right; font-weight:900; font-size:13px;">$${(p.montoUsd || 0).toFixed(2)} ${isZelle ? '<br><span class="zelle-tag">ZELLE</span>' : ''}</td>
+         <td style="text-align:right; font-weight:900; font-size:13px;">
+            $${(p.montoUsd || 0).toFixed(2)} ${isZelle ? '<br><span class="zelle-tag">ZELLE</span>' : ''}
+            ${costoEnvio > 0 ? `<br><span class="envio-tag">Envío: $${costoEnvio.toFixed(2)}</span>` : ''}
+         </td>
        </tr>`;
     });
 
@@ -398,7 +437,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         
         <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
           <div>
-            <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-2"><CalendarDays className="text-sky-600"/> Período del Reporte</h2>
+            <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><CalendarDays className="text-sky-600"/> Período del Reporte</h2>
             <p className="text-xs font-medium text-slate-500">Las métricas se recalcularán basadas en las fechas de despacho seleccionadas.</p>
           </div>
           
@@ -433,43 +472,71 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         )}
       </div>
 
+      {verDinero && (
+         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-slate-950 relative overflow-hidden">
+               <div className="relative z-10">
+                 <div className="text-[10px] uppercase font-black tracking-widest text-slate-400 mb-1">Total General Bruto ($)</div>
+                 <div className="text-3xl lg:text-4xl font-black">${metricas.totalBrutoGeneralUsd.toFixed(2)}</div>
+               </div>
+               <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+            </div>
+
+            <div className="bg-orange-600 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-orange-800 relative overflow-hidden">
+               <div className="relative z-10">
+                 <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-orange-200 mb-1">Recaudado por Envíos/Delivery ($)</div>
+                 <div className="text-3xl lg:text-4xl font-black">${metricas.totalCobroEnviosUsd.toFixed(2)}</div>
+               </div>
+               <Truck size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+            </div>
+            
+            <div className="bg-emerald-600 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-emerald-800 relative overflow-hidden">
+               <div className="relative z-10">
+                 <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-emerald-200 mb-1">Ventas Netas (Solo Productos) ($)</div>
+                 <div className="text-3xl lg:text-4xl font-black">${metricas.totalNetoProductosUsd.toFixed(2)}</div>
+               </div>
+               <TrendingUp size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+            </div>
+         </div>
+      )}
+
       {(verDinero || verTotalInventario) && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
            {verDinero && (
              <>
-               <div className="bg-[#003366] text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-sky-600 relative overflow-hidden">
+               <div className="bg-[#003366] text-white p-6 rounded-[2rem] shadow-md flex flex-col justify-center border-b-4 border-sky-600 relative overflow-hidden">
                   <div className="relative z-10">
-                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Divisas / Transf ($)</div>
-                    <div className="text-3xl lg:text-4xl font-black">${metricas.ventasUSD.toFixed(2)}</div>
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Efectivo/Transf ($)</div>
+                    <div className="text-2xl lg:text-3xl font-black">${metricas.ventasUSD.toFixed(2)}</div>
                   </div>
                   <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
                </div>
 
-               <div className="bg-purple-800 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-purple-950 relative overflow-hidden">
+               <div className="bg-purple-800 text-white p-6 rounded-[2rem] shadow-md flex flex-col justify-center border-b-4 border-purple-950 relative overflow-hidden">
                   <div className="relative z-10">
-                    <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-purple-200 mb-1">Ventas ZELLE ($)</div>
-                    <div className="text-3xl lg:text-4xl font-black">${metricas.ventasZelle.toFixed(2)}</div>
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-purple-200 mb-1">Pagos ZELLE ($)</div>
+                    <div className="text-2xl lg:text-3xl font-black">${metricas.ventasZelle.toFixed(2)}</div>
                   </div>
                   <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
                </div>
                
-               <div className="bg-emerald-600 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-emerald-800 relative overflow-hidden">
+               <div className="bg-emerald-50 text-emerald-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-emerald-200 relative overflow-hidden">
                   <div className="relative z-10">
-                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Ventas Netas (Bs)</div>
-                    <div className="text-2xl lg:text-3xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Pagos en Bs</div>
+                    <div className="text-xl lg:text-2xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                   </div>
-                  <TrendingUp size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+                  <TrendingUp size={80} className="absolute -right-4 -bottom-4 opacity-5"/>
                </div>
              </>
            )}
 
            {verTotalInventario && (
-             <div className="bg-slate-800 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-slate-950 relative overflow-hidden">
+             <div className="bg-slate-100 text-slate-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-slate-300 relative overflow-hidden">
                 <div className="relative z-10">
-                  <div className="text-[10px] uppercase font-black tracking-widest text-slate-300 mb-1">Inventario Físico ($)</div>
-                  <div className="text-3xl lg:text-4xl font-black">${totalValInventario.toFixed(2)}</div>
+                  <div className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">Inventario Físico ($)</div>
+                  <div className="text-2xl lg:text-3xl font-black">${totalValInventario.toFixed(2)}</div>
                 </div>
-                <Archive size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+                <Archive size={80} className="absolute -right-4 -bottom-4 opacity-5"/>
              </div>
            )}
         </div>
@@ -561,11 +628,18 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                                <td className="p-4 text-right font-bold text-emerald-600 dark:text-emerald-400">
                                   {c.moneda === 'ZELLE' ? '-' : `Bs. ${c.montoVes.toLocaleString('es-VE', {minimumFractionDigits:2})}`}
                                </td>
-                               <td className="p-4 text-right">
-                                  <span className={`font-black text-base ${c.moneda==='ZELLE' ? 'text-purple-600 dark:text-purple-400' : 'text-slate-800 dark:text-slate-200'}`}>
-                                     ${c.montoUsd.toFixed(2)}
-                                  </span>
-                                  {c.moneda === 'ZELLE' && <span className="ml-2 text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/50 px-1.5 py-0.5 rounded font-black border border-purple-200 dark:border-purple-800">ZELLE</span>}
+                               <td className="p-4 text-right flex flex-col items-end gap-1">
+                                  <div>
+                                     <span className={`font-black text-base ${c.moneda==='ZELLE' ? 'text-purple-600 dark:text-purple-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                                        ${c.montoUsd.toFixed(2)}
+                                     </span>
+                                     {c.moneda === 'ZELLE' && <span className="ml-2 text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/50 px-1.5 py-0.5 rounded font-black border border-purple-200 dark:border-purple-800">ZELLE</span>}
+                                  </div>
+                                  {c.costoEnvio > 0 && (
+                                     <div className="text-[9px] font-bold text-orange-600 dark:text-orange-400 uppercase tracking-widest bg-orange-50 dark:bg-orange-900/30 px-2 py-0.5 rounded border border-orange-200 dark:border-orange-800/50 w-max">
+                                        Incluye Envío: ${c.costoEnvio.toFixed(2)}
+                                     </div>
+                                  )}
                                </td>
                             </tr>
                          ))}

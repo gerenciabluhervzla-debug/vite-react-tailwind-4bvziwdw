@@ -1,83 +1,113 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Truck, MapPin, Phone, User, Package, CalendarDays, Clock } from 'lucide-react';
+import { BRAND_LOGO } from '../../config/constants';
 
-export default function VistaImpresion({ pedidos }) { 
-  
-  // 1. Calculamos la misma numeración diaria que en el panel
-  const numeracionDiaria = useMemo(() => {
-    const map = {};
-    const agrupados = {};
-    pedidos.forEach(p => {
-       const fecha = p.fechaDespacho || 'Sin Fecha';
-       if (!agrupados[fecha]) agrupados[fecha] = [];
-       agrupados[fecha].push(p);
-    });
-    Object.keys(agrupados).forEach(fecha => {
-       agrupados[fecha].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
-       agrupados[fecha].forEach((p, index) => { map[p.id] = index + 1; });
-    });
-    return map;
-  }, [pedidos]);
+export default function VistaImpresion({ pedidos }) {
+  const [pedidosImprimir, setPedidosImprimir] = useState([]);
 
-  // 2. Ordenamos los pedidos de forma ascendente (1, 2, 3...)
-  const pedidosOrdenados = useMemo(() => {
-     return [...pedidos].sort((a, b) => {
-        const numA = numeracionDiaria[a.id] || 999999;
-        const numB = numeracionDiaria[b.id] || 999999;
-        return numA - numB;
-     });
-  }, [pedidos, numeracionDiaria]);
+  useEffect(() => {
+    const handlePrint = (e) => {
+      const data = e.detail;
+      setPedidosImprimir(Array.isArray(data) ? data : [data]);
+      setTimeout(() => {
+        window.print();
+        setPedidosImprimir([]);
+      }, 500);
+    };
 
-  if (pedidos.length === 0) {
-    return (
-      <div className="hidden print:block p-8 text-center text-xl font-bold italic text-slate-400">
-        No hay pedidos listos y validados para imprimir guías de despacho.
-      </div>
-    );
-  }
+    window.addEventListener('print-ticket', handlePrint);
+    return () => window.removeEventListener('print-ticket', handlePrint);
+  }, []);
+
+  if (pedidosImprimir.length === 0) return null;
 
   return (
-    <div className="hidden print:block w-full bg-white text-black p-2">
-      <h1 className="text-xl font-black text-center mb-4 tracking-tight border-b-2 border-black pb-2">
-        HOJA DE DESPACHO BLUHER - <span className="text-base font-medium">FECHA DE CORTE: {new Date().toLocaleDateString('es-VE')}</span>
-      </h1>
-      
-      <div className="grid grid-cols-2 gap-x-6 gap-y-4 print:overflow-visible pl-2 pt-2">
-        {pedidosOrdenados.map((p) => (
-          <div key={p.id} className="border-2 border-slate-900 p-3 rounded-xl break-inside-avoid shadow-none relative mb-2 page-break-inside-avoid">
-            
-            {/* Círculo con el número identificador del pedido */}
-            <div className="absolute -top-4 -left-4 bg-black text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white print:border-white z-10 text-sm">
-              {numeracionDiaria[p.id]}
-            </div>
-
-            {p.esMercadoLibre && <div className="absolute top-0 right-0 bg-black text-white font-bold px-2 py-0.5 rounded-bl-lg rounded-tr-md text-[10px] uppercase tracking-widest">MERCADOLIBRE</div>}
-            
-            <div className="flex justify-between items-center border-b border-slate-300 pb-2 mb-2 mt-1 ml-2">
-              <div className="flex items-center gap-2">
-                 <span className="font-black text-lg uppercase tracking-widest">{p.courier || 'ENVÍO'}</span>
-                 <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-white text-black border-black'}`}>
-                   {p.pagoEnvio === 'PAGADO' ? 'PAGADO' : 'COBRO EN DESTINO'}
-                 </span>
-                 {p.moneda === 'ZELLE' && (
-                   <span className="text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest border bg-purple-100 text-purple-800 border-purple-300">ZELLE</span>
-                 )}
-              </div>
-              <span className="text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-300">Salida: {p.fechaDespacho}</span>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <p><span className="font-bold text-slate-600">DESTINATARIO:</span> <span className="font-black text-sm ml-1">{p.clienteNombre?.toUpperCase()}</span></p>
-              <p><span className="font-bold text-slate-600">C.I / RIF:</span> <span className="font-bold ml-1">{p.clienteCedula}</span></p>
-              <p><span className="font-bold text-slate-600">TELÉFONO:</span> <span className="font-bold ml-1">{p.clienteTelefono}</span></p>
-              <div className="mt-2"><span className="font-bold text-slate-600 block mb-0.5">DIRECCIÓN DE ENTREGA:</span></div>
-              <p className="pl-2 border-l-2 border-slate-300 leading-tight font-bold bg-slate-50 p-1 rounded-r">{p.direccion}</p>
-              <div className="mt-2 border-t border-dashed border-slate-300 pt-2"><span className="font-bold text-slate-600 block mb-1">CONTENIDO DEL PAQUETE:</span> 
-                 <div className="font-bold whitespace-pre-wrap leading-tight text-[11px]">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div>
-              </div>
+    <div className="hidden print:block fixed inset-0 bg-white z-[9999] overflow-visible">
+      {pedidosImprimir.map((pedido, index) => (
+        <div key={pedido.id} className={`w-full max-w-[4in] mx-auto bg-white text-black p-6 ${index > 0 ? 'break-before-page' : ''}`}>
+          
+          <div className="flex flex-col items-center border-b-2 border-black pb-4 mb-4">
+            <img src={BRAND_LOGO} alt="Bluher" className="h-16 mb-2 grayscale" />
+            <h1 className="text-xl font-black tracking-widest uppercase text-center">Etiqueta de Despacho</h1>
+            <div className="text-sm font-bold mt-1 bg-black text-white px-3 py-1 rounded-full uppercase">
+               {pedido.tipoEntrega || 'Nacional'}
             </div>
           </div>
-        ))}
-      </div>
+
+          <div className="space-y-4">
+            <div>
+              <div className="text-[10px] font-black uppercase text-gray-500 mb-1 flex items-center gap-1"><User size={12}/> Destinatario</div>
+              <div className="text-lg font-black leading-tight uppercase">{pedido.clienteNombre}</div>
+              <div className="text-sm font-bold text-gray-700 mt-1">C.I / RIF: {pedido.clienteCedula || 'N/A'}</div>
+            </div>
+
+            <div>
+              <div className="text-[10px] font-black uppercase text-gray-500 mb-1 flex items-center gap-1"><Phone size={12}/> Teléfono</div>
+              <div className="text-lg font-bold">{pedido.clienteTelefono || 'Sin teléfono registrado'}</div>
+            </div>
+
+            {pedido.tipoEntrega !== 'Retiro en Tienda' && (
+               <div>
+                 <div className="text-[10px] font-black uppercase text-gray-500 mb-1 flex items-center gap-1"><MapPin size={12}/> Dirección de Entrega</div>
+                 <div className="text-sm font-bold uppercase leading-snug border-l-4 border-black pl-3 py-1">
+                   {pedido.direccion}
+                 </div>
+               </div>
+            )}
+
+            {pedido.tipoEntrega === 'Nacional' && (
+               <div className="grid grid-cols-2 gap-4 bg-gray-100 p-3 rounded-xl border border-gray-300">
+                 <div>
+                   <div className="text-[10px] font-black uppercase text-gray-500">Agencia</div>
+                   <div className="text-base font-black uppercase">{pedido.courier}</div>
+                 </div>
+                 <div>
+                   <div className="text-[10px] font-black uppercase text-gray-500">Modalidad</div>
+                   <div className="text-base font-black uppercase">{pedido.pagoEnvio === 'PAGADO' ? 'PAGADO' : 'C.O.D'}</div>
+                 </div>
+               </div>
+            )}
+
+            {pedido.tipoEntrega === 'Delivery' && (
+               <div className="grid grid-cols-2 gap-4 bg-gray-100 p-3 rounded-xl border border-gray-300">
+                 <div>
+                   <div className="text-[10px] font-black uppercase text-gray-500 flex items-center gap-1"><CalendarDays size={10}/> Fecha Solicitada</div>
+                   <div className="text-sm font-black">{pedido.fechaDelivery || 'Hoy'}</div>
+                 </div>
+                 <div>
+                   <div className="text-[10px] font-black uppercase text-gray-500 flex items-center gap-1"><Clock size={10}/> Hora / Modalidad</div>
+                   <div className="text-sm font-black">{pedido.horaDelivery || 'Cualquier hora'} - {pedido.pagoEnvio === 'PAGADO' ? 'PAG.' : 'COD'}</div>
+                 </div>
+               </div>
+            )}
+
+            {pedido.tipoEntrega === 'Retiro en Tienda' && (
+               <div className="bg-gray-100 p-3 rounded-xl border border-gray-300">
+                 <div className="text-[10px] font-black uppercase text-gray-500 mb-1 flex items-center gap-1"><User size={12}/> Autorizado para Retirar</div>
+                 <div className="text-base font-black uppercase">{pedido.personaRetiroNombre}</div>
+                 <div className="text-xs font-bold mt-1">C.I: {pedido.personaRetiroCedula} | Tlf: {pedido.personaRetiroTelefono}</div>
+               </div>
+            )}
+
+            <div className="pt-4 border-t-2 border-dashed border-gray-300">
+              <div className="text-[10px] font-black uppercase text-gray-500 mb-2 flex items-center gap-1"><Package size={12}/> Contenido del Paquete</div>
+              <ul className="text-sm font-bold uppercase space-y-1">
+                 {pedido.carritoObj && Object.entries(pedido.carritoObj).map(([key, qty]) => (
+                    <li key={key} className="flex gap-2">
+                       <span className="shrink-0 w-6 text-center bg-black text-white rounded-sm">{qty}x</span> 
+                       <span>{key.replace('|', ' ')}</span>
+                    </li>
+                 ))}
+                 {!pedido.carritoObj && <li>Verificar sistema para detalle</li>}
+              </ul>
+            </div>
+
+            <div className="pt-4 text-center text-[10px] text-gray-500 font-bold">
+               Orden #{pedido.id.slice(-6).toUpperCase()} • Generado el {new Date().toLocaleDateString('es-VE')}
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
-  ); 
+  );
 }

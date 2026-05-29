@@ -5,7 +5,7 @@ import SubPanelStock from './SubPanelStock';
 import SubPanelMovimientos from './SubPanelMovimientos';
 import SubPanelCatalogo from './SubPanelCatalogo';
 import SubPanelAuditoria from './SubPanelAuditoria';
-import SubPanelHistorial from './SubPanelHistorial'; // <-- NUEVO COMPONENTE
+import SubPanelHistorial from './SubPanelHistorial';
 
 export default function PanelInventario({ stock, notas, catalogo, movimientos, pedidos = [], db, appId, loggear, perfil, dialogs }) {
   const rol = perfil?.role;
@@ -35,7 +35,7 @@ export default function PanelInventario({ stock, notas, catalogo, movimientos, p
       </div>
 
       {subTab === 'stock' && <SubPanelStock lista={listaStock} notas={notas} stock={stock} movimientos={movimientos} pedidos={pedidos} db={db} appId={appId} puedeEditar={puedeEditar} loggear={loggear} dialogs={dialogs} />}
-      {subTab === 'historial' && <SubPanelHistorial lista={listaStock} movimientos={movimientos} pedidos={pedidos} db={db} appId={appId} loggear={loggear} dialogs={dialogs} puedeEditar={puedeEditar} />}
+      {subTab === 'historial' && <SubPanelHistorial lista={listaStock} stock={stock} movimientos={movimientos} pedidos={pedidos} db={db} appId={appId} loggear={loggear} dialogs={dialogs} puedeEditar={puedeEditar} />}
       {subTab === 'movimientos' && <SubPanelMovimientos movimientos={movimientos} stock={stock} db={db} appId={appId} loggear={loggear} perfil={perfil} catalogo={catalogo} dialogs={dialogs} />}
       {subTab === 'catalogo' && <SubPanelCatalogo catalogo={catalogo} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
       {subTab === 'auditoria' && <SubPanelAuditoria db={db} appId={appId} dialogs={dialogs} loggear={loggear} perfil={perfil} />}

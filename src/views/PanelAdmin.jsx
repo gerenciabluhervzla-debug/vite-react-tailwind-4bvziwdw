@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban, Search, Edit3 } from 'lucide-react';
+import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban, Search, Edit3, Truck, Store as StoreIcon, Bike } from 'lucide-react';
 import { StatusBadge, InputDark } from '../components/ui';
 import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
@@ -96,7 +96,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                 })
             });
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), { ultimaFechaBackup: hoyStr }, { merge: true });
-           
+            
             if(isAuto) { loggear('BACKUP_AUTO', 'Respaldo automático del día guardado en Drive.'); } 
             else {
                 loggear('BACKUP_MANUAL', 'El administrador generó un respaldo manual.');
@@ -158,7 +158,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             reader.readAsText(file);
         } catch (err) { setBackupLoading(false); dialogs.alert("Error leyendo el archivo."); }
     }, "Confirmación Requerida");
-   
+    
     e.target.value = '';
   };
 
@@ -172,7 +172,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   // --- FILTRADO DEL HISTORIAL CON FECHA DESPACHO/OPERATIVA Y ORDEN ASCENDENTE ---
   const historialFiltrado = useMemo(() => {
     let todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
-   
+    
     if (!mostrarAnulados) {
       todosHistorial = todosHistorial.filter(p => p.status !== 'Anulado');
     }
@@ -183,7 +183,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
          return opIso >= fechaInicio && opIso <= fechaFin;
       });
     }
-   
+    
     // ORDENAMIENTO ASCENDENTE (MÁS ANTIGUOS PRIMERO)
     return todosHistorial.sort((a, b) => a.fechaCreacion - b.fechaCreacion);
   }, [pedidos, fechaInicio, fechaFin, mostrarAnulados]);
@@ -192,7 +192,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const listado = useMemo(() => {
     const base = vistaAdmin === 'pendientes' ? pendientesOrdenados : historialFiltrado;
     if (!busqueda.trim()) return base;
-   
+    
     const busquedaMinuscula = busqueda.toLowerCase();
     return base.filter(p => p.clienteNombre?.toLowerCase().includes(busquedaMinuscula));
   }, [vistaAdmin, pendientesOrdenados, historialFiltrado, busqueda]);
@@ -238,7 +238,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const abrirModalValidacion = (pedido, isEdit = false) => {
     let tipo = 'ninguno';
     let monto = '';
-   
+    
     if (pedido.sobranteUsd > 0) {
        tipo = 'sobrante';
        monto = pedido.sobranteUsd.toString();
@@ -274,7 +274,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const procesarValidacionDefinitiva = async () => {
     if (!modalValidacion) return;
     const { pedido, tipoDiferencia, montoDiferencia, monedaDiferencia, file, isEdit } = modalValidacion;
-   
+    
     if (tipoDiferencia !== 'ninguno' && (!montoDiferencia || parseFloat(montoDiferencia) <= 0)) {
         return dialogs.alert("Debes ingresar un monto válido para el faltante o sobrante.", "Monto Inválido");
     }
@@ -282,7 +282,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     setModalValidacion(prev => ({ ...prev, subiendo: true }));
     try {
       let urlComprobanteAdmin = pedido.linkComprobanteAdmin || '';
-     
+      
       // 1. Subir la imagen si hay una nueva
       if (file && URL_GOOGLE_SCRIPT) {
         const base64Data = await compressImage(file, 800, 0.7);
@@ -298,7 +298,12 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       if (!isEdit) {
          const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
          const updates = {};
-         Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { updates[itemKey] = { envios: increment(-qty) }; });
+         // LÓGICA DE MÚLTIPLES ALMACENES
+         const almacenDestino = (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') ? 'recepcion' : 'envios';
+         
+         Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { 
+             updates[itemKey] = { [almacenDestino]: increment(-qty) }; 
+         });
          if (Object.keys(updates).length > 0) { await setDoc(stockRef, updates, { merge: true }); }
       }
 
@@ -322,11 +327,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           sobranteUsd: sobranteUsd, 
           faltanteUsd: faltanteUsd 
       };
-     
+      
       if (urlComprobanteAdmin) payloadPedido.linkComprobanteAdmin = urlComprobanteAdmin;
 
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), payloadPedido);
-     
+      
       loggear(isEdit ? 'PAGO_CORREGIDO' : 'PAGO_VALIDADO', `${isEdit ? 'Corrección de validación' : 'Aprobación y descuento de stock'}: ${pedido.clienteNombre}`);
       dialogs.alert(isEdit ? "La validación fue actualizada correctamente." : "El pago fue aprobado, el extracto guardado y el inventario descontado exitosamente.", "Éxito");
       setModalValidacion(null);
@@ -529,6 +534,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                {esAdmin && <button onClick={() => setVistaAdmin('pendientes')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Pendientes ({pendientesOrdenados.length})</button>}
                <button onClick={() => setVistaAdmin('historial')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial General</button>
                {esAuditor && <button onClick={() => setVistaAdmin('auditoria')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'auditoria' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Diario de Auditoría</button>}
+               {esAdmin && <a href="#recepcion" className="px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex items-center justify-center gap-2 text-emerald-700 hover:bg-emerald-100 dark:text-emerald-400 dark:hover:bg-emerald-900/40"><Package size={16}/> Módulo Recepción</a>}
              </div>
           </div>
         </div>
@@ -574,13 +580,32 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    
                    <div className="text-[11px] font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1 mb-3 flex items-center flex-wrap gap-2">
                      <span>Ingreso: {new Date(p.fechaCreacion).toLocaleDateString('es-VE')} {new Date(p.fechaCreacion).toLocaleTimeString('es-VE', {hour: '2-digit', minute:'2-digit'})}</span>
-                     <span className="bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-700">Despacho pautado: {p.fechaDespacho || 'No asignado'}</span>
+                     <span className="bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-700">Pautado: {p.fechaDespacho || 'No asignado'}</span>
+                     
+                     {/* BADGES VISUALES DE DESPACHO */}
+                     {p.tipoDespacho === 'Delivery' && <span className="bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-400 px-2 py-0.5 rounded border border-fuchsia-200 dark:border-fuchsia-800 flex items-center gap-1"><Bike size={12}/> Delivery</span>}
+                     {p.tipoDespacho === 'Tienda' && <span className="bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800 flex items-center gap-1"><StoreIcon size={12}/> Tienda</span>}
+                     {(p.tipoDespacho === 'Nacional' || !p.tipoDespacho) && <span className="bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 px-2 py-0.5 rounded border border-orange-200 dark:border-orange-800 flex items-center gap-1"><Truck size={12}/> Nacional</span>}
                    </div>
                    
-                   <div className="text-xs font-semibold text-slate-500 flex items-center gap-2 mb-4">
+                   <div className="text-xs font-semibold text-slate-500 flex items-center flex-wrap gap-2 mb-4">
                      <span className="bg-slate-100 dark:bg-slate-700 px-3 py-1.5 rounded-lg">Asesora: {p.asesora}</span>
                      {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-3 py-1.5 rounded-lg font-black uppercase tracking-widest border border-yellow-300">MercadoLibre</span>}
                    </div>
+
+                   {/* INFORMACIÓN DE RECEPCIÓN: RETIRA O DELIVERY */}
+                   {p.tipoDespacho === 'Tienda' && p.retiroNombre && (
+                     <div className="mb-4 text-xs font-bold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-100 dark:border-purple-800/50 flex flex-col">
+                       <span className="uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1 opacity-70"><StoreIcon size={12}/> Datos de Retiro</span>
+                       <span>Retira: {p.retiroNombre} (C.I: {p.retiroCedula}) - Tlf: {p.retiroTelefono}</span>
+                     </div>
+                   )}
+                   {p.tipoDespacho === 'Delivery' && p.deliveryHora && (
+                     <div className="mb-4 text-xs font-bold text-fuchsia-700 dark:text-fuchsia-400 bg-fuchsia-50 dark:bg-fuchsia-900/20 p-3 rounded-xl border border-fuchsia-100 dark:border-fuchsia-800/50 flex flex-col">
+                       <span className="uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1 opacity-70"><Bike size={12}/> Programación de Delivery</span>
+                       <span>Entregar a las: {p.deliveryHora}</span>
+                     </div>
+                   )}
                    
                    <div className="text-[13px] font-medium text-slate-700 dark:text-slate-300 bg-[#f0f4f8] dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-4 mt-1 rounded-xl shadow-inner">
                      <span className="font-black text-sky-700 dark:text-sky-400 flex items-center gap-1.5 mb-2 uppercase tracking-wider text-[10px]"><Package size={14}/> Productos Facturados:</span>
@@ -608,13 +633,14 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                          <div className="text-xs text-red-500 font-bold mt-2 leading-tight">Motivo: {p.motivoAnulacion || 'Cancelado por el Administrador'}</div>
                        </div>
                    ) : p.esRegalo ? (
-                      <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl"><Gift size={20}/> REGALO VIP</div>
+                      <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl mb-4"><Gift size={20}/> REGALO VIP</div>
                    ) : p.moneda === 'ZELLE' ? (
                       <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl border border-purple-200 dark:border-purple-800 mb-4">
                         <div className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">Pago Vía Zelle</div>
                         <div className="font-black text-purple-800 dark:text-purple-300 text-3xl">${(p.montoUsd||0).toFixed(2)}</div>
                         
                         <div className="flex flex-wrap gap-2 mt-3">
+                           {p.costoEnvio > 0 && <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-2.5 py-1 rounded-lg">Incluye Despacho: ${p.costoEnvio}</span>}
                            {p.sobranteUsd > 0 && <span className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/30 px-2.5 py-1 rounded-lg">+ Sobrante: ${p.sobranteUsd}</span>}
                            {p.faltanteUsd > 0 && <span className="text-xs font-bold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30 px-2.5 py-1 rounded-lg">- Faltante: ${p.faltanteUsd}</span>}
                         </div>
@@ -626,10 +652,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                         <div className="text-[11px] font-bold text-slate-500 mb-3">Tasa Aplicada: Bs. {p.tasaAplicada}</div>
                         
                         <div className="flex flex-wrap gap-2">
+                           {p.costoEnvio > 0 && <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">Despacho: ${p.costoEnvio}</span>}
                            {p.sobranteUsd > 0 && <span className="text-xs font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2.5 py-1 rounded-lg border border-purple-200">+ Sobrante: ${p.sobranteUsd}</span>}
                            {p.faltanteUsd > 0 && <span className="text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2.5 py-1 rounded-lg border border-red-200">- Faltante: ${p.faltanteUsd}</span>}
-                           {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 px-2.5 py-1 rounded-lg border border-pink-200">Campaña: {p.descuentoGlobalAplicado}%</span>}
-                           {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">Asesor: {p.descuentoPorcentaje}%</span>}
+                           {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 px-2.5 py-1 rounded-lg border border-pink-200 dark:border-pink-800 dark:bg-pink-900/20">Campaña: {p.descuentoGlobalAplicado}%</span>}
+                           {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 dark:bg-emerald-900/20">Asesor: {p.descuentoPorcentaje}%</span>}
                         </div>
                       </div>
                    )}

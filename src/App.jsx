@@ -7,7 +7,7 @@ import {
 } from 'firebase/firestore';
 import { 
   ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users, 
-  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X 
+  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X, PackageCheck, Contact 
 } from 'lucide-react';
 
 import { auth, db, googleProvider, appId } from './config/firebase';
@@ -24,6 +24,10 @@ import PanelReportes from './views/PanelReportes';
 import PanelInventario from './views/inventario/PanelInventario';
 import PanelUsuarios from './views/PanelUsuarios';
 import PanelLogs from './views/PanelLogs';
+
+// NUEVOS MÓDULOS
+import PanelRecepcion from './views/PanelRecepcion';
+import PanelClientes from './views/PanelClientes';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -71,7 +75,6 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
-        // Si la sesión de Google o un Anónimo viejo carga, CANCELAMOS la creación de nuevos anónimos
         clearTimeout(timeoutId);
         setUser(currentUser);
       } else {
@@ -79,7 +82,6 @@ export default function App() {
         setUserProfile(null);
         setAuthLoading(false);
 
-        // Esperamos 1.5 segundos antes de asumir que realmente es un visitante desconocido
         timeoutId = setTimeout(async () => {
           if (!auth.currentUser) {
             try {
@@ -117,7 +119,7 @@ export default function App() {
            if (!profile.isOnline) {
               updateDoc(userRef, { isOnline: true });
               addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
-                  accion: 'INICIO_SESION', detalle: 'El usuario inició sesión en el sistema.', usuarioEmail: profile.email, usuarioNombre: profile.nombre, usuarioRol: profile.role, fecha: Date.now()
+                 accion: 'INICIO_SESION', detalle: 'El usuario inició sesión en el sistema.', usuarioEmail: profile.email, usuarioNombre: profile.nombre, usuarioRol: profile.role, fecha: Date.now()
               }).catch(()=>{});
            }
         }
@@ -277,10 +279,20 @@ export default function App() {
       </div>
     );
   } else {
+    // ASIGNACIÓN DE ROLES PARA NAVEGACIÓN
     const r = userProfile?.role;
     const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
     const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA].includes(r);
+    
+    // Despacho opera envíos nacionales
     const showDespacho = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.DESPACHO, ROLES.AUDITORIA].includes(r);
+    
+    // NUEVO: Recepción opera Deliverys y Entregas en Tienda
+    const showRecepcion = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
+    
+    // NUEVO: CRM de Clientes
+    const showClientes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA].includes(r);
+
     const showReportes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r);
     const showInventario = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r); 
     const showUsuarios = [ROLES.ADMIN].includes(r);
@@ -295,6 +307,7 @@ export default function App() {
     content = (
       <div className="flex flex-col min-h-screen bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors selection:bg-sky-200 dark:selection:bg-sky-900">
         
+        {/* HEADER MÓVIL */}
         <div className="md:hidden flex items-center justify-between bg-[#003366] dark:bg-slate-950 p-4 text-white sticky top-0 z-40 shadow-md">
           <div className="flex items-center gap-3">
             <button onClick={() => setIsMobileMenuOpen(true)} className="p-1 rounded-md hover:bg-white/10 transition-colors">
@@ -308,11 +321,13 @@ export default function App() {
         </div>
 
         <div className="flex flex-1 relative">
+          {/* CORTINA MÓVIL */}
           {isMobileMenuOpen && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden transition-opacity" onClick={() => setIsMobileMenuOpen(false)}></div>
           )}
 
-          <aside className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-[#003366] dark:bg-slate-950 text-slate-200 flex flex-col h-full transform transition-transform duration-300 ease-in-out md:sticky md:top-0 md:h-screen md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
+          {/* SIDEBAR LATERAL */}
+          <aside id="recepcion" className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-[#003366] dark:bg-slate-950 text-slate-200 flex flex-col h-full transform transition-transform duration-300 ease-in-out md:sticky md:top-0 md:h-screen md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
             <div className="p-8 pb-4 flex flex-col items-center border-b border-sky-800/50 dark:border-slate-800/50 relative">
               <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden absolute top-4 right-4 p-1.5 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
                 <X size={20}/>
@@ -338,13 +353,18 @@ export default function App() {
               <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Área Operativa</div>
               {showVentas && <TabButton active={activeTab === 'ventas'} onClick={() => handleTabClick('ventas')} icon={<ShoppingCart size={18} />} label="Ventas y Web" badge={pedidos.filter(p=>p.status==='Rechazado' || p.esPublico).length} badgeColor="bg-red-500 dark:bg-sky-500" />}
               {showAdmin && <TabButton active={activeTab === 'admin'} onClick={() => handleTabClick('admin')} icon={<CheckSquare size={18} />} label={r === ROLES.AUDITORIA ? 'Auditoría Pagos' : 'Admin y Pagos'} badge={pedidos.filter(p=>p.status==='Pendiente').length} />}
-              {showDespacho && <TabButton active={activeTab === 'despacho'} onClick={() => handleTabClick('despacho')} icon={<Truck size={18} />} label={`Despacho`} badge={pedidos.filter(p=>p.status==='Validado').length} />}
               
-              {(showReportes || showInventario || showUsuarios || showLogs) && <div className="my-4 border-t border-sky-800/50 dark:border-slate-800 mx-2"></div>}
-              {(showReportes || showInventario || showUsuarios || showLogs) && <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Gestión y Reportes</div>}
+              {/* LÓGICA DE BADGES DIVIDIDA POR TIPO DE DESPACHO */}
+              {showDespacho && <TabButton active={activeTab === 'despacho'} onClick={() => handleTabClick('despacho')} icon={<Truck size={18} />} label={`Despacho Nacional`} badge={pedidos.filter(p=>p.status==='Validado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')).length} />}
+              {showRecepcion && <TabButton active={activeTab === 'recepcion'} onClick={() => handleTabClick('recepcion')} icon={<PackageCheck size={18} />} label={`Recepción (Tienda)`} badge={pedidos.filter(p=>['Tienda', 'Delivery'].includes(p.tipoDespacho) && p.status==='Validado').length} />}
+              
+              {(showReportes || showClientes || showInventario || showUsuarios || showLogs) && <div className="my-4 border-t border-sky-800/50 dark:border-slate-800 mx-2"></div>}
+              {(showReportes || showClientes || showInventario || showUsuarios || showLogs) && <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Gestión y Reportes</div>}
 
-              {showReportes && <TabButton active={activeTab === 'reportes'} onClick={() => handleTabClick('reportes')} icon={<FileSpreadsheet size={18} />} label="Reportes" />}
-              {showInventario && <TabButton active={activeTab === 'inventario'} onClick={() => handleTabClick('inventario')} icon={<Archive size={18} />} label="Inventario" badge={movimientos.filter(m=>m.status==='PENDIENTE').length} />}
+              {/* NUEVO MÓDULO CRM */}
+              {showClientes && <TabButton active={activeTab === 'clientes'} onClick={() => handleTabClick('clientes')} icon={<Contact size={18} />} label="CRM Clientes" />}
+              {showReportes && <TabButton active={activeTab === 'reportes'} onClick={() => handleTabClick('reportes')} icon={<FileSpreadsheet size={18} />} label="Reportes Financieros" />}
+              {showInventario && <TabButton active={activeTab === 'inventario'} onClick={() => handleTabClick('inventario')} icon={<Archive size={18} />} label="Inventario Dual" badge={movimientos.filter(m=>m.status==='PENDIENTE').length} />}
               {showUsuarios && <TabButton active={activeTab === 'usuarios'} onClick={() => handleTabClick('usuarios')} icon={<Users size={18} />} label="Usuarios" badge={usuarios.filter(u=>!u.isApproved).length} />}
               {showLogs && <TabButton active={activeTab === 'logs'} onClick={() => handleTabClick('logs')} icon={<FileText size={18} />} label="Auditoría" />}
             </nav>
@@ -356,30 +376,41 @@ export default function App() {
             </div>
           </aside>
 
+          {/* VISTAS PRINCIPALES */}
           <main className="flex-1 p-4 md:p-10 overflow-y-auto print:p-0 print:m-0 print:bg-white print:block w-full">
             <div className="max-w-6xl mx-auto print:max-w-none print:mx-0">
               <div className="print:hidden">
                 {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} />}
                 {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} config={configGral} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
                 {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} perfil={userProfile} />}
+                
+                {/* INYECCIÓN DE LOS NUEVOS PANELES */}
+                {activeTab === 'recepcion' && showRecepcion && <PanelRecepcion pedidos={pedidos} perfil={userProfile} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
+                {activeTab === 'clientes' && showClientes && <PanelClientes pedidos={pedidos} />}
+
                 {activeTab === 'reportes' && showReportes && <PanelReportes perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
                 {activeTab === 'inventario' && showInventario && <PanelInventario stock={stockInventario} notas={notasInventario} catalogo={catalogo} movimientos={movimientos} pedidos={pedidos} db={db} appId={appId} loggear={loggear} perfil={userProfile} dialogs={dialogs} />}
                 {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
                 {activeTab === 'logs' && showLogs && <PanelLogs logs={logs} />}
               </div>
+
+              {/* VISTA DE IMPRESIÓN MASIVA (EXCLUYE RECEPCIÓN Y DELIVERY) */}
               <VistaImpresion pedidos={pedidos.filter(p => {
-    if (p.status !== 'Validado') return false;
-    if (!p.fechaDespacho || p.fechaDespacho === 'Sin Fecha') return false;
-    const parts = p.fechaDespacho.split('/');
-    if (parts.length !== 3) return false;
-    const timeDespacho = new Date(parts[2], parts[1] - 1, parts[0]).getTime();
-    
-    const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    const tDateApp = getVeneziaTimeApp();
-    const timeHoy = new Date(tDateApp.getFullYear(), tDateApp.getMonth(), tDateApp.getDate()).getTime();
-    
-    return timeDespacho <= timeHoy;
-})} />
+                  if (p.status !== 'Validado') return false;
+                  // Si es Delivery o Tienda no se imprime por lote, se procesan individual en el módulo Recepción
+                  if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Delivery') return false; 
+
+                  if (!p.fechaDespacho || p.fechaDespacho === 'Sin Fecha') return false;
+                  const parts = p.fechaDespacho.split('/');
+                  if (parts.length !== 3) return false;
+                  const timeDespacho = new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+                  
+                  const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+                  const tDateApp = getVeneziaTimeApp();
+                  const timeHoy = new Date(tDateApp.getFullYear(), tDateApp.getMonth(), tDateApp.getDate()).getTime();
+                  
+                  return timeDespacho <= timeHoy;
+              })} />
             </div>
           </main>
         </div>
