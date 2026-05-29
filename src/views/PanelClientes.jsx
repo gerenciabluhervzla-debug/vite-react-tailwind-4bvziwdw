@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Users, Search, ShoppingBag, CalendarClock, DollarSign, Award } from 'lucide-react';
+import { Users, Search, ShoppingBag, CalendarClock, DollarSign, Award, Store } from 'lucide-react';
 
 export default function PanelClientes({ pedidos = [] }) {
   const [busqueda, setBusqueda] = useState('');
