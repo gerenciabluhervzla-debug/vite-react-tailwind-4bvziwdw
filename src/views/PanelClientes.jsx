@@ -1,94 +1,108 @@
 import React, { useState, useMemo } from 'react';
 import { Users, Search, ShoppingBag, CalendarClock, DollarSign, Award } from 'lucide-react';
 
-export default function PanelClientes({ pedidos }) {
+export default function PanelClientes({ pedidos = [] }) {
   const [busqueda, setBusqueda] = useState('');
   const [orden, setOrden] = useState('fecha'); // 'fecha' | 'compras' | 'gasto'
 
   const clientes = useMemo(() => {
      const map = {};
 
+     // 1. Protección contra arreglos indefinidos
+     if (!Array.isArray(pedidos)) return [];
+
      pedidos.forEach(p => {
-        // Ignoramos pedidos no concretados
-        if(p.status === 'Anulado' || p.status === 'Rechazado' || p.status === 'Pendiente' || p.esPublico) return;
-        
-        // SANITIZACIÓN ESTRICTA: Forzamos a que todo sea texto para evitar el pantallazo blanco
-        const tlf = p.clienteTelefono ? String(p.clienteTelefono).trim() : '';
-        const ci = p.clienteCedula ? String(p.clienteCedula).trim() : '';
-        const nom = p.clienteNombre ? String(p.clienteNombre).trim() : 'Sin Nombre';
+        try {
+            // Ignoramos pedidos no concretados o vacíos
+            if(!p || p.status === 'Anulado' || p.status === 'Rechazado' || p.status === 'Pendiente' || p.esPublico) return;
+            
+            // 2. SANITIZACIÓN ESTRICTA: Forzamos a que todo sea texto para evitar el pantallazo blanco
+            const tlf = p.clienteTelefono ? String(p.clienteTelefono).trim() : '';
+            const ci = p.clienteCedula ? String(p.clienteCedula).trim() : '';
+            const nom = p.clienteNombre ? String(p.clienteNombre).trim() : 'Sin Nombre';
 
-        // Estandarizar la llave del cliente (Prioridad: Teléfono -> Cédula -> Nombre)
-        const key = tlf || ci || nom;
-        if (!key) return;
+            // Estandarizar la llave del cliente (Prioridad: Teléfono -> Cédula -> Nombre)
+            const key = tlf || ci || nom;
+            if (!key) return;
 
-        if (!map[key]) {
-            map[key] = {
-                nombre: nom,
-                cedula: ci || 'S/N',
-                telefono: tlf || 'S/N',
-                direccion: p.direccion ? String(p.direccion) : 'No especificada',
-                primeraCompra: p.fechaCreacion,
-                ultimaCompra: p.fechaCreacion,
-                totalCompras: 0,
-                totalGastado: 0,
-                historialProductos: {},
-                asesoras: new Set()
-            };
-        }
+            if (!map[key]) {
+                map[key] = {
+                    nombre: nom,
+                    cedula: ci || 'S/N',
+                    telefono: tlf || 'S/N',
+                    direccion: p.direccion ? String(p.direccion) : 'No especificada',
+                    primeraCompra: p.fechaCreacion || 0,
+                    ultimaCompra: p.fechaCreacion || 0,
+                    totalCompras: 0,
+                    totalGastado: 0,
+                    historialProductos: {},
+                    asesoras: new Set()
+                };
+            }
 
-        // Actualizar datos si el pedido es más reciente
-        if (p.fechaCreacion > map[key].ultimaCompra) {
-            map[key].ultimaCompra = p.fechaCreacion;
-            if (p.direccion) map[key].direccion = String(p.direccion);
-            map[key].nombre = nom; 
-        }
+            // Actualizar datos si el pedido es más reciente
+            const fechaPedido = p.fechaCreacion || 0;
+            if (fechaPedido > map[key].ultimaCompra) {
+                map[key].ultimaCompra = fechaPedido;
+                if (p.direccion) map[key].direccion = String(p.direccion);
+                if (nom !== 'Sin Nombre') map[key].nombre = nom; 
+            }
 
-        map[key].totalCompras += 1;
-        map[key].totalGastado += (Number(p.montoUsd) || 0);
-        if (p.asesora) map[key].asesoras.add(p.asesora);
+            map[key].totalCompras += 1;
+            map[key].totalGastado += (Number(p.montoUsd) || 0);
+            if (p.asesora) map[key].asesoras.add(String(p.asesora));
 
-        // Analizar productos comprados
-        if (p.carritoObj) {
-            Object.entries(p.carritoObj).forEach(([prodKey, qty]) => {
-                if (!map[key].historialProductos[prodKey]) map[key].historialProductos[prodKey] = 0;
-                map[key].historialProductos[prodKey] += Number(qty) || 0;
-            });
+            // Analizar productos comprados (Protección contra objetos nulos)
+            if (p.carritoObj && typeof p.carritoObj === 'object') {
+                Object.entries(p.carritoObj).forEach(([prodKey, qty]) => {
+                    const safeKey = String(prodKey);
+                    if (!map[key].historialProductos[safeKey]) map[key].historialProductos[safeKey] = 0;
+                    map[key].historialProductos[safeKey] += (Number(qty) || 0);
+                });
+            }
+        } catch (errorInt) {
+            console.warn("Se omitió un pedido corrupto en el cálculo del CRM:", errorInt, p);
         }
      });
 
-     // Calcular Producto Favorito y transformar a Array
-     let clientesArray = Object.values(map).map(c => {
-         let favProd = 'Ninguno';
-         let maxQty = 0;
-         Object.entries(c.historialProductos).forEach(([prodKey, qty]) => {
-             if (qty > maxQty) {
-                 maxQty = qty;
-                 favProd = prodKey.replace('|', ' ');
-             }
+     try {
+         // Calcular Producto Favorito y transformar a Array
+         let clientesArray = Object.values(map).map(c => {
+             let favProd = 'Ninguno';
+             let maxQty = 0;
+             Object.entries(c.historialProductos).forEach(([prodKey, qty]) => {
+                 if (qty > maxQty) {
+                     maxQty = qty;
+                     favProd = String(prodKey).replace('|', ' ');
+                 }
+             });
+             return {
+                 ...c,
+                 productoFavorito: favProd,
+                 asesorasList: Array.from(c.asesoras).join(', ')
+             };
          });
-         return {
-             ...c,
-             productoFavorito: favProd,
-             asesorasList: Array.from(c.asesoras).join(', ')
-         };
-     });
 
-     // Aplicar Filtro de Búsqueda Seguro
-     if (busqueda.trim()) {
-         const b = busqueda.toLowerCase();
-         clientesArray = clientesArray.filter(c => 
-             String(c.nombre).toLowerCase().includes(b) || 
-             String(c.telefono).toLowerCase().includes(b) || 
-             String(c.cedula).toLowerCase().includes(b)
-         );
+         // Aplicar Filtro de Búsqueda Seguro
+         if (busqueda && busqueda.trim() !== '') {
+             const b = String(busqueda).toLowerCase().trim();
+             clientesArray = clientesArray.filter(c => 
+                 String(c.nombre || '').toLowerCase().includes(b) || 
+                 String(c.telefono || '').toLowerCase().includes(b) || 
+                 String(c.cedula || '').toLowerCase().includes(b)
+             );
+         }
+
+         // Aplicar Ordenamiento Seguro
+         if (orden === 'fecha') clientesArray.sort((a,b) => (b.ultimaCompra || 0) - (a.ultimaCompra || 0));
+         if (orden === 'compras') clientesArray.sort((a,b) => (b.totalCompras || 0) - (a.totalCompras || 0));
+         if (orden === 'gasto') clientesArray.sort((a,b) => (b.totalGastado || 0) - (a.totalGastado || 0));
+
+         return clientesArray;
+     } catch (errorExt) {
+         console.error("Error al procesar la lista de clientes:", errorExt);
+         return [];
      }
-
-     // Aplicar Ordenamiento
-     if (orden === 'fecha') clientesArray.sort((a,b) => b.ultimaCompra - a.ultimaCompra);
-     if (orden === 'compras') clientesArray.sort((a,b) => b.totalCompras - a.totalCompras);
-     if (orden === 'gasto') clientesArray.sort((a,b) => b.totalGastado - a.totalGastado);
-
-     return clientesArray;
   }, [pedidos, busqueda, orden]);
 
   return (
@@ -153,11 +167,15 @@ export default function PanelClientes({ pedidos }) {
                 <div className="grid grid-cols-2 gap-3 mt-auto pt-4 border-t border-slate-100 dark:border-slate-700">
                    <div className="flex flex-col">
                       <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1 flex items-center gap-1"><CalendarClock size={10}/> Última Compra</span>
-                      <span className="font-bold text-sm text-slate-700 dark:text-slate-200">{new Date(c.ultimaCompra).toLocaleDateString('es-VE')}</span>
+                      <span className="font-bold text-sm text-slate-700 dark:text-slate-200">
+                         {c.ultimaCompra ? new Date(c.ultimaCompra).toLocaleDateString('es-VE') : 'N/A'}
+                      </span>
                    </div>
                    <div className="flex flex-col text-right">
                       <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1 flex items-center justify-end gap-1"><DollarSign size={10}/> Total Gastado</span>
-                      <span className="font-black text-emerald-600 dark:text-emerald-400 text-base">${c.totalGastado.toFixed(2)}</span>
+                      <span className="font-black text-emerald-600 dark:text-emerald-400 text-base">
+                         ${(Number(c.totalGastado) || 0).toFixed(2)}
+                      </span>
                    </div>
                 </div>
                 
