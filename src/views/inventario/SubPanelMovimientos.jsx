@@ -21,19 +21,17 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
         const updates = {};
         
         Object.entries(mov.items).forEach(([key, qty]) => { 
-           // Resta del almacén principal (Envíos) y suma al destino (Recepción) atómicamente
-           updates[`${key}.envios`] = increment(-qty);
-           updates[`${key}.recepcion`] = increment(qty); 
+           // CORRECCIÓN: Solo sumamos a Recepción. El Modal ya restó de envíos.
+           updates[key] = { recepcion: increment(qty) }; 
         });
         
         if(Object.keys(updates).length > 0){ 
-           await updateDoc(stockRef, updates); 
+           await setDoc(stockRef, updates, { merge: true }); 
         }
 
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'movimientos', mov.id), { status: 'COMPLETADO', fechaAprobacion: Date.now(), aprobadoPor: perfil.nombre });
         loggear('TRANSFERENCIA_APROBADA', `Recepción aprobó entrada de transferencia enviada por ${mov.creadoPor}`);
-        dialogs.alert("Transferencia completada. El stock ha sido movido a Recepción.");
-      } catch(e) { console.error(e); dialogs.alert("Error al procesar la transferencia."); }
+      } catch(e) { console.error(e); }
     }, "Aprobar Recepción");
   };
 
@@ -46,11 +44,11 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
         const origenStock = mov.origen ? mov.origen.toLowerCase() : 'envios';
         
         Object.entries(mov.items).forEach(([key, qty]) => { 
-           updates[`${key}.${origenStock}`] = increment(-qty); 
+           updates[key] = { [origenStock]: increment(-qty) }; 
         });
         
         if(Object.keys(updates).length > 0){ 
-           await updateDoc(stockRef, updates); 
+           await setDoc(stockRef, updates, { merge: true }); 
         }
 
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'movimientos', mov.id), { 
@@ -59,8 +57,7 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
             aprobadoPor: perfil.nombre 
         });
         loggear('SALIDA_APROBADA', `Admin aprobó salida de inventario por daños/mermas registrada por ${mov.creadoPor}`);
-        dialogs.alert("Salida de inventario aplicada correctamente.");
-      } catch(e) { console.error(e); dialogs.alert("Error procesando la salida."); }
+      } catch(e) { console.error(e); }
     }, "Aprobar Salida de Inventario");
   };
 

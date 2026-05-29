@@ -4,13 +4,11 @@ import { setDoc, doc } from 'firebase/firestore';
 
 export default function SubPanelStock({ lista, notas, stock, movimientos, pedidos = [], db, appId, puedeEditar, loggear, dialogs }) {
   const [localStock, setLocalStock] = useState({});
-  const [activeTab, setActiveTab] = useState('envios'); // 'envios' | 'recepcion'
+  const [activeTab, setActiveTab] = useState('envios'); 
   
-  // ESTADOS PARA BÚSQUEDA Y FILTRO
   const [busqueda, setBusqueda] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('Todas');
 
-  // Helpers para fechas
   const getHoyDDMMYYYY = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
@@ -20,20 +18,16 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  // 1. Extraer categorías únicas dinámicamente
   const categorias = useMemo(() => {
     const cats = new Set(lista.map(item => item.cat));
     return ['Todas', ...Array.from(cats).filter(Boolean)];
   }, [lista]);
 
-  // 2. CÁLCULO DINÁMICO DE MÉTRICAS DEL DÍA (Independiente por Almacén)
-  // Nota: Esto calcula para TODOS los productos siempre, sin importar los filtros visuales.
   const metricasDia = useMemo(() => {
     const hoyDDMM = getHoyDDMMYYYY();
     const hoyISO = getHoyISO();
     const map = {};
     
-    // Inicializar contadores independientes
     lista.forEach(i => {
        map[i.key] = { 
          envios: { ingresos: 0, trasladosOut: 0, ventas: 0, salidas: 0 },
@@ -41,7 +35,6 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
        };
     });
 
-    // Sumar Ventas del Día (Clasificadas por Tipo de Despacho)
     pedidos.forEach(p => {
        const esParaHoy = p.fechaDespacho === hoyDDMM || (!p.fechaDespacho && new Date(p.fechaCreacion).toLocaleDateString('es-VE') === new Date().toLocaleDateString('es-VE'));
        
@@ -50,23 +43,19 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
           
           Object.entries(p.carritoObj || {}).forEach(([key, qty]) => {
              if (map[key]) {
-                 if (isRecepcion) {
-                     map[key].recepcion.ventas += qty;
-                 } else {
-                     map[key].envios.ventas += qty;
-                 }
+                 if (isRecepcion) map[key].recepcion.ventas += qty;
+                 else map[key].envios.ventas += qty;
              }
           });
        }
     });
 
-    // Sumar Movimientos del Día
     movimientos?.forEach(m => {
        const isToday = m.fecha === hoyISO || m.fecha === hoyDDMM || new Date(m.fechaCreacion || Date.now()).toLocaleDateString('es-VE') === new Date().toLocaleDateString('es-VE');
        if (isToday) {
           const type = (m.tipo || '').toUpperCase();
           const itemsObj = m.carritoObj || m.items || {};
-          const origen = m.origen || 'envios';
+          const origen = m.origen ? m.origen.toLowerCase() : 'envios';
           
           Object.entries(itemsObj).forEach(([key, qty]) => {
              if (map[key]) {
@@ -75,7 +64,10 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
                 }
                 if (type === 'TRANSFERENCIA' || type.includes('TRASLADO')) {
                    map[key].envios.trasladosOut += qty;
-                   map[key].recepcion.trasladosIn += qty;
+                   // CORRECCIÓN: Solo se suma a la métrica de Recepción si ya lo aprobaron.
+                   if (m.status === 'COMPLETADO') {
+                      map[key].recepcion.trasladosIn += qty;
+                   }
                 }
                 if (type === 'SALIDA' && m.status === 'COMPLETADO') {
                    if (origen === 'recepcion') map[key].recepcion.salidas += qty;
@@ -89,18 +81,12 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
     return map;
   }, [pedidos, movimientos, lista]);
 
-  // 3. Filtrar la lista a mostrar en la tabla según Búsqueda y Categoría
   const listaFiltrada = useMemo(() => {
      let filtrada = lista;
-     if (filtroCategoria !== 'Todas') {
-         filtrada = filtrada.filter(item => item.cat === filtroCategoria);
-     }
+     if (filtroCategoria !== 'Todas') filtrada = filtrada.filter(item => item.cat === filtroCategoria);
      if (busqueda.trim()) {
          const q = busqueda.toLowerCase();
-         filtrada = filtrada.filter(item => 
-             item.nom.toLowerCase().includes(q) || 
-             item.pres.toLowerCase().includes(q)
-         );
+         filtrada = filtrada.filter(item => item.nom.toLowerCase().includes(q) || item.pres.toLowerCase().includes(q));
      }
      return filtrada;
   }, [lista, busqueda, filtroCategoria]);
@@ -129,19 +115,12 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
   return (
     <div className="animate-in fade-in flex flex-col gap-4">
       
-      {/* CABECERA: TABS, BUSCADOR Y FILTROS */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
          <div className="flex gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 w-full lg:w-max overflow-x-auto">
-            <button 
-              onClick={() => setActiveTab('envios')} 
-              className={`flex-1 sm:flex-none px-5 py-2.5 text-sm font-black rounded-xl transition-all whitespace-nowrap flex items-center justify-center gap-2 ${activeTab === 'envios' ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-            >
+            <button onClick={() => setActiveTab('envios')} className={`flex-1 sm:flex-none px-5 py-2.5 text-sm font-black rounded-xl transition-all whitespace-nowrap flex items-center justify-center gap-2 ${activeTab === 'envios' ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
               <Package size={18} /> Almacén Envíos
             </button>
-            <button 
-              onClick={() => setActiveTab('recepcion')} 
-              className={`flex-1 sm:flex-none px-5 py-2.5 text-sm font-black rounded-xl transition-all whitespace-nowrap flex items-center justify-center gap-2 ${activeTab === 'recepcion' ? 'bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-            >
+            <button onClick={() => setActiveTab('recepcion')} className={`flex-1 sm:flex-none px-5 py-2.5 text-sm font-black rounded-xl transition-all whitespace-nowrap flex items-center justify-center gap-2 ${activeTab === 'recepcion' ? 'bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
               <Store size={18} /> Almacén Recepción
             </button>
          </div>
@@ -149,21 +128,11 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
          <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
             <div className="relative w-full sm:w-64">
                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-               <input 
-                 type="text" 
-                 placeholder="Buscar producto..." 
-                 value={busqueda} 
-                 onChange={e => setBusqueda(e.target.value)}
-                 className="w-full pl-10 pr-4 py-2.5 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-sm font-bold outline-none focus:border-sky-500 transition-colors"
-               />
+               <input type="text" placeholder="Buscar producto..." value={busqueda} onChange={e => setBusqueda(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-sm font-bold outline-none focus:border-sky-500 transition-colors" />
             </div>
             <div className="relative w-full sm:w-56">
                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-               <select 
-                 value={filtroCategoria} 
-                 onChange={e => setFiltroCategoria(e.target.value)}
-                 className="w-full pl-10 pr-8 py-2.5 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-sm font-bold outline-none focus:border-sky-500 transition-colors cursor-pointer appearance-none"
-               >
+               <select value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)} className="w-full pl-10 pr-8 py-2.5 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-sm font-bold outline-none focus:border-sky-500 transition-colors cursor-pointer appearance-none">
                   {categorias.map(c => <option key={c} value={c}>{c}</option>)}
                </select>
             </div>
@@ -203,10 +172,7 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
               {listaFiltrada.map(item => {
                 const m = metricasDia[item.key];
                 
-                // CÁLCULOS MATEMÁTICOS DE INICIO DE DÍA INVERSO
-                // Inicio Envios = Actual + Ventas + TrasladosOut + Salidas - Ingresos
                 const inicioEnvios = item.envios + m.envios.ventas + m.envios.trasladosOut + m.envios.salidas - m.envios.ingresos;
-                // Inicio Recepcion = Actual + Ventas + Salidas - TrasladosIn
                 const inicioRecepcion = item.recepcion + m.recepcion.ventas + m.recepcion.salidas - m.recepcion.trasladosIn;
 
                 if (activeTab === 'envios') {

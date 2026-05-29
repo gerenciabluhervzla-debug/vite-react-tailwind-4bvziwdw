@@ -13,9 +13,8 @@ export default function SubPanelHistorial({ lista, movimientos, pedidos = [], db
   const [cierreActivo, setCierreActivo] = useState(null);
   const [cargando, setCargando] = useState(false);
   const [soloCambios, setSoloCambios] = useState(false);
-  const [activeTab, setActiveTab] = useState('envios'); // 'envios' | 'recepcion'
+  const [activeTab, setActiveTab] = useState('envios');
 
-  // 1. CÁLCULO DE MÉTRICAS INDEPENDIENTES (Idéntico a SubPanelStock)
   const metricasHoy = useMemo(() => {
     const [yyyy, mm, dd] = fechaConsulta.split('-');
     const hoyDDMMFormat = `${dd}/${mm}/${yyyy}`;
@@ -55,7 +54,10 @@ export default function SubPanelHistorial({ lista, movimientos, pedidos = [], db
                 }
                 if (type === 'TRANSFERENCIA' || type.includes('TRASLADO')) {
                    map[key].envios.trasladosOut += qty;
-                   map[key].recepcion.trasladosIn += qty;
+                   // CORRECCIÓN
+                   if (m.status === 'COMPLETADO') {
+                       map[key].recepcion.trasladosIn += qty;
+                   }
                 }
                 if (type === 'SALIDA' && m.status === 'COMPLETADO') {
                    if (origen === 'recepcion') map[key].recepcion.salidas += qty;
@@ -68,9 +70,8 @@ export default function SubPanelHistorial({ lista, movimientos, pedidos = [], db
     return map;
   }, [pedidos, movimientos, lista, fechaConsulta]);
 
-  // 2. RECUPERAR CIERRE HISTÓRICO DE FIREBASE (Solo si no es Hoy)
   useEffect(() => {
-    if (fechaConsulta === hoyISO) return; // Si es hoy, usamos datos en vivo.
+    if (fechaConsulta === hoyISO) return;
 
     let isMounted = true;
     const buscarCierre = async () => {
@@ -88,58 +89,51 @@ export default function SubPanelHistorial({ lista, movimientos, pedidos = [], db
     return () => { isMounted = false; };
   }, [fechaConsulta, hoyISO, db, appId]);
 
-  // 3. AUTO-GUARDADO DEL CIERRE DIARIO (Solo para Hoy)
   useEffect(() => {
-   if (fechaConsulta !== hoyISO || !lista.length) return;
+    if (fechaConsulta !== hoyISO || !lista.length) return;
 
-   const timeoutId = setTimeout(async () => {
-      try {
-         const filas = lista.map(item => {
-            const m = metricasHoy[item.key];
-            
-            // SANITIZACIÓN ESTRICTA: Forzamos a que si un valor no existe (undefined) sea 0
-            // Esto evita que Firebase bloquee el autoguardado y tire el error en la consola
-            const stockEnviosActual = item.envios || 0;
-            const stockRecepcionActual = item.recepcion || 0;
+    const timeoutId = setTimeout(async () => {
+       try {
+          const filas = lista.map(item => {
+             const m = metricasHoy[item.key];
+             const stockEnviosActual = item.envios || 0;
+             const stockRecepcionActual = item.recepcion || 0;
 
-            // Cálculos matemáticos puros para el Snapshot del día
-            const inicioEnvios = stockEnviosActual + (m.envios.ventas || 0) + (m.envios.trasladosOut || 0) + (m.envios.salidas || 0) - (m.envios.ingresos || 0);
-            const inicioRecepcion = stockRecepcionActual + (m.recepcion.ventas || 0) + (m.recepcion.salidas || 0) - (m.recepcion.trasladosIn || 0);
+             const inicioEnvios = stockEnviosActual + (m.envios.ventas || 0) + (m.envios.trasladosOut || 0) + (m.envios.salidas || 0) - (m.envios.ingresos || 0);
+             const inicioRecepcion = stockRecepcionActual + (m.recepcion.ventas || 0) + (m.recepcion.salidas || 0) - (m.recepcion.trasladosIn || 0);
 
-            return {
-               key: item.key || 'Desconocido', 
-               nom: item.nom || 'Sin Nombre', 
-               pres: item.pres || 'N/A',
-               envios: {
-                  inicio: inicioEnvios || 0,
-                  ingresos: m.envios.ingresos || 0,
-                  trasladosOut: m.envios.trasladosOut || 0,
-                  ventas: m.envios.ventas || 0,
-                  salidas: m.envios.salidas || 0,
-                  cierre: stockEnviosActual
-               },
-               recepcion: {
-                  inicio: inicioRecepcion || 0,
-                  trasladosIn: m.recepcion.trasladosIn || 0,
-                  ventas: m.recepcion.ventas || 0,
-                  salidas: m.recepcion.salidas || 0,
-                  cierre: stockRecepcionActual
-               }
-            };
-         });
+             return {
+                key: item.key || 'Desconocido', 
+                nom: item.nom || 'Sin Nombre', 
+                pres: item.pres || 'N/A',
+                envios: {
+                   inicio: inicioEnvios || 0,
+                   ingresos: m.envios.ingresos || 0,
+                   trasladosOut: m.envios.trasladosOut || 0,
+                   ventas: m.envios.ventas || 0,
+                   salidas: m.envios.salidas || 0,
+                   cierre: stockEnviosActual
+                },
+                recepcion: {
+                   inicio: inicioRecepcion || 0,
+                   trasladosIn: m.recepcion.trasladosIn || 0,
+                   ventas: m.recepcion.ventas || 0,
+                   salidas: m.recepcion.salidas || 0,
+                   cierre: stockRecepcionActual
+                }
+             };
+          });
 
-         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', hoyISO), { filas, fechaUltimaAct: Date.now() }, { merge: true });
-      } catch (error) { console.error("Error en autoguardado de cierre:", error); }
-   }, 3000);
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', hoyISO), { filas, fechaUltimaAct: Date.now() }, { merge: true });
+       } catch (error) { console.error("Error en autoguardado de cierre:", error); }
+    }, 3000);
 
-   return () => clearTimeout(timeoutId);
- }, [metricasHoy, lista, fechaConsulta, hoyISO, db, appId]);
+    return () => clearTimeout(timeoutId);
+  }, [metricasHoy, lista, fechaConsulta, hoyISO, db, appId]);
 
-  // 4. CONSOLIDAR DATA A MOSTRAR (En vivo vs Histórico + Retrocompatibilidad)
   const dataMostrarAdaptada = useMemo(() => {
      let baseData = [];
      if (fechaConsulta === hoyISO) {
-         // Generar data en vivo para la vista de Hoy
          baseData = lista.map(item => {
              const m = metricasHoy[item.key];
              return {
@@ -160,7 +154,6 @@ export default function SubPanelHistorial({ lista, movimientos, pedidos = [], db
          baseData = cierreActivo || [];
      }
 
-     // Adaptador de Retrocompatibilidad para cierres viejos
      return baseData.map(f => {
          if (f.envios && f.recepcion) return f; 
          return {
@@ -226,18 +219,11 @@ export default function SubPanelHistorial({ lista, movimientos, pedidos = [], db
          </div>
       </div>
 
-      {/* PESTAÑAS (TABS) */}
       <div className="flex gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 w-full sm:w-max print:hidden">
-         <button 
-           onClick={() => setActiveTab('envios')} 
-           className={`flex-1 sm:flex-none px-6 py-3 text-sm font-black rounded-xl transition-all flex items-center justify-center gap-2 ${activeTab === 'envios' ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-         >
+         <button onClick={() => setActiveTab('envios')} className={`flex-1 sm:flex-none px-6 py-3 text-sm font-black rounded-xl transition-all flex items-center justify-center gap-2 ${activeTab === 'envios' ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
            <Package size={18} /> Historial Envíos
          </button>
-         <button 
-           onClick={() => setActiveTab('recepcion')} 
-           className={`flex-1 sm:flex-none px-6 py-3 text-sm font-black rounded-xl transition-all flex items-center justify-center gap-2 ${activeTab === 'recepcion' ? 'bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-         >
+         <button onClick={() => setActiveTab('recepcion')} className={`flex-1 sm:flex-none px-6 py-3 text-sm font-black rounded-xl transition-all flex items-center justify-center gap-2 ${activeTab === 'recepcion' ? 'bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
            <Store size={18} /> Historial Recepción
          </button>
       </div>
