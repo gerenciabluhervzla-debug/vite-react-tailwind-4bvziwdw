@@ -17,23 +17,28 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
   const [subiendoFotoId, setSubiendoFotoId] = useState(null);
   const [vista, setVista] = useState('pendientes'); // 'pendientes' | 'retiros' | 'entregados'
 
-  // LÓGICA DE NUMERACIÓN (Independiente por Tipo de Despacho y Fecha)
+  // CORREGIDO: SECUENCIA NUMÉRICA 100% INDEPENDIENTE POR TIPO Y FECHA
   const numeracionDiaria = useMemo(() => {
     const map = {};
     const agrupados = {};
+
     pedidos.forEach(p => {
        const fecha = p.fechaDespacho || 'Sin Fecha';
-       const tipo = p.tipoDespacho || 'Nacional'; // Nacional, Tienda o Delivery
-       // La clave combina fecha y tipo, haciendo que las secuencias sean independientes
+       const tipo = p.tipoDespacho || 'Tienda'; 
        const key = `${fecha}_${tipo}`;
        
        if (!agrupados[key]) agrupados[key] = [];
        agrupados[key].push(p);
     });
+
+    // Ordenamos cronológicamente cada grupo por separado asegurando secuencias desde 1
     Object.keys(agrupados).forEach(key => {
-       agrupados[key].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
-       agrupados[key].forEach((p, index) => { map[p.id] = index + 1; });
+       agrupados[key].sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0));
+       agrupados[key].forEach((p, index) => { 
+          map[p.id] = index + 1; 
+       });
     });
+
     return map;
   }, [pedidos]);
 
@@ -76,6 +81,15 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
      return filtrados;
   }, [pedidosRecepcion, vista, busqueda, fechaFiltro, tipoFiltro]);
 
+  // CORREGIDO: Función auxiliar para calcular el monto basado en productos si el total viene vacío
+  const calcularMontoPedido = (p) => {
+     if (p.total || p.montoTotal) return Number(p.total || p.montoTotal);
+     if (Array.isArray(p.productos)) {
+        return p.productos.reduce((sum, prod) => sum + ((prod.precio || 0) * (prod.cantidad || 1)), 0);
+     }
+     return 0;
+  };
+
   const imprimirEtiqueta = (p) => {
     const printWindow = window.open('', '_blank');
     if(!printWindow) return dialogs.alert("Permite las ventanas emergentes para imprimir.");
@@ -97,7 +111,7 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
           </style>
         </head>
         <body>
-          <h2>BLUHER - ${p.tipoDespacho} N°${numeracionDiaria[p.id]}</h2>
+          <h2>BLUHER - ${p.tipoDespacho} N°${numeracionDiaria[p.id] || 1}</h2>
           <div class="info"><strong>Cliente:</strong><br/> ${p.clienteNombre}</div>
           <div class="info"><strong>Teléfono:</strong><br/> ${p.clienteTelefono}</div>
           
@@ -206,7 +220,6 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
              loggear('CIERRE_RECEPCION', `Se registró el cierre diario de Recepción con ${entregadosHoy.length} entregas.`);
 
              const printWindow = window.open('', '_blank');
-             // ... [Código HTML del cierre se mantiene igual] ...
              let html = `
               <html>
                 <head>
@@ -250,18 +263,12 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
                         </tr>
                      `).join('')}
                   </table>
-
-                  <div style="margin-top: 80px; text-align: center; border-top: 1px solid #cbd5e1; padding-top: 20px;">
-                      <p style="margin-bottom: 50px;">Firma del Encargado / Auditor</p>
-                      <p>_____________________________________</p>
-                  </div>
                 </body>
               </html>
              `;
              printWindow.document.write(html);
              printWindow.document.close();
              setTimeout(() => printWindow.print(), 1000);
-
          } catch (error) {
              console.error(error);
              dialogs.alert("Ocurrió un error al guardar el cierre en la base de datos.");
@@ -269,89 +276,117 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
      }, "Confirmar Cierre Diario");
   };
 
-  // Extraemos el renderizado de la tarjeta para reutilizarlo en las divisiones
-  const renderTarjetaPedido = (p) => (
-    <div key={p.id} className={`relative bg-slate-50 dark:bg-slate-800/50 p-6 rounded-3xl border-2 transition-all shadow-sm flex flex-col h-full ${p.status === 'Despachado' ? 'border-emerald-200 dark:border-emerald-800/50 opacity-80' : p.tipoDespacho === 'Delivery' ? 'border-fuchsia-200 dark:border-fuchsia-800/50 hover:border-fuchsia-400' : 'border-purple-200 dark:border-purple-800/50 hover:border-purple-400'}`}>
+  // REORGANIZADO: Renderizado de la tarjeta individual
+  const renderTarjetaPedido = (p) => {
+    const montoProductos = calcularMontoPedido(p);
+    const montoDelivery = Number(p.montoDelivery || p.deliveryMonto || 0);
+    const montoTotalCliente = montoProductos + (p.tipoDespacho === 'Delivery' ? montoDelivery : 0);
+
+    // Identificamos los links de imágenes válidos para evitar errores de renderizado en miniaturas
+    const urlValidacion = p.linkComprobante || p.fotoPago || p.comprobantePago || "";
+    const urlProducto = p.linkFotoProductos || "";
+    const urlExtracto = p.linkExtracto || p.extractoBancario || p.fotoExtracto || "";
+
+    return (
+      <div key={p.id} className={`relative bg-slate-50 dark:bg-slate-800/50 p-6 rounded-3xl border-2 transition-all shadow-sm flex flex-col h-full ${p.status === 'Despachado' ? 'border-emerald-200 dark:border-emerald-800/50 opacity-80' : p.tipoDespacho === 'Delivery' ? 'border-fuchsia-200 dark:border-fuchsia-800/50 hover:border-fuchsia-400' : 'border-purple-200 dark:border-purple-800/50 hover:border-purple-400'}`}>
+                  
+        {/* GLOBITO CON LA NUMERACIÓN INDEPENDIENTE POR TIPO */}
+        <div className="absolute -top-3 -left-3 bg-purple-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md">
+          {numeracionDiaria[p.id] || 1}
+        </div>
+
+        <div className="flex justify-between items-start mb-4 pl-4">
+           <div>
+             <div className="text-lg font-black text-slate-800 dark:text-slate-100 leading-tight">{p.clienteNombre}</div>
+             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Tlf: {p.clienteTelefono}</div>
+           </div>
+           {p.tipoDespacho === 'Delivery' ? (
+              <span className="bg-fuchsia-100 text-fuchsia-700 px-2 py-1 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase"><Bike size={12}/> Delivery</span>
+           ) : (
+              <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase"><Store size={12}/> Tienda</span>
+           )}
+        </div>
+
+        {p.tipoDespacho === 'Delivery' ? (
+           <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-2 text-xs">
+             <span className="font-bold text-slate-400 block mb-1">PROGRAMADO PARA:</span>
+             <span className="font-black text-fuchsia-600 dark:text-fuchsia-400 text-sm">{p.deliveryFecha} a las ${p.deliveryHora}</span>
+           </div>
+        ) : (
+           <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-2 text-xs">
+             <span className="font-bold text-slate-400 block mb-1">AUTORIZADO PARA RETIRAR:</span>
+             <span className="font-black text-purple-600 dark:text-purple-400 text-sm block">{p.retiroNombre}</span>
+             <span className="font-bold text-slate-500">C.I: {p.retiroCedula}</span>
+           </div>
+        )}
+
+        {/* CORREGIDO: Bloque con Dirección y desglose de Montos exactos */}
+        <div className="bg-slate-100 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-4 text-xs space-y-1">
+           <div><strong>Monto Pedido:</strong> <span className="text-slate-700 dark:text-slate-300 font-medium">${montoProductos.toFixed(2)}</span></div>
+           {p.tipoDespacho === 'Delivery' && (
+              <div><strong>Monto Delivery:</strong> <span className="text-fuchsia-600 dark:text-fuchsia-400 font-medium">${montoDelivery.toFixed(2)}</span></div>
+           )}
+           <div className="border-t border-slate-200 dark:border-slate-600 pt-1">
+              <strong>Total Cliente:</strong> <span className="text-emerald-600 dark:text-emerald-400 font-black">${montoTotalCliente.toFixed(2)}</span>
+           </div>
+           <div className="pt-1"><strong className="text-slate-500">Dirección:</strong> <span className="text-slate-600 dark:text-slate-300 ml-1">{p.direccion || 'Retiro Presencial en Tienda'}</span></div>
+        </div>
+
+        <div className="text-[11px] bg-slate-100 dark:bg-slate-800 p-3 rounded-xl whitespace-pre-wrap font-medium text-slate-600 dark:text-slate-300 mb-4 flex-grow border border-slate-200 dark:border-slate-700">
+           <div className="font-black mb-1 uppercase text-[9px] tracking-widest">Contenido del Paquete:</div>
+           {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
+        </div>
+
+        {/* CORREGIDO: Vistas en miniatura seguras (Sin errores visuales) + Extracto Bancario */}
+        <div className="flex flex-wrap gap-3 mb-4 bg-white dark:bg-slate-950 p-2 rounded-xl border border-slate-100 dark:border-slate-800/60">
+           {typeof urlValidacion === 'string' && urlValidacion.startsWith('http') && (
+             <div className="flex flex-col items-center gap-1">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Validación</span>
+                <a href={urlValidacion} target="_blank" rel="noreferrer" className="block w-12 h-12 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 hover:scale-105 transition-all shadow-sm">
+                   <img src={urlValidacion} alt="Validación" className="w-full h-full object-cover" onError={(e)=>{e.target.style.display='none'}}/>
+                </a>
+             </div>
+           )}
+           
+           {typeof urlExtracto === 'string' && urlExtracto.startsWith('http') && (
+             <div className="flex flex-col items-center gap-1">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Extracto</span>
+                <a href={urlExtracto} target="_blank" rel="noreferrer" className="block w-12 h-12 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 hover:scale-105 transition-all shadow-sm">
+                   <img src={urlExtracto} alt="Extracto" className="w-full h-full object-cover" onError={(e)=>{e.target.style.display='none'}}/>
+                </a>
+             </div>
+           )}
+
+           {typeof urlProducto === 'string' && urlProducto.startsWith('http') && (
+             <div className="flex flex-col items-center gap-1">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Producto</span>
+                <a href={urlProducto} target="_blank" rel="noreferrer" className="block w-12 h-12 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 hover:scale-105 transition-all shadow-sm">
+                   <img src={urlProducto} alt="Producto" className="w-full h-full object-cover" onError={(e)=>{e.target.style.display='none'}}/>
+                </a>
+             </div>
+           )}
+        </div>
+
+        <div className="mt-auto pt-4 border-t border-slate-200 dark:border-slate-700 flex flex-col gap-3">
+           {p.status === 'Despachado' ? (
+              <div className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-black text-xs uppercase tracking-widest py-3 rounded-xl flex justify-center items-center gap-2 border border-emerald-200 dark:border-emerald-800/50"><CheckCircle size={16}/> Procesado y Entregado</div>
+           ) : (
+              <>
+                <button onClick={()=>imprimirEtiqueta(p)} className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs hover:bg-slate-50 transition-colors"><Printer size={16}/> Imprimir Etiqueta</button>
                 
-      <div className="absolute -top-3 -left-3 bg-purple-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md">
-        {numeracionDiaria[p.id]}
+                <label className={`font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs transition-colors cursor-pointer border-2 ${p.linkFotoProductos ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-900/30 dark:border-emerald-500 dark:text-emerald-400' : 'bg-white border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:border-purple-300'}`}>
+                   {subiendoFotoId === p.id ? <Loader2 size={16} className="animate-spin"/> : p.linkFotoProductos ? <ImageIcon size={16}/> : <Camera size={16}/>}
+                   {subiendoFotoId === p.id ? 'Subiendo...' : p.linkFotoProductos ? 'Foto Capturada' : 'Tomar / Subir Foto'}
+                   <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e)=>subirFotoEntrega(e, p)} disabled={subiendoFotoId === p.id}/>
+                </label>
+
+                <button onClick={()=>marcarComoEntregado(p)} disabled={!p.linkFotoProductos || subiendoFotoId === p.id} className="bg-purple-600 hover:bg-purple-700 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 text-xs transition-colors shadow-md disabled:opacity-50 disabled:hover:bg-purple-600 uppercase tracking-widest"><CheckCircle size={16}/> Marcar Entregado</button>
+              </>
+           )}
+        </div>
       </div>
-
-      <div className="flex justify-between items-start mb-4 pl-4">
-         <div>
-           <div className="text-lg font-black text-slate-800 dark:text-slate-100 leading-tight">{p.clienteNombre}</div>
-           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Tlf: {p.clienteTelefono}</div>
-         </div>
-         {p.tipoDespacho === 'Delivery' ? (
-            <span className="bg-fuchsia-100 text-fuchsia-700 px-2 py-1 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase"><Bike size={12}/> Delivery</span>
-         ) : (
-            <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase"><Store size={12}/> Tienda</span>
-         )}
-      </div>
-
-      {p.tipoDespacho === 'Delivery' ? (
-         <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-2 text-xs">
-           <span className="font-bold text-slate-400 block mb-1">PROGRAMADO PARA:</span>
-           <span className="font-black text-fuchsia-600 dark:text-fuchsia-400 text-sm">{p.deliveryFecha} a las {p.deliveryHora}</span>
-         </div>
-      ) : (
-         <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-2 text-xs">
-           <span className="font-bold text-slate-400 block mb-1">AUTORIZADO PARA RETIRAR:</span>
-           <span className="font-black text-purple-600 dark:text-purple-400 text-sm block">{p.retiroNombre}</span>
-           <span className="font-bold text-slate-500">C.I: {p.retiroCedula}</span>
-         </div>
-      )}
-
-      {/* NUEVO: Dirección y Monto para Todos */}
-      <div className="bg-slate-100 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-4 text-xs">
-         <div className="mb-1"><strong>Monto Pagado:</strong> <span className="text-emerald-600 dark:text-emerald-400 font-bold ml-1">{p.total || p.montoTotal ? `$${p.total || p.montoTotal}` : 'N/A'}</span></div>
-         <div><strong className="text-slate-500">Dirección:</strong> <span className="text-slate-600 dark:text-slate-300 ml-1">{p.direccion || 'No especificada / Retiro'}</span></div>
-      </div>
-
-      <div className="text-[11px] bg-slate-100 dark:bg-slate-800 p-3 rounded-xl whitespace-pre-wrap font-medium text-slate-600 dark:text-slate-300 mb-4 flex-grow border border-slate-200 dark:border-slate-700">
-         <div className="font-black mb-1 uppercase text-[9px] tracking-widest">Contenido del Paquete:</div>
-         {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
-      </div>
-
-      {/* NUEVO: Accesos en miniatura */}
-      <div className="flex gap-4 mb-4">
-         {(p.linkComprobante || p.fotoPago || p.comprobantePago) && (
-           <div className="flex flex-col items-center gap-1">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Validación</span>
-              <a href={p.linkComprobante || p.fotoPago || p.comprobantePago} target="_blank" rel="noreferrer" className="block w-14 h-14 overflow-hidden rounded-lg border-2 border-slate-200 dark:border-slate-700 hover:border-purple-400 transition-all shadow-sm">
-                 <img src={p.linkComprobante || p.fotoPago || p.comprobantePago} alt="Validación" className="w-full h-full object-cover"/>
-              </a>
-           </div>
-         )}
-         {p.linkFotoProductos && (
-           <div className="flex flex-col items-center gap-1">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Producto</span>
-              <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="block w-14 h-14 overflow-hidden rounded-lg border-2 border-slate-200 dark:border-slate-700 hover:border-emerald-400 transition-all shadow-sm">
-                 <img src={p.linkFotoProductos} alt="Producto" className="w-full h-full object-cover"/>
-              </a>
-           </div>
-         )}
-      </div>
-
-      <div className="mt-auto pt-4 border-t border-slate-200 dark:border-slate-700 flex flex-col gap-3">
-         {p.status === 'Despachado' ? (
-            <div className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-black text-xs uppercase tracking-widest py-3 rounded-xl flex justify-center items-center gap-2 border border-emerald-200 dark:border-emerald-800/50"><CheckCircle size={16}/> Procesado y Entregado</div>
-         ) : (
-            <>
-              <button onClick={()=>imprimirEtiqueta(p)} className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs hover:bg-slate-50 transition-colors"><Printer size={16}/> Imprimir Etiqueta</button>
-              
-              <label className={`font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs transition-colors cursor-pointer border-2 ${p.linkFotoProductos ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-900/30 dark:border-emerald-500 dark:text-emerald-400' : 'bg-white border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:border-purple-300'}`}>
-                 {subiendoFotoId === p.id ? <Loader2 size={16} className="animate-spin"/> : p.linkFotoProductos ? <ImageIcon size={16}/> : <Camera size={16}/>}
-                 {subiendoFotoId === p.id ? 'Subiendo...' : p.linkFotoProductos ? 'Foto Capturada' : 'Tomar / Subir Foto'}
-                 <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e)=>subirFotoEntrega(e, p)} disabled={subiendoFotoId === p.id}/>
-              </label>
-
-              <button onClick={()=>marcarComoEntregado(p)} disabled={!p.linkFotoProductos || subiendoFotoId === p.id} className="bg-purple-600 hover:bg-purple-700 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 text-xs transition-colors shadow-md disabled:opacity-50 disabled:hover:bg-purple-600 uppercase tracking-widest"><CheckCircle size={16}/> Marcar Entregado</button>
-            </>
-         )}
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] shadow-sm border border-slate-200 dark:border-slate-700 transition-colors animate-in fade-in">
@@ -368,7 +403,7 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
          </div>
        </div>
 
-       {/* BARRA DE BÚSQUEDA Y NUEVOS FILTROS */}
+       {/* BARRA DE BÚSQUEDA Y FILTROS */}
        <div className="flex flex-col md:flex-row gap-4 mb-6 justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
           <div className="flex flex-col md:flex-row gap-3 w-full md:w-2/3">
              <div className="relative w-full md:w-1/2">
@@ -390,34 +425,32 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
           <button onClick={generarCierreAuditoria} className="bg-slate-800 text-white px-5 py-3 rounded-xl font-bold text-sm shadow-md hover:bg-slate-700 flex items-center gap-2 transition-colors w-full md:w-auto justify-center"><FileDown size={18}/> Cierre Auditable Diario</button>
        </div>
 
-       {/* RENDERIZADO CONDICIONAL DE LA GRILLA SEGÚN LA VISTA */}
+       {/* GRILLA PRINCIPAL */}
        {listado.length === 0 ? (
           <div className="p-12 text-center text-slate-400 font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl">No hay paquetes para la fecha y filtros seleccionados.</div>
        ) : vista === 'entregados' ? (
           <>
-             {/* SECCIÓN ENTREGADOS: ORDENADOS DE FORMA ASCENDENTE Y SEPARADOS */}
-             
-             {/* 1. ENTREGAS EN TIENDA */}
+             {/* 1. ENTREGAS EN TIENDA EN ORDEN ASCENDENTE */}
              <div className="mb-4 border-b-2 border-purple-200 dark:border-purple-800/50 pb-2 flex items-center gap-2">
-                <Store className="text-purple-600" />
+                <Store className="text-purple-600" size={20} />
                 <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">Entregas en Tienda</h3>
              </div>
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
                 {listado
                    .filter(p => p.tipoDespacho === 'Tienda')
-                   .sort((a, b) => a.fechaCreacion - b.fechaCreacion) // Ascendente
+                   .sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0))
                    .map(p => renderTarjetaPedido(p))}
              </div>
 
-             {/* 2. DELIVERYS */}
+             {/* 2. DELIVERYS EN ORDEN ASCENDENTE */}
              <div className="mb-4 border-b-2 border-fuchsia-200 dark:border-fuchsia-800/50 pb-2 flex items-center gap-2">
-                <Bike className="text-fuchsia-600" />
+                <Bike className="text-fuchsia-600" size={20} />
                 <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">Deliverys</h3>
              </div>
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {listado
                    .filter(p => p.tipoDespacho === 'Delivery')
-                   .sort((a, b) => a.fechaCreacion - b.fechaCreacion) // Ascendente
+                   .sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0))
                    .map(p => renderTarjetaPedido(p))}
              </div>
           </>
