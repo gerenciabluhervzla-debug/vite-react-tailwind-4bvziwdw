@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users, Truck, Wallet, ArrowDownCircle } from 'lucide-react';
+import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users, Truck, Wallet, ArrowDownCircle, ShoppingBag } from 'lucide-react';
 import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
@@ -74,10 +74,13 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   }, [validados]);
 
   const metricas = useMemo(() => {
-    let ventasUSD = 0; let ventasVES = 0; let ventasZelle = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
+    let ventasVES = 0; let ventasZelle = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
     let totalBrutoGeneralUsd = 0; let totalCobroEnviosUsd = 0;
     
-    // NUEVAS MÉTRICAS TIENDA
+    // MÉTRICAS SEGMENTADAS DE VENTAS (NUEVAS)
+    let ventasEnviosUsd = 0; let ventasDeliveryUsd = 0; let ventasTiendaUsd = 0;
+
+    // MÉTRICAS TIENDA FÍSICA
     let totalEfectivoTienda = 0; let totalPuntoTiendaBs = 0; let totalVueltosDados = 0;
 
     pedidosFiltrados.forEach(p => {
@@ -100,8 +103,17 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         const mUsd = p.montoUsd || 0;
         const costoEnvio = parseFloat(p.costoEnvio) || 0;
         
+        // Acumular Ventas por Tipo de Despacho
+        if (p.tipoDespacho === 'Delivery') {
+          ventasDeliveryUsd += mUsd;
+        } else if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda') {
+          ventasTiendaUsd += mUsd;
+        } else {
+          ventasEnviosUsd += mUsd;
+        }
+
         // Registrar pagos físicos de Tienda
-        if (p.tipoDespacho === 'Tienda') {
+        if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda') {
            totalEfectivoTienda += (p.montoEfectivoUsd || 0);
            totalPuntoTiendaBs += (p.montoPuntoVentaBs || 0);
            totalVueltosDados += (p.vueltoUsd || 0);
@@ -113,7 +125,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         if (p.moneda === 'ZELLE') {
            ventasZelle += mUsd;
         } else {
-           ventasUSD += mUsd;
            ventasVES += (p.montoVes || 0);
         }
 
@@ -124,14 +135,14 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       }
     });
 
-    // El VueltoDado sale del dinero Bruto/Neto que recibimos (Resta)
     totalBrutoGeneralUsd -= totalVueltosDados;
     const totalNetoProductosUsd = totalBrutoGeneralUsd - totalCobroEnviosUsd;
 
     return { 
-       ventasUSD, ventasVES, ventasZelle, mlUSD, mlVES, regalosUSD, descuentosUSD, 
+       ventasVES, ventasZelle, mlUSD, mlVES, regalosUSD, descuentosUSD, 
        totalBrutoGeneralUsd, totalCobroEnviosUsd, totalNetoProductosUsd,
-       totalEfectivoTienda, totalPuntoTiendaBs, totalVueltosDados 
+       totalEfectivoTienda, totalPuntoTiendaBs, totalVueltosDados,
+       ventasEnviosUsd, ventasDeliveryUsd, ventasTiendaUsd
     };
   }, [pedidosFiltrados, catalogo]);
 
@@ -163,19 +174,47 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       return Object.values(map).sort((a,b) => (b.totalUsd + b.totalZelle) - (a.totalUsd + a.totalZelle));
   }, [pedidosFiltrados]);
 
+  // --- CÁLCULO INVENTARIO FÍSICO (RECEPCIÓN + ENVÍOS - DESCUENTOS BRUTOS DE VENDIDOS / REGALOS) ---
   const totalValInventario = useMemo(() => {
-    let t = 0;
+    let valorInicialStock = 0;
+    
+    // 1. Sumar el valor de catálogo base de todo el inventario físico inicial (recepción + envíos)
     Object.entries(stock).forEach(([key, val]) => {
-      const c = typeof val === 'object' ? val.envios : val;
-      if (c > 0) {
+      const cantEnvios = typeof val === 'object' ? (val.envios || 0) : (val || 0);
+      const cantRecepcion = typeof val === 'object' ? (val.recepcion || 0) : 0;
+      const totalCant = cantEnvios + cantRecepcion;
+
+      if (totalCant > 0) {
         const [n, pr] = key.split('|');
         catalogo.forEach(cat => cat.productos.forEach(p => { 
-          if(p.nombre === n){ const i = p.presentaciones.indexOf(pr); if(i >= 0) t += (c * p.precios[i]); } 
+          if(p.nombre === n){ 
+            const i = p.presentaciones.indexOf(pr); 
+            if(i >= 0) valorInicialStock += (totalCant * p.precios[i]); 
+          } 
         }));
       }
     });
-    return t;
-  }, [stock, catalogo]);
+
+    // 2. Calcular y restar el valor total de catálogo original vendido (sin restar descuentos e incluyendo obsequios)
+    let valorDescontarPorVentas = 0;
+    pedidosFiltrados.forEach(p => {
+      if (p.carritoObj) {
+        Object.entries(p.carritoObj).forEach(([key, qty]) => {
+          const [n, pr] = key.split('|');
+          catalogo.forEach(cat => cat.productos.forEach(prod => {
+            if (prod.nombre === n) {
+              const idx = prod.presentaciones.indexOf(pr);
+              if (idx >= 0 && prod.precios) { 
+                valorDescontarPorVentas += (prod.precios[idx] * qty); 
+              }
+            }
+          }));
+        });
+      }
+    });
+
+    return Math.max(0, valorInicialStock - valorDescontarPorVentas);
+  }, [stock, catalogo, pedidosFiltrados]);
 
   const topProductos = useMemo(() => {
     const map = {};
@@ -229,9 +268,21 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
        if (p.carritoObj) {
           Object.entries(p.carritoObj).forEach(([key, qty]) => {
-             if (!productosDetallados[key]) productosDetallados[key] = { nombre: key.replace('|', ' - '), unidades: 0, valorRealUsd: 0 };
+             if (!productosDetallados[key]) {
+                productosDetallados[key] = { 
+                   nombre: key.replace('|', ' - '), 
+                   unidadesEnvios: 0, 
+                   unidadesRecepcion: 0, 
+                   valorRealUsd: 0 
+                };
+             }
              
-             productosDetallados[key].unidades += qty;
+             // Separación de cantidades: Envíos vs Recepción (Tienda + Delivery)
+             if (p.tipoDespacho === 'Delivery' || p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda') {
+                productosDetallados[key].unidadesRecepcion += qty;
+             } else {
+                productosDetallados[key].unidadesEnvios += qty;
+             }
              
              const [n, pr] = key.split('|');
              let precioUnitarioCata = 0;
@@ -252,13 +303,18 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        }
     });
 
-    const listaProductosPDF = Object.values(productosDetallados).sort((a, b) => b.unidades - a.unidades);
+    const listaProductosPDF = Object.values(productosDetallados).sort((a, b) => (b.unidadesEnvios + b.unidadesRecepcion) - (a.unidadesEnvios + a.unidadesRecepcion));
+
+    // Separación de Pedidos para el informe en 3 bloques
+    const pedidosEnviosNacionales = pedidosFiltrados.filter(p => p.tipoDespacho !== 'Delivery' && p.tipoDespacho !== 'Tienda' && p.tipoDespacho !== 'Entrega en tienda');
+    const pedidosEntregasTienda = pedidosFiltrados.filter(p => p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda');
+    const pedidosDelivery = pedidosFiltrados.filter(p => p.tipoDespacho === 'Delivery');
 
     let html = `
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Reporte de Ventas Bluher</title>
+        <title>Reporte de Ventas Bluher Sys</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
           body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 900px; margin: 0 auto; }
@@ -284,7 +340,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           .kpi-box p { margin: 0; font-size: 20px; font-weight: 900; }
           .kpi-box.main p, .kpi-box.neto p { font-size: 26px; }
           
-          h2 { font-size: 16px; font-weight: 900; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-top: 40px;}
+          h2 { font-size: 14px; font-weight: 900; border-left: 4px solid #0ea5e9; padding-left: 8px; margin-top: 40px; color: #0f172a; text-transform: uppercase; }
           table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
           th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 8px; text-align: left; vertical-align: top; }
           th { background-color: #f1f5f9; color: #475569; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
@@ -343,10 +399,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
               <h3>Ventas Restantes Bs</h3>
               <p>Bs ${metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
            </div>
-           <div class="kpi-box">
-              <h3>Transf / Efectivo ($)</h3>
-              <p>$${metricas.ventasUSD.toFixed(2)}</p>
-           </div>
            <div class="kpi-box zelle">
               <h3>Ventas ZELLE ($)</h3>
               <p>$${metricas.ventasZelle.toFixed(2)}</p>
@@ -365,8 +417,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
          <div style="background: #f8fafc; padding: 15px; margin-top: 15px; border-radius: 8px; border-left: 4px solid #0ea5e9;">
             <h3 style="margin: 0 0 10px 0; font-size: 14px;">${asesora.nombre.toUpperCase()}</h3>
             <p style="margin: 0; font-size: 12px; font-weight: bold; color: #475569;">
-               Divisas: <span style="color:#0f172a;">$${asesora.totalUsd.toFixed(2)}</span> | 
                Zelle: <span style="color:#6b21a8;">$${asesora.totalZelle.toFixed(2)}</span> | 
+               Bolívares / Efectivo: <span style="color:#059669;">$${asesora.totalUsd.toFixed(2)}</span> | 
                Bolívares: <span style="color:#059669;">Bs. ${asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
             </p>
          </div>
@@ -390,16 +442,18 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        html += `</tbody></table>`;
     });
 
+    // RENDERIZADO DEL RESUMEN DE CANTIDADES DE PRODUCTOS (SEPARANDO ENVÍOS Y RECEPCIÓN)
     html += `
         <h2 style="margin-top: 50px;">Resumen de Productos Vendidos</h2>
         <div style="font-size: 10px; color: #64748b; margin-top: -5px; margin-bottom: 10px;">
-           * El "Valor Real ($)" refleja lo que realmente ingresó por ese producto luego de aplicar descuentos si los hubo (No incluye mercancía de regalo ni cobros por envío).
+           * El "Valor Real ($)" refleja lo que realmente ingresó por ese producto luego de aplicar descuentos si los hubo.
         </div>
         <table>
           <thead>
             <tr>
-              <th style="width: 60%;">Producto y Presentación</th>
-              <th style="width: 20%; text-align:center;">Unidades Vendidas</th>
+              <th style="width: 46%;">Producto y Presentación</th>
+              <th style="width: 17%; text-align:center;">U. Envíos</th>
+              <th style="width: 17%; text-align:center;">U. Recepción</th>
               <th style="width: 20%; text-align:right;">Valor Real ($)</th>
             </tr>
           </thead>
@@ -407,21 +461,23 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     `;
 
     if (listaProductosPDF.length === 0) {
-      html += `<tr><td colspan="3" style="text-align:center; padding: 30px; font-style: italic; color: #94a3b8;">No hay productos vendidos en este periodo.</td></tr>`;
+      html += `<tr><td colspan="4" style="text-align:center; padding: 30px; font-style: italic; color: #94a3b8;">No hay productos vendidos en este periodo.</td></tr>`;
     } else {
       listaProductosPDF.forEach(prod => {
          html += `<tr>
            <td><strong>${prod.nombre}</strong></td>
-           <td style="text-align:center; font-weight:bold; color:#0f172a;">${prod.unidades}</td>
+           <td style="text-align:center; font-weight:bold; color:#ea580c;">${prod.unidadesEnvios}</td>
+           <td style="text-align:center; font-weight:bold; color:#3b82f6;">${prod.unidadesRecepcion}</td>
            <td style="text-align:right; font-weight:bold; color:#059669;">$${prod.valorRealUsd.toFixed(2)}</td>
          </tr>`;
       });
     }
     html += `</tbody></table>`;
 
-    html += `
-        <h2 style="margin-top: 50px;">Detalle Histórico Global (Todas las Órdenes Validadas)</h2>
-        <table>
+
+    // FUNCIÓN DE AYUDA PARA AGREGAR TABLAS DE PEDIDOS SEGMENTADAS
+    const macroTablaPedidos = (tituloSeccion, listadoPedidos) => {
+       let tablaHtml = `<h2 style="margin-top: 50px;">${tituloSeccion} (${listadoPedidos.length})</h2><table>
           <thead>
             <tr>
               <th style="width: 20%;">Cliente / Asesora</th>
@@ -431,33 +487,40 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
               <th style="text-align:right; width: 10%;">USD</th>
             </tr>
           </thead>
-          <tbody>
-    `;
+          <tbody>`;
 
-    pedidosFiltrados.forEach(p => {
-       const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
-       const isZelle = p.moneda === 'ZELLE';
-       const costoEnvio = parseFloat(p.costoEnvio) || 0;
-       
-       html += `<tr>
-         <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${p.fechaDespacho}</span><br><span style="font-size:10px; font-weight:bold;">Asesora: ${p.asesora}</span></td>
-         <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia || 'N/A'}</span><br><span style="font-size:9px; font-weight:bold; color:#4338ca; display:block; margin-top:4px;">${p.origenPedido || 'Sin Origen'}</span></td>
-         <td class="products-list">${prodsFormat}</td>
-         <td style="text-align:right; font-weight:bold; color:#059669;">${isZelle ? '-' : (p.montoVes || 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-         <td style="text-align:right; font-weight:900; font-size:13px;">
-            $${(p.montoUsd || 0).toFixed(2)} ${isZelle ? '<br><span class="zelle-tag">ZELLE</span>' : ''}
-            ${costoEnvio > 0 ? `<br><span class="envio-tag">Envío: $${costoEnvio.toFixed(2)}</span>` : ''}
-         </td>
-       </tr>`;
-    });
+       if (listadoPedidos.length === 0) {
+          tablaHtml += `<tr><td colspan="5" style="text-align:center; padding: 20px; font-style: italic; color: #94a3b8;">No se registraron órdenes en esta sección.</td></tr>`;
+       } else {
+          listadoPedidos.forEach(p => {
+             const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
+             const isZelle = p.moneda === 'ZELLE';
+             const costoEnvio = parseFloat(p.costoEnvio) || 0;
+             
+             tablaHtml += `<tr>
+               <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${p.fechaDespacho}</span><br><span style="font-size:10px; font-weight:bold;">Asesora: ${p.asesora}</span></td>
+               <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia || 'N/A'}</span><br><span style="font-size:9px; font-weight:bold; color:#4338ca; display:block; margin-top:4px;">${p.origenPedido || 'Sin Origen'}</span></td>
+               <td class="products-list">${prodsFormat}</td>
+               <td style="text-align:right; font-weight:bold; color:#059669;">${isZelle ? '-' : (p.montoVes || 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+               <td style="text-align:right; font-weight:900; font-size:13px;">
+                  $${(p.montoUsd || 0).toFixed(2)} ${isZelle ? '<br><span class="zelle-tag">ZELLE</span>' : ''}
+                  ${costoEnvio > 0 ? `<br><span class="envio-tag">Costo: $${costoEnvio.toFixed(2)}</span>` : ''}
+               </td>
+             </tr>`;
+          });
+       }
+       tablaHtml += `</tbody></table>`;
+       return tablaHtml;
+    };
 
-    if (pedidosFiltrados.length === 0) {
-      html += `<tr><td colspan="5" style="text-align:center; padding: 30px; font-style: italic; color: #94a3b8;">No se registraron ventas válidas en este periodo.</td></tr>`;
-    }
+    // Imprimir las 3 secciones requeridas de pedidos separadas
+    html += macroTablaPedidos("Envíos Nacionales", pedidosEnviosNacionales);
+    html += macroTablaPedidos("Entregas en Tienda", pedidosEntregasTienda);
+    html += macroTablaPedidos("Delivery", pedidosDelivery);
 
-    html += `</tbody></table>
+    html += `
       <div style="margin-top: 50px; border-top: 1px dashed #cbd5e1; padding-top: 20px; color: #94a3b8; font-size: 11px; text-align: center;">
-         Documento generado automáticamente por el Sistema de Gestión Bluher el ${new Date().toLocaleString('es-VE')}
+         Documento generado automáticamente por el Sistema de Gestión Bluher Sys el ${new Date().toLocaleString('es-VE')}
       </div>
     </body></html>`;
 
@@ -537,11 +600,45 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
          </div>
       )}
 
-      {/* MÉTRICAS SECUNDARIAS (INCLUYENDO TIENDA Y VUELTOS) */}
+      {/* TRES NUEVOS CAMPOS: SEGMENTACIÓN DE VENTAS */}
+      {verDinero && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
+              <div className="w-14 h-14 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-500 rounded-2xl flex items-center justify-center shrink-0">
+                <Truck size={28}/>
+              </div>
+              <div>
+                <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas en Envíos</div>
+                <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.ventasEnviosUsd.toFixed(2)}</div>
+              </div>
+           </div>
+
+           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
+              <div className="w-14 h-14 bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-500 rounded-2xl flex items-center justify-center shrink-0">
+                <ShoppingBag size={28}/>
+              </div>
+              <div>
+                <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas Delivery</div>
+                <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.ventasDeliveryUsd.toFixed(2)}</div>
+              </div>
+           </div>
+
+           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
+              <div className="w-14 h-14 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-500 rounded-2xl flex items-center justify-center shrink-0">
+                <Store size={28}/>
+              </div>
+              <div>
+                <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas Entrega en Tienda</div>
+                <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.ventasTiendaUsd.toFixed(2)}</div>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* MÉTRICAS SECUNDARIAS (CAJAS FÍSICAS Y AUDITORÍA) */}
       {(verDinero || verTotalInventario) && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
            
-           {/* NUEVAS MÉTRICAS: PAGOS EN TIENDA FÍSICA */}
            {verDinero && (
               <>
                  <div className="bg-sky-100 text-sky-900 p-5 rounded-2xl shadow-sm flex flex-col justify-center border-b-4 border-sky-300 relative overflow-hidden">
@@ -569,14 +666,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
            {verDinero && (
              <>
-               <div className="bg-[#003366] text-white p-6 rounded-[2rem] shadow-md flex flex-col justify-center border-b-4 border-sky-600 relative overflow-hidden">
-                  <div className="relative z-10">
-                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Transf. USD / Efec ($)</div>
-                    <div className="text-2xl lg:text-3xl font-black">${metricas.ventasUSD.toFixed(2)}</div>
-                  </div>
-                  <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
-               </div>
-
                <div className="bg-purple-800 text-white p-6 rounded-[2rem] shadow-md flex flex-col justify-center border-b-4 border-purple-950 relative overflow-hidden">
                   <div className="relative z-10">
                     <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-purple-200 mb-1">Pagos ZELLE ($)</div>
@@ -585,7 +674,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                   <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
                </div>
                
-               <div className="bg-emerald-50 text-emerald-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-emerald-200 relative overflow-hidden">
+               <div className="bg-emerald-50 text-emerald-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-emerald-200 relative overflow-hidden md:col-span-2">
                   <div className="relative z-10">
                     <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Transf. y PagoMóvil Bs</div>
                     <div className="text-xl lg:text-2xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
@@ -595,11 +684,13 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              </>
            )}
 
+           {/* CAMPO DE INVENTARIO FÍSICO SOLO VISIBLE PARA ADMINISTRADORES */}
            {verTotalInventario && (
-             <div className="bg-slate-100 text-slate-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-slate-300 relative overflow-hidden md:col-span-full xl:col-span-1">
+             <div className="bg-slate-100 text-slate-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-slate-300 relative overflow-hidden col-span-full">
                 <div className="relative z-10">
-                  <div className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">Inventario Físico ($)</div>
+                  <div className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">Inventario Físico Restante Auditado ($)</div>
                   <div className="text-2xl lg:text-3xl font-black">${totalValInventario.toFixed(2)}</div>
+                  <p className="text-[10px] text-slate-400 mt-1 font-semibold">* Suma base (Recepcion + Envios) descontando el total bruto de productos vendidos u obsequiados sin distorsión de ofertas.</p>
                 </div>
                 <Archive size={80} className="absolute -right-4 -bottom-4 opacity-5"/>
              </div>
@@ -659,7 +750,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                     <th className="p-4 font-black tracking-wide">Cliente y Teléfono</th>
                     <th className="p-4 font-black tracking-wide">Origen del Pedido</th>
                     <th className="p-4 font-black tracking-wide text-right">Monto Bs</th>
-                    <th className="p-4 font-black tracking-wide text-right">Monto USD / Zelle</th>
+                    <th className="p-4 font-black tracking-wide text-right">Monto Zelle / Restante</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -672,8 +763,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                                   <span className="font-black text-lg text-sky-800 dark:text-sky-300 uppercase tracking-tighter">{asesora.nombre}</span>
                                   <div className="flex flex-wrap gap-4 text-xs font-bold text-slate-600 dark:text-slate-300">
-                                     <span className="bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border dark:border-slate-700 shadow-sm">Divisas: <span className="text-slate-900 dark:text-white">${asesora.totalUsd.toFixed(2)}</span></span>
                                      <span className="bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-3 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800/50 shadow-sm">Zelle: ${asesora.totalZelle.toFixed(2)}</span>
+                                     <span className="bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border dark:border-slate-700 shadow-sm">Bolívares / Efectivo: <span className="text-slate-900 dark:text-white">${asesora.totalUsd.toFixed(2)}</span></span>
                                      <span className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800/50 shadow-sm">Bs. {asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2})}</span>
                                   </div>
                                </div>
@@ -716,6 +807,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
+      {/* TOP 10 PRODUCTOS */}
       <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
            <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><Sparkles className="text-sky-600"/> Top 10 Productos Más Vendidos</h3>
