@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Store, Bike, Package, Printer, Camera, CheckCircle, Search, FileDown, Loader2, Image as ImageIcon, ClipboardCheck, ShieldCheck, CheckSquare, Save, FileSpreadsheet, Download, FileOutput, AlertTriangle, MessageSquare } from 'lucide-react';
-import { updateDoc, doc, addDoc, collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { Store, Bike, Package, Printer, Camera, CheckCircle, Search, Loader2, ClipboardCheck, ShieldCheck, CheckSquare, Save, FileSpreadsheet, Download, FileOutput, AlertTriangle, MessageSquare } from 'lucide-react';
+import { updateDoc, doc, addDoc, collection, getDocs, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image';
 import { BRAND_LOGO, ROLES } from '../config/constants';
@@ -17,7 +17,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   const [fechaFiltro, setFechaFiltro] = useState(getHoyISO());
   const [tipoFiltro, setTipoFiltro] = useState('Todos');
   const [subiendoFotoId, setSubiendoFotoId] = useState(null);
-  const [vista, setVista] = useState('pendientes'); // 'pendientes' | 'retiros' | 'entregados' | 'inventario' | 'auditoria'
+  const [vista, setVista] = useState('pendientes'); 
   
   // Estados para Auditoría y Conteo Físico
   const [cierresGuardados, setCierresGuardados] = useState([]);
@@ -25,13 +25,63 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   const [conteoActivo, setConteoActivo] = useState(false);
   const [conteoFisico, setConteoFisico] = useState({});
   const [notasConteo, setNotasConteo] = useState({});
+  const [movimientos, setMovimientos] = useState([]);
 
-  // Filtrar pedidos
+  // Cargar movimientos en tiempo real para el cálculo de Ingresos/Salidas
+  useEffect(() => {
+    const qMovs = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'));
+    const unsubMovs = onSnapshot(qMovs, (snap) => setMovimientos(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => unsubMovs();
+  }, [db, appId]);
+
+  // Lógica del Kardex Diario de Recepción
+  const hoyKardex = useMemo(() => {
+    const aggr = {};
+    catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
+        aggr[`${p.nombre}|${pres}`] = { ventas: 0, ingresos: 0, salidas: 0 };
+    })));
+
+    const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const tDate = getVeneziaTime();
+    const todayStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
+    const startOfDay = new Date(tDate.getFullYear(), tDate.getMonth(), tDate.getDate()).getTime();
+
+    // 1. Sumar Ventas (Pedidos Tienda o Delivery del día)
+    pedidos.forEach(p => {
+        if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr && ['Tienda', 'Delivery'].includes(p.tipoDespacho)) {
+            if (p.carritoObj) {
+                Object.entries(p.carritoObj).forEach(([k, qty]) => {
+                    if (aggr[k]) aggr[k].ventas += qty;
+                });
+            }
+        }
+    });
+
+    // 2. Sumar Movimientos (Transferencias desde Envíos, Ingresos y Salidas manuales)
+    movimientos.forEach(m => {
+        if (m.fechaCreacion >= startOfDay) {
+            if (m.tipo === 'TRANSFERENCIA') {
+                Object.entries(m.items || {}).forEach(([k, qty]) => {
+                    if (aggr[k]) aggr[k].ingresos += qty;
+                });
+            } else if (m.tipo === 'INGRESO' && (!m.destino || m.destino === 'recepcion' || m.destino === 'tienda')) {
+                Object.entries(m.items || {}).forEach(([k, qty]) => {
+                    if (aggr[k]) aggr[k].ingresos += qty;
+                });
+            } else if (m.tipo === 'SALIDA' && m.status === 'COMPLETADO' && (m.origen === 'recepcion' || m.origen === 'tienda')) {
+                Object.entries(m.items || {}).forEach(([k, qty]) => {
+                    if (aggr[k]) aggr[k].salidas += qty;
+                });
+            }
+        }
+    });
+    
+    return aggr;
+  }, [pedidos, movimientos, catalogo]);
+
   const pedidosRecepcionBase = useMemo(() => {
      return pedidos.filter(p => 
-        ['Tienda', 'Delivery'].includes(p.tipoDespacho) && 
-        !p.esPublico && 
-        !['Anulado', 'Rechazado', 'Pendiente'].includes(p.status)
+        ['Tienda', 'Delivery'].includes(p.tipoDespacho) && !p.esPublico && !['Anulado', 'Rechazado', 'Pendiente'].includes(p.status)
      );
   }, [pedidos]);
 
@@ -122,9 +172,6 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
     });
   };
 
-  // --------------------------------------------------------
-  // LÓGICA DE CIERRE FÍSICO E INVENTARIO
-  // --------------------------------------------------------
   const cargarCierres = async () => {
     setCargandoCierres(true);
     try {
@@ -143,7 +190,6 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
     const inicial = {};
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
       const key = `${p.nombre}|${pres}`;
-      // Se asume que el stock asignado a recepción está en la propiedad "recepcion" (o "tienda")
       inicial[key] = typeof stock[key] === 'object' ? (stock[key].recepcion || stock[key].tienda || 0) : 0;
     })));
     setConteoFisico(inicial);
@@ -163,7 +209,10 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
       
       catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
         const key = `${p.nombre}|${pres}`;
+        const kData = hoyKardex[key] || { ventas: 0, ingresos: 0, salidas: 0 };
+        
         const sistema = typeof stock[key] === 'object' ? (stock[key].recepcion || stock[key].tienda || 0) : 0;
+        const inicioDia = sistema + kData.ventas + kData.salidas - kData.ingresos;
         const fisico = conteoFisico[key] ?? sistema;
         const diferencia = fisico - sistema; 
         
@@ -172,7 +221,11 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
         productosCierre.push({ 
            categoria: c.categoria, 
            nombre: p.nombre, 
-           presentacion: pres, 
+           presentacion: pres,
+           inicioDia,
+           ingresos: kData.ingresos,
+           salidas: kData.salidas,
+           ventas: kData.ventas,
            sistema, 
            fisico, 
            diferencia, 
@@ -201,10 +254,10 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   };
 
   const generarCSV = (cierre) => {
-    let csv = 'Categoria,Producto,Presentacion,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
+    let csv = 'Categoria,Producto,Presentacion,Inicio Dia,Ingresos (Envios),Salidas,Ventas,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
     cierre.productos.forEach(p => {
       const estatus = p.diferencia === 0 ? 'OK' : (p.diferencia > 0 ? 'SOBRANTE' : 'FALTANTE');
-      csv += `"${p.categoria}","${p.nombre}","${p.presentacion}",${p.sistema},${p.fisico},${p.diferencia},"${estatus}","${p.nota}"\n`;
+      csv += `"${p.categoria}","${p.nombre}","${p.presentacion}",${p.inicioDia||0},${p.ingresos||0},${p.salidas||0},${p.ventas||0},${p.sistema},${p.fisico},${p.diferencia},"${estatus}","${p.nota}"\n`;
     });
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' }); 
     const url = URL.createObjectURL(blob);
@@ -227,7 +280,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
         <title>Reporte Cierre Recepción - ${cierre.fecha}</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-          body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 900px; margin: 0 auto; }
+          body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 1050px; margin: 0 auto; }
           .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #9333ea; padding-bottom: 20px; margin-bottom: 20px; }
           .logo { height: 60px; object-fit: contain; }
           h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; text-transform: uppercase; }
@@ -270,6 +323,10 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
             <tr>
               <th>Categoría</th>
               <th>Producto</th>
+              <th style="text-align:center;">Inicio Día</th>
+              <th style="text-align:center; color:#2563eb;">Ingresos</th>
+              <th style="text-align:center; color:#ea580c;">Salidas</th>
+              <th style="text-align:center; color:#059669;">Ventas</th>
               <th style="text-align:center; background:#f8fafc;">Stock Sist.</th>
               <th style="text-align:center;">Stock Físico</th>
               <th style="text-align:center;">Diferencia</th>
@@ -281,10 +338,18 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
     cierre.productos.forEach(p => {
        const claseDif = p.diferencia === 0 ? 'ok' : (p.diferencia < 0 ? 'faltante' : 'sobrante');
        const textDif = p.diferencia === 0 ? 'OK' : (p.diferencia > 0 ? '+'+p.diferencia : p.diferencia);
+       const ini = p.inicioDia !== undefined ? p.inicioDia : '-';
+       const ing = p.ingresos !== undefined ? p.ingresos : '-';
+       const sal = p.salidas !== undefined ? p.salidas : '-';
+       const vta = p.ventas !== undefined ? p.ventas : '-';
 
        html += `<tr>
          <td>${p.categoria}</td>
          <td><strong>${p.nombre}</strong><br><span style="color:#64748b; font-size:10px;">${p.presentacion}</span></td>
+         <td style="text-align:center;">${ini}</td>
+         <td style="text-align:center; color:#2563eb; font-weight:bold;">${ing}</td>
+         <td style="text-align:center; color:#ea580c; font-weight:bold;">${sal}</td>
+         <td style="text-align:center; color:#059669; font-weight:bold;">${vta}</td>
          <td style="text-align:center; font-weight:bold; font-size:13px; background:#f8fafc;">${p.sistema}</td>
          <td style="text-align:center; font-weight:900; font-size:13px;">${p.fisico}</td>
          <td class="${claseDif}" style="text-align:center;">${textDif}</td>
@@ -303,7 +368,6 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   };
 
   const renderTarjetaPedido = (p) => {
-    // Código de la tarjeta sin cambios, se reutiliza para mantener el diseño.
     const montoProductos = calcularMontoPedido(p);
     const montoDelivery = Number(p.montoDelivery || p.deliveryMonto || 0);
     const montoTotalCliente = montoProductos + (p.tipoDespacho === 'Delivery' ? montoDelivery : 0);
@@ -418,7 +482,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
              <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700">
                 <CheckSquare size={64} className="mx-auto text-purple-300 dark:text-purple-800 mb-6" />
                 <h3 className="text-2xl font-black text-slate-700 dark:text-slate-200 mb-2">Auditoría Diaria de Recepción</h3>
-                <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara el inventario físico en la tienda contra el registrado en Bluher Sys.</p>
+                <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara el inventario físico en la tienda contra el registrado en Bluher Sys evaluando el Kárdex de hoy.</p>
                 <button onClick={iniciarConteo} className="bg-purple-600 hover:bg-purple-700 text-white font-black py-4 px-8 rounded-xl shadow-lg transition-all hover:-translate-y-1">
                   Iniciar Conteo del Día
                 </button>
@@ -428,7 +492,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-purple-50 dark:bg-purple-900/20 p-6 rounded-2xl border border-purple-100 dark:border-purple-800">
                   <div>
                     <h3 className="font-black text-purple-900 dark:text-purple-300 text-lg">Hoja de Trabajo Activa</h3>
-                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Las casillas ya tienen la cantidad del sistema. Modifica solo donde haya diferencias.</p>
+                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Las casillas ya tienen la cantidad final del sistema calculada en base a los movimientos de hoy. Modifica solo donde haya diferencias.</p>
                   </div>
                   <div className="flex gap-3 w-full md:w-auto">
                     <button onClick={()=>setConteoActivo(false)} className="flex-1 md:flex-none px-6 py-3 font-bold text-slate-600 bg-white dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Cancelar</button>
@@ -437,20 +501,27 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                </div>
 
                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                  <table className="w-full text-left text-sm border-collapse min-w-[700px]">
+                  <table className="w-full text-left text-sm border-collapse min-w-[1000px]">
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                         <th className="p-4 font-black">Producto</th>
-                        <th className="p-4 font-black text-center w-32">Stock Sistema</th>
-                        <th className="p-4 font-black text-center bg-purple-100 dark:bg-purple-900/40 w-32">Conteo Físico</th>
-                        <th className="p-4 font-black text-center w-32">Diferencia</th>
+                        <th className="p-4 font-black text-center w-24">Inicio Día</th>
+                        <th className="p-4 font-black text-center w-24 text-blue-600">Ingresos</th>
+                        <th className="p-4 font-black text-center w-24 text-orange-600">Salidas</th>
+                        <th className="p-4 font-black text-center w-24 text-emerald-600">Ventas</th>
+                        <th className="p-4 font-black text-center w-24">Stock Sist.</th>
+                        <th className="p-4 font-black text-center bg-purple-100 dark:bg-purple-900/40 w-32">Físico Tienda</th>
+                        <th className="p-4 font-black text-center w-28">Diferencia</th>
                         <th className="p-4 font-black">Notas / Justificación</th>
                       </tr>
                     </thead>
                     <tbody>
                       {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
                          const key = `${p.nombre}|${pres}`;
+                         const kData = hoyKardex[key] || { ventas: 0, ingresos: 0, salidas: 0 };
+                         
                          const sistema = typeof stock[key] === 'object' ? (stock[key].recepcion || stock[key].tienda || 0) : 0;
+                         const inicioDia = sistema + kData.ventas + kData.salidas - kData.ingresos;
                          const fisico = conteoFisico[key] ?? sistema;
                          const diferencia = fisico - sistema;
                          
@@ -464,6 +535,10 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                                 <div className="font-bold text-slate-800 dark:text-slate-100">{p.nombre}</div>
                                 <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{pres}</div>
                               </td>
+                              <td className="p-4 text-center font-bold text-lg text-slate-500">{inicioDia}</td>
+                              <td className="p-4 text-center font-bold text-lg text-blue-600">{kData.ingresos}</td>
+                              <td className="p-4 text-center font-bold text-lg text-orange-600">{kData.salidas}</td>
+                              <td className="p-4 text-center font-bold text-lg text-emerald-600">{kData.ventas}</td>
                               <td className="p-4 text-center font-black text-lg text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-900/30">{sistema}</td>
                               <td className="p-4 text-center bg-purple-50 dark:bg-purple-900/20">
                                  <input 
