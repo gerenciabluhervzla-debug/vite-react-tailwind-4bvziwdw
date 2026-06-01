@@ -9,7 +9,7 @@ import { ROLES } from '../config/constants';
 
 export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
 
- const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS].includes(perfil?.role);
+ const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION].includes(perfil?.role);
  const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial');
 
  const getLocalToday = () => {
