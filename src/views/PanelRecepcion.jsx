@@ -1,14 +1,40 @@
 import React, { useState, useMemo } from 'react';
 import { Store, Bike, Package, Printer, Camera, CheckCircle, Search, FileDown, Loader2, Image as ImageIcon } from 'lucide-react';
-import { updateDoc, doc } from 'firebase/firestore';
+import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image';
-import { StatusBadge } from '../components/ui';
+import { BRAND_LOGO } from '../config/constants';
 
 export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, dialogs }) {
+  const getHoyISO = () => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
   const [busqueda, setBusqueda] = useState('');
+  const [fechaFiltro, setFechaFiltro] = useState(getHoyISO());
+  const [tipoFiltro, setTipoFiltro] = useState('Todos'); // 'Todos' | 'Delivery' | 'Tienda'
   const [subiendoFotoId, setSubiendoFotoId] = useState(null);
   const [vista, setVista] = useState('pendientes'); // 'pendientes' | 'retiros' | 'entregados'
+
+  // NUEVA LÓGICA DE NUMERACIÓN (Independiente por Tipo de Despacho)
+  const numeracionDiaria = useMemo(() => {
+    const map = {};
+    const agrupados = {};
+    pedidos.forEach(p => {
+       const fecha = p.fechaDespacho || 'Sin Fecha';
+       const tipo = p.tipoDespacho || 'Nacional'; // Nacional, Tienda o Delivery
+       const key = `${fecha}_${tipo}`;
+       
+       if (!agrupados[key]) agrupados[key] = [];
+       agrupados[key].push(p);
+    });
+    Object.keys(agrupados).forEach(key => {
+       agrupados[key].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+       agrupados[key].forEach((p, index) => { map[p.id] = index + 1; });
+    });
+    return map;
+  }, [pedidos]);
 
   // Filtrar solo pedidos que corresponden a Recepción y están pagados/validados
   const pedidosRecepcion = useMemo(() => {
@@ -19,7 +45,7 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
      ).sort((a, b) => b.fechaCreacion - a.fechaCreacion);
   }, [pedidos]);
 
-  // Sub-clasificaciones
+  // Sub-clasificaciones con los nuevos filtros
   const listado = useMemo(() => {
      let filtrados = pedidosRecepcion;
      
@@ -27,15 +53,27 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
      if (vista === 'retiros') filtrados = filtrados.filter(p => p.status === 'Validado' && p.tipoDespacho === 'Tienda');
      if (vista === 'entregados') filtrados = filtrados.filter(p => p.status === 'Despachado');
 
+     // Filtro de Fecha
+     if (fechaFiltro) {
+        const [year, month, day] = fechaFiltro.split('-');
+        const fechaFiltroStr = `${day}/${month}/${year}`;
+        filtrados = filtrados.filter(p => p.fechaDespacho === fechaFiltroStr);
+     }
+
+     // Filtro de Tipo de Recepción
+     if (tipoFiltro !== 'Todos') {
+        filtrados = filtrados.filter(p => p.tipoDespacho === tipoFiltro);
+     }
+
      if (busqueda.trim()) {
-      const b = busqueda.toLowerCase();
-      filtrados = filtrados.filter(p => 
-         String(p.clienteNombre || '').toLowerCase().includes(b) || 
-         String(p.retiroNombre || '').toLowerCase().includes(b)
-      );
-   }
+        const b = busqueda.toLowerCase();
+        filtrados = filtrados.filter(p => 
+           String(p.clienteNombre || '').toLowerCase().includes(b) || 
+           String(p.retiroNombre || '').toLowerCase().includes(b)
+        );
+     }
      return filtrados;
-  }, [pedidosRecepcion, vista, busqueda]);
+  }, [pedidosRecepcion, vista, busqueda, fechaFiltro, tipoFiltro]);
 
   const imprimirEtiqueta = (p) => {
     const printWindow = window.open('', '_blank');
@@ -58,7 +96,7 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
           </style>
         </head>
         <body>
-          <h2>BLUHER - ${p.tipoDespacho}</h2>
+          <h2>BLUHER - ${p.tipoDespacho} N°${numeracionDiaria[p.id]}</h2>
           <div class="info"><strong>Cliente:</strong><br/> ${p.clienteNombre}</div>
           <div class="info"><strong>Teléfono:</strong><br/> ${p.clienteTelefono}</div>
           
@@ -131,46 +169,102 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
     });
   };
 
-  const generarCierreAuditoria = () => {
+  const generarCierreAuditoria = async () => {
      const hoy = new Date().toLocaleDateString('es-VE');
-     const entregadosHoy = pedidosRecepcion.filter(p => p.status === 'Despachado' && new Date(p.fechaEntregaFisica || p.fechaCreacion).toLocaleDateString('es-VE') === hoy);
      
-     if (entregadosHoy.length === 0) return dialogs.alert("No hay paquetes procesados el día de hoy para generar un cierre.");
+     const entregadosHoy = pedidosRecepcion.filter(p => {
+        if (p.status !== 'Despachado') return false;
+        const fechaReal = p.fechaEntregaFisica ? new Date(p.fechaEntregaFisica) : new Date(p.fechaCreacion);
+        return fechaReal.toLocaleDateString('es-VE') === hoy;
+     });
+     
+     if (entregadosHoy.length === 0) {
+        return dialogs.alert("No hay paquetes procesados el día de hoy para generar un cierre.", "Sin Movimientos");
+     }
 
-     const printWindow = window.open('', '_blank');
-     let html = `
-      <html>
-        <head>
-          <style>
-             body { font-family: sans-serif; padding: 30px; }
-             h1 { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; }
-             table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
-             th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
-             th { background: #f0f0f0; }
-          </style>
-        </head>
-        <body>
-          <h1>Cierre de Recepción - ${hoy}</h1>
-          <p>Total de Paquetes Procesados: <strong>${entregadosHoy.length}</strong></p>
-          <table>
-             <tr><th>Cliente</th><th>Tipo Despacho</th><th>Asesora</th><th>Hora Entrega</th><th>Foto</th></tr>
-             ${entregadosHoy.map(p => `
-                <tr>
-                   <td>${p.clienteNombre}</td>
-                   <td>${p.tipoDespacho}</td>
-                   <td>${p.asesora}</td>
-                   <td>${new Date(p.fechaEntregaFisica || p.fechaCreacion).toLocaleTimeString('es-VE')}</td>
-                   <td>${p.linkFotoProductos ? 'SI (Guardada)' : 'NO'}</td>
-                </tr>
-             `).join('')}
-          </table>
-          <p style="text-align: center; margin-top: 40px; font-size: 10px;">Firma del Encargado ___________________________</p>
-        </body>
-      </html>
-     `;
-     printWindow.document.write(html);
-     printWindow.document.close();
-     setTimeout(() => printWindow.print(), 500);
+     dialogs.confirm(`Se generará un cierre en el sistema con los ${entregadosHoy.length} paquetes entregados hoy. ¿Deseas continuar?`, async () => {
+         try {
+             const resumenPaquetes = entregadosHoy.map(p => ({
+                 idPedido: p.id,
+                 cliente: p.clienteNombre,
+                 tipo: p.tipoDespacho,
+                 asesora: p.asesora,
+                 fotoGuardada: !!p.linkFotoProductos,
+                 hora: new Date(p.fechaEntregaFisica || p.fechaCreacion).toLocaleTimeString('es-VE')
+             }));
+
+             const nuevoCierre = {
+                 fecha: hoy,
+                 timestamp: Date.now(),
+                 creadoPor: perfil?.nombre || 'Recepcionista',
+                 totalEntregas: entregadosHoy.length,
+                 entregas: resumenPaquetes
+             };
+
+             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_recepcion'), nuevoCierre);
+             loggear('CIERRE_RECEPCION', `Se registró el cierre diario de Recepción con ${entregadosHoy.length} entregas.`);
+
+             const printWindow = window.open('', '_blank');
+             let html = `
+              <html>
+                <head>
+                  <style>
+                     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+                     body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 900px; margin: 0 auto; }
+                     .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #9333ea; padding-bottom: 20px; margin-bottom: 20px; }
+                     .logo { height: 60px; object-fit: contain; }
+                     h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; text-transform: uppercase; }
+                     .meta { background: #faf5ff; padding: 15px; border-radius: 8px; border: 1px solid #e9d5ff; margin-bottom: 30px; font-size: 14px;}
+                     table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
+                     th, td { border-bottom: 1px solid #e2e8f0; padding: 12px; text-align: left; }
+                     th { background: #f8fafc; color: #475569; font-weight: 700; text-transform: uppercase; font-size: 11px; }
+                     .badge { background: #dcfce7; color: #166534; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+                  </style>
+                </head>
+                <body>
+                  <div class="header">
+                    <div>
+                      <h1>Auditoría de Recepción</h1>
+                      <p style="color: #64748b; margin-top: 5px; font-size: 14px; font-weight: bold;">Cierre Diario Oficial</p>
+                    </div>
+                    <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
+                  </div>
+                  
+                  <div class="meta">
+                     <p style="margin:0 0 8px 0;"><strong>Fecha de Cierre:</strong> ${hoy}</p>
+                     <p style="margin:0 0 8px 0;"><strong>Operador Responsable:</strong> ${perfil?.nombre || 'Recepcionista'}</p>
+                     <p style="margin:0; font-size: 16px;"><strong>Total Paquetes Procesados:</strong> <span style="color:#9333ea; font-weight:900;">${entregadosHoy.length}</span></p>
+                  </div>
+
+                  <table>
+                     <tr><th>Cliente</th><th>Tipo Despacho</th><th>Asesora</th><th>Hora Entrega</th><th>Soporte</th></tr>
+                     ${entregadosHoy.map(p => `
+                        <tr>
+                           <td><strong>${p.clienteNombre}</strong></td>
+                           <td style="font-weight:bold; color: #7e22ce;">${p.tipo}</td>
+                           <td>${p.asesora}</td>
+                           <td>${p.hora}</td>
+                           <td>${p.fotoGuardada ? '<span class="badge">Foto Ok</span>' : 'Sin Foto'}</td>
+                        </tr>
+                     `).join('')}
+                  </table>
+
+                  <div style="margin-top: 80px; text-align: center; border-top: 1px solid #cbd5e1; padding-top: 20px;">
+                      <p style="margin-bottom: 50px;">Firma del Encargado / Auditor</p>
+                      <p>_____________________________________</p>
+                  </div>
+                </body>
+              </html>
+             `;
+             printWindow.document.write(html);
+             printWindow.document.close();
+             setTimeout(() => printWindow.print(), 1000);
+
+         } catch (error) {
+             console.error(error);
+             dialogs.alert("Ocurrió un error al guardar el cierre en la base de datos.");
+         }
+     }, "Confirmar Cierre Diario");
   };
 
   return (
@@ -188,21 +282,40 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
          </div>
        </div>
 
-       <div className="flex flex-col md:flex-row gap-4 mb-6 justify-between items-center">
-          <div className="relative w-full md:w-1/3">
-             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-             <input type="text" placeholder="Buscar por cliente o autorizado..." className="w-full pl-10 pr-4 py-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500 transition-colors" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+       {/* BARRA DE BÚSQUEDA Y NUEVOS FILTROS */}
+       <div className="flex flex-col md:flex-row gap-4 mb-6 justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+          <div className="flex flex-col md:flex-row gap-3 w-full md:w-2/3">
+             <div className="relative w-full md:w-1/2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                <input type="text" placeholder="Buscar por cliente o autorizado..." className="w-full pl-10 pr-4 py-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500 transition-colors" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+             </div>
+             <div className="relative w-full md:w-1/4">
+                <input type="date" value={fechaFiltro} onChange={(e)=>setFechaFiltro(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500 transition-colors" />
+             </div>
+             <div className="relative w-full md:w-1/4">
+                <select value={tipoFiltro} onChange={(e)=>setTipoFiltro(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500 transition-colors cursor-pointer">
+                   <option value="Todos">Todos (Tipos)</option>
+                   <option value="Tienda">Solo Tienda</option>
+                   <option value="Delivery">Solo Delivery</option>
+                </select>
+             </div>
           </div>
+          
           <button onClick={generarCierreAuditoria} className="bg-slate-800 text-white px-5 py-3 rounded-xl font-bold text-sm shadow-md hover:bg-slate-700 flex items-center gap-2 transition-colors w-full md:w-auto justify-center"><FileDown size={18}/> Cierre Auditable Diario</button>
        </div>
 
        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {listado.length === 0 ? (
-             <div className="col-span-full p-12 text-center text-slate-400 font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl">No hay paquetes en esta categoría.</div>
+             <div className="col-span-full p-12 text-center text-slate-400 font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl">No hay paquetes para la fecha y filtros seleccionados.</div>
           ) : listado.map(p => (
-             <div key={p.id} className={`bg-slate-50 dark:bg-slate-800/50 p-6 rounded-3xl border-2 transition-all shadow-sm flex flex-col h-full ${p.status === 'Despachado' ? 'border-emerald-200 dark:border-emerald-800/50 opacity-80' : p.tipoDespacho === 'Delivery' ? 'border-fuchsia-200 dark:border-fuchsia-800/50 hover:border-fuchsia-400' : 'border-purple-200 dark:border-purple-800/50 hover:border-purple-400'}`}>
+             <div key={p.id} className={`relative bg-slate-50 dark:bg-slate-800/50 p-6 rounded-3xl border-2 transition-all shadow-sm flex flex-col h-full ${p.status === 'Despachado' ? 'border-emerald-200 dark:border-emerald-800/50 opacity-80' : p.tipoDespacho === 'Delivery' ? 'border-fuchsia-200 dark:border-fuchsia-800/50 hover:border-fuchsia-400' : 'border-purple-200 dark:border-purple-800/50 hover:border-purple-400'}`}>
                 
-                <div className="flex justify-between items-start mb-4">
+                {/* GLOBITO CON LA NUEVA NUMERACIÓN INDEPENDIENTE */}
+                <div className="absolute -top-3 -left-3 bg-purple-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md">
+                  {numeracionDiaria[p.id]}
+                </div>
+
+                <div className="flex justify-between items-start mb-4 pl-4">
                    <div>
                      <div className="text-lg font-black text-slate-800 dark:text-slate-100 leading-tight">{p.clienteNombre}</div>
                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Tlf: {p.clienteTelefono}</div>

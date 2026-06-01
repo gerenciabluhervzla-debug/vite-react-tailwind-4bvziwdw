@@ -48,17 +48,21 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const [notasConteo, setNotasConteo] = useState({});
   const [filtroFechaCierre, setFiltroFechaCierre] = useState('');
 
+  // NUEVA LÓGICA DE NUMERACIÓN INDEPENDIENTE
   const numeracionDiaria = useMemo(() => {
     const map = {};
     const agrupados = {};
     pedidos.forEach(p => {
        const fecha = p.fechaDespacho || 'Sin Fecha';
-       if (!agrupados[fecha]) agrupados[fecha] = [];
-       agrupados[fecha].push(p);
+       const tipo = p.tipoDespacho || 'Nacional'; // Nacional, Tienda o Delivery
+       const key = `${fecha}_${tipo}`;
+       
+       if (!agrupados[key]) agrupados[key] = [];
+       agrupados[key].push(p);
     });
-    Object.keys(agrupados).forEach(fecha => {
-       agrupados[fecha].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
-       agrupados[fecha].forEach((p, index) => { map[p.id] = index + 1; });
+    Object.keys(agrupados).forEach(key => {
+       agrupados[key].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+       agrupados[key].forEach((p, index) => { map[p.id] = index + 1; });
     });
     return map;
   }, [pedidos]);

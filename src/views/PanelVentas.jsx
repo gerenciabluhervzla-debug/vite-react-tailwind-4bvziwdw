@@ -18,7 +18,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
  };
 
  const defaultForm = {
-   tipoDespacho: 'Nacional', // 'Nacional', 'Tienda', 'Delivery'
+   tipoDespacho: 'Nacional',
    costoEnvio: '',
    retiroNombre: '', retiroCedula: '', retiroTelefono: '',
    deliveryFecha: getLocalToday(), deliveryHora: '',
@@ -56,17 +56,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
  const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
 
+ // NUEVA LÓGICA DE NUMERACIÓN INDEPENDIENTE
  const numeracionDiaria = useMemo(() => {
    const map = {};
    const agrupados = {};
    pedidos.forEach(p => {
       const fecha = p.fechaDespacho || 'Sin Fecha';
-      if (!agrupados[fecha]) agrupados[fecha] = [];
-      agrupados[fecha].push(p);
+      const tipo = p.tipoDespacho || 'Nacional'; // Nacional, Tienda o Delivery
+      const key = `${fecha}_${tipo}`;
+      
+      if (!agrupados[key]) agrupados[key] = [];
+      agrupados[key].push(p);
    });
-   Object.keys(agrupados).forEach(fecha => {
-      agrupados[fecha].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
-      agrupados[fecha].forEach((p, index) => { map[p.id] = index + 1; });
+   Object.keys(agrupados).forEach(key => {
+      agrupados[key].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+      agrupados[key].forEach((p, index) => { map[p.id] = index + 1; });
    });
    return map;
  }, [pedidos]);
@@ -411,7 +415,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
       else if (isPastCutoff) daysToAdd = 1; 
       fechaDespachoObj.setDate(fechaDespachoObj.getDate() + daysToAdd);
    } else {
-      // Regla: Toda entrega en tienda o delivery agendada para sábado/domingo o después de las 5PM pasa al Lunes.
       let baseDate = formData.tipoDespacho === 'Delivery' && formData.deliveryFecha ? new Date(formData.deliveryFecha + "T12:00:00") : new Date(targetDate);
       let moveToMonday = false;
       
@@ -824,10 +827,11 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                return (
                <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${isAnulado ? 'opacity-60 grayscale-[50%]' : ''}`}>
                 
-                 {/* NÚMERO DE VENTA DEL DÍA */}
-                 <div className="absolute top-4 lg:top-6 left-2 lg:left-3 bg-[#003366] dark:bg-sky-600 text-white w-6 h-6 rounded-full flex items-center justify-center font-black text-xs shadow-sm">
+                 {/* NÚMERO DE VENTA DEL DÍA INDEPENDIENTE */}
+                 <div className={`absolute top-4 lg:top-6 left-2 lg:left-3 text-white w-6 h-6 rounded-full flex items-center justify-center font-black text-xs shadow-sm ${p.tipoDespacho === 'Delivery' ? 'bg-fuchsia-600' : p.tipoDespacho === 'Tienda' ? 'bg-purple-600' : 'bg-[#003366] dark:bg-sky-600'}`}>
                    {numeracionDiaria[p.id] || index + 1}
                  </div>
+
                  <div className="lg:col-span-4 flex flex-col justify-start pl-8 lg:pl-10">
                    <div className={`font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2 ${isAnulado ? 'line-through text-slate-400' : ''}`}>
                       {p.clienteNombre}
