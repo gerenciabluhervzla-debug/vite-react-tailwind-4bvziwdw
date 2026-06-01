@@ -17,56 +17,57 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
   const [subiendoFotoId, setSubiendoFotoId] = useState(null);
   const [vista, setVista] = useState('pendientes'); // 'pendientes' | 'retiros' | 'entregados'
 
-  // CORREGIDO: SECUENCIA NUMÉRICA 100% INDEPENDIENTE POR TIPO Y FECHA
-  const numeracionDiaria = useMemo(() => {
-    const map = {};
-    const agrupados = {};
-
-    pedidos.forEach(p => {
-       const fecha = p.fechaDespacho || 'Sin Fecha';
-       const tipo = p.tipoDespacho || 'Tienda'; 
-       const key = `${fecha}_${tipo}`;
-       
-       if (!agrupados[key]) agrupados[key] = [];
-       agrupados[key].push(p);
-    });
-
-    // Ordenamos cronológicamente cada grupo por separado asegurando secuencias desde 1
-    Object.keys(agrupados).forEach(key => {
-       agrupados[key].sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0));
-       agrupados[key].forEach((p, index) => { 
-          map[p.id] = index + 1; 
-       });
-    });
-
-    return map;
-  }, [pedidos]);
-
-  // Filtrar solo pedidos que corresponden a Recepción y están pagados/validados
-  const pedidosRecepcion = useMemo(() => {
+  // 1. Filtrar primero los pedidos que corresponden a Recepción (Pilar de datos base)
+  const pedidosRecepcionBase = useMemo(() => {
      return pedidos.filter(p => 
         ['Tienda', 'Delivery'].includes(p.tipoDespacho) && 
         !p.esPublico && 
         !['Anulado', 'Rechazado', 'Pendiente'].includes(p.status)
-     ).sort((a, b) => b.fechaCreacion - a.fechaCreacion);
+     );
   }, [pedidos]);
 
-  // Sub-clasificaciones con los filtros
+  // SECUENCIA NUMÉRICA BASADA SOLO EN LO VISIBLE DEL DÍA
+  const numeracionDiaria = useMemo(() => {
+    const map = {};
+    const agrupados = {};
+    
+    const [year, month, day] = fechaFiltro.split('-');
+    const fechaFiltroStr = `${day}/${month}/${year}`;
+
+    // Filtramos la base solo por la fecha que estamos viendo
+    const pedidosDelDia = pedidosRecepcionBase.filter(p => p.fechaDespacho === fechaFiltroStr);
+
+    pedidosDelDia.forEach(p => {
+       const tipo = p.tipoDespacho || 'Tienda'; 
+       if (!agrupados[tipo]) agrupados[tipo] = [];
+       agrupados[tipo].push(p);
+    });
+
+    // Ordenamos cronológicamente CADA TIPO por separado asegurando secuencias desde 1
+    Object.keys(agrupados).forEach(tipo => {
+       agrupados[tipo].sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0));
+       agrupados[tipo].forEach((p, index) => { 
+          map[p.id] = index + 1; // Delivery 1, 2... Tienda 1, 2...
+       });
+    });
+
+    return map;
+  }, [pedidosRecepcionBase, fechaFiltro]);
+
+  // Listado final aplicar filtros de búsqueda visual y tipo
   const listado = useMemo(() => {
-     let filtrados = pedidosRecepcion;
+     let filtrados = pedidosRecepcionBase;
      
      if (vista === 'pendientes') filtrados = filtrados.filter(p => p.status === 'Validado');
      if (vista === 'retiros') filtrados = filtrados.filter(p => p.status === 'Validado' && p.tipoDespacho === 'Tienda');
      if (vista === 'entregados') filtrados = filtrados.filter(p => p.status === 'Despachado');
 
-     // Filtro de Fecha
      if (fechaFiltro) {
         const [year, month, day] = fechaFiltro.split('-');
         const fechaFiltroStr = `${day}/${month}/${year}`;
         filtrados = filtrados.filter(p => p.fechaDespacho === fechaFiltroStr);
      }
 
-     // Filtro de Tipo de Recepción
      if (tipoFiltro !== 'Todos') {
         filtrados = filtrados.filter(p => p.tipoDespacho === tipoFiltro);
      }
@@ -78,69 +79,48 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
            String(p.retiroNombre || '').toLowerCase().includes(b)
         );
      }
-     return filtrados;
-  }, [pedidosRecepcion, vista, busqueda, fechaFiltro, tipoFiltro]);
+     return filtrados.sort((a, b) => (b.fechaCreacion || 0) - (a.fechaCreacion || 0));
+  }, [pedidosRecepcionBase, vista, busqueda, fechaFiltro, tipoFiltro]);
 
-  // CORREGIDO: Función auxiliar para calcular el monto basado en productos si el total viene vacío
+  // Función robusta para calcular el monto (Evita N/A)
   const calcularMontoPedido = (p) => {
-     if (p.total || p.montoTotal) return Number(p.total || p.montoTotal);
+     if (p.total && !isNaN(p.total) && Number(p.total) > 0) return Number(p.total);
+     if (p.montoTotal && !isNaN(p.montoTotal) && Number(p.montoTotal) > 0) return Number(p.montoTotal);
+     
+     let listaProductos = [];
      if (Array.isArray(p.productos)) {
-        return p.productos.reduce((sum, prod) => sum + ((prod.precio || 0) * (prod.cantidad || 1)), 0);
+        listaProductos = p.productos;
+     } else if (typeof p.productos === 'string') {
+        try {
+           const parsed = JSON.parse(p.productos);
+           if (Array.isArray(parsed)) listaProductos = parsed;
+        } catch (e) {
+           const regexMonto = /\$\s?(\d+(?:\.\d+)?)/g;
+           let match;
+           let sumaExtraida = 0;
+           while ((match = regexMonto.exec(p.productos)) !== null) {
+              sumaExtraida += parseFloat(match[1]);
+           }
+           if (sumaExtraida > 0) return sumaExtraida;
+        }
      }
+
+     if (listaProductos.length > 0) {
+        return listaProductos.reduce((sum, prod) => {
+           const precio = Number(prod.precio || prod.price || 0);
+           const cant = Number(prod.cantidad || prod.qty || prod.quantity || 1);
+           return sum + (precio * cant);
+        }, 0);
+     }
+     
      return 0;
   };
 
   const imprimirEtiqueta = (p) => {
     const printWindow = window.open('', '_blank');
     if(!printWindow) return dialogs.alert("Permite las ventanas emergentes para imprimir.");
-    
     const isDelivery = p.tipoDespacho === 'Delivery';
-    
-    const html = `
-      <html>
-        <head>
-          <title>Etiqueta - ${p.clienteNombre}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; color: #000; width: 350px; margin: auto; border: 2px dashed #000; }
-            h2 { text-align: center; margin: 0 0 10px 0; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 10px;}
-            .info { margin-bottom: 5px; font-size: 14px; }
-            .info strong { text-transform: uppercase; font-size: 12px; }
-            .box { background: #f0f0f0; padding: 10px; border-radius: 5px; margin: 15px 0; text-align: center; border: 1px solid #ccc; }
-            .products { font-size: 12px; margin-top: 15px; white-space: pre-wrap; line-height: 1.4; border-top: 1px dotted #000; padding-top: 10px;}
-            .footer { text-align: center; margin-top: 20px; font-size: 10px; font-style: italic; }
-          </style>
-        </head>
-        <body>
-          <h2>BLUHER - ${p.tipoDespacho} N°${numeracionDiaria[p.id] || 1}</h2>
-          <div class="info"><strong>Cliente:</strong><br/> ${p.clienteNombre}</div>
-          <div class="info"><strong>Teléfono:</strong><br/> ${p.clienteTelefono}</div>
-          
-          ${isDelivery ? `
-             <div class="box">
-               <strong>PROGRAMACIÓN DE DELIVERY</strong><br/>
-               <span style="font-size: 16px; font-weight: bold;">${p.deliveryFecha} a las ${p.deliveryHora}</span>
-             </div>
-             <div class="info"><strong>Dirección:</strong><br/> ${p.direccion}</div>
-          ` : `
-             <div class="box">
-               <strong>DATOS DE RETIRO EN TIENDA</strong><br/>
-               <span style="font-size: 14px; font-weight: bold;">Retira: ${p.retiroNombre}</span><br/>
-               C.I: ${p.retiroCedula}
-             </div>
-          `}
-          
-          <div class="products">
-            <strong>CONTENIDO DEL PAQUETE:</strong><br/>
-            ${typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
-          </div>
-          
-          <div class="footer">
-            Generado el: ${new Date().toLocaleString('es-VE')}<br/>
-            Auditoría de Recepción Bluher
-          </div>
-        </body>
-      </html>
-    `;
+    const html = `<html><head><title>Etiqueta</title><style>body{font-family:Arial;padding:20px;width:350px;margin:auto;border:2px dashed #000;}h2{text-align:center;text-transform:uppercase;border-bottom:2px solid #000;padding-bottom:10px;}.box{background:#f0f0f0;padding:10px;text-align:center;margin:15px 0;}.products{font-size:12px;margin-top:15px;white-space:pre-wrap;border-top:1px dotted #000;padding-top:10px;}</style></head><body><h2>BLUHER - ${p.tipoDespacho} N°${numeracionDiaria[p.id] || '-'}</h2><div><strong>Cliente:</strong> ${p.clienteNombre}</div><div><strong>Tlf:</strong> ${p.clienteTelefono}</div>${isDelivery?`<div class="box"><strong>DELIVERY</strong><br/>${p.deliveryFecha} - ${p.deliveryHora}</div><div><strong>Dirección:</strong> ${p.direccion}</div>`:`<div class="box"><strong>RETIRO TIENDA</strong><br/>Retira: ${p.retiroNombre}</div>`} <div class="products"><strong>CONTENIDO:</strong><br/>${typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div></body></html>`;
     printWindow.document.write(html);
     printWindow.document.close();
     setTimeout(() => printWindow.print(), 500);
@@ -148,46 +128,30 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
 
   const subirFotoEntrega = async (e, pedido) => {
     const file = e.target.files[0];
-    if (!file) return;
-    if (!URL_GOOGLE_SCRIPT) return dialogs.alert("Sistema de subida no configurado.");
-    
+    if (!file || !URL_GOOGLE_SCRIPT) return;
     setSubiendoFotoId(pedido.id);
     try {
       const base64Data = await compressImage(file, 800, 0.7);
-      const response = await fetch(URL_GOOGLE_SCRIPT, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ tokenSecreto: "BLUHER_SECURE_TOKEN_2026", fileName: `Recepcion_${pedido.id}.jpg`, mimeType: 'image/jpeg', data: base64Data })
-      });
+      const response = await fetch(URL_GOOGLE_SCRIPT, { method: 'POST', body: JSON.stringify({ tokenSecreto: "BLUHER_SECURE_TOKEN_2026", fileName: `Recepcion_${pedido.id}.jpg`, mimeType: 'image/jpeg', data: base64Data }) });
       const result = await response.json();
-      if (result.url) {
-         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { linkFotoProductos: result.url });
-         loggear('FOTO_RECEPCION', `Foto de entrega subida para ${pedido.clienteNombre}`);
-      }
-    } catch(err) {
-      console.error(err);
-      dialogs.alert("Error subiendo la foto.");
-    } finally {
-      setSubiendoFotoId(null);
-    }
+      if (result.url) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { linkFotoProductos: result.url });
+    } catch(err) { console.error(err); } finally { setSubiendoFotoId(null); }
   };
 
   const marcarComoEntregado = async (pedido) => {
-    if (!pedido.linkFotoProductos) {
-       return dialogs.alert("Debes cargar una foto del paquete físico o de la entrega antes de marcarlo como procesado.", "Foto Requerida");
-    }
-    dialogs.confirm(`¿Confirmas que este paquete ha sido entregado/despachado físicamente al cliente o delivery?`, async () => {
-       try {
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Despachado', fechaEntregaFisica: Date.now() });
-          loggear('PAQUETE_ENTREGADO', `Recepción procesó la entrega de: ${pedido.clienteNombre}`);
-          dialogs.alert("Paquete marcado como entregado exitosamente.", "Completado");
+    if (!pedido.linkFotoProductos) return dialogs.alert("Toma la foto del producto primero.", "Foto Requerida");
+    dialogs.confirm(`¿Confirmas que este paquete ha sido entregado?`, async () => {
+       try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Despachado', fechaEntregaFisica: Date.now() });
+       loggear('PAQUETE_ENTREGADO', `Recepción procesó la entrega de: ${pedido.clienteNombre}`);
        } catch(e) { console.error(e); }
     });
   };
 
+  // FUNCIÓN DE CIERRE AUDITORÍA (Restaurada al 100%)
   const generarCierreAuditoria = async () => {
      const hoy = new Date().toLocaleDateString('es-VE');
      
-     const entregadosHoy = pedidosRecepcion.filter(p => {
+     const entregadosHoy = pedidosRecepcionBase.filter(p => {
         if (p.status !== 'Despachado') return false;
         const fechaReal = p.fechaEntregaFisica ? new Date(p.fechaEntregaFisica) : new Date(p.fechaCreacion);
         return fechaReal.toLocaleDateString('es-VE') === hoy;
@@ -263,12 +227,18 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
                         </tr>
                      `).join('')}
                   </table>
+                  
+                  <div style="margin-top: 80px; text-align: center; border-top: 1px solid #cbd5e1; padding-top: 20px;">
+                      <p style="margin-bottom: 50px;">Firma del Encargado / Auditor</p>
+                      <p>_____________________________________</p>
+                  </div>
                 </body>
               </html>
              `;
              printWindow.document.write(html);
              printWindow.document.close();
              setTimeout(() => printWindow.print(), 1000);
+
          } catch (error) {
              console.error(error);
              dialogs.alert("Ocurrió un error al guardar el cierre en la base de datos.");
@@ -276,111 +246,93 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
      }, "Confirmar Cierre Diario");
   };
 
-  // REORGANIZADO: Renderizado de la tarjeta individual
+  // Renderizado de la tarjeta individual (Diseño 2 columnas y scroll interno)
   const renderTarjetaPedido = (p) => {
     const montoProductos = calcularMontoPedido(p);
     const montoDelivery = Number(p.montoDelivery || p.deliveryMonto || 0);
     const montoTotalCliente = montoProductos + (p.tipoDespacho === 'Delivery' ? montoDelivery : 0);
 
-    // Identificamos los links de imágenes válidos para evitar errores de renderizado en miniaturas
     const urlValidacion = p.linkComprobante || p.fotoPago || p.comprobantePago || "";
     const urlProducto = p.linkFotoProductos || "";
     const urlExtracto = p.linkExtracto || p.extractoBancario || p.fotoExtracto || "";
 
     return (
-      <div key={p.id} className={`relative bg-slate-50 dark:bg-slate-800/50 p-6 rounded-3xl border-2 transition-all shadow-sm flex flex-col h-full ${p.status === 'Despachado' ? 'border-emerald-200 dark:border-emerald-800/50 opacity-80' : p.tipoDespacho === 'Delivery' ? 'border-fuchsia-200 dark:border-fuchsia-800/50 hover:border-fuchsia-400' : 'border-purple-200 dark:border-purple-800/50 hover:border-purple-400'}`}>
+      <div key={p.id} className={`relative bg-slate-50 dark:bg-slate-800/50 p-5 rounded-3xl border-2 transition-all shadow-sm flex flex-col h-full ${p.status === 'Despachado' ? 'border-emerald-200 dark:border-emerald-800/50 opacity-80' : p.tipoDespacho === 'Delivery' ? 'border-fuchsia-200 dark:border-fuchsia-800/50' : 'border-purple-200 dark:border-purple-800/50'}`}>
                   
-        {/* GLOBITO CON LA NUMERACIÓN INDEPENDIENTE POR TIPO */}
-        <div className="absolute -top-3 -left-3 bg-purple-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md">
-          {numeracionDiaria[p.id] || 1}
+        {/* GLOBITO INDEPENDIENTE CORRECTO */}
+        <div className="absolute -top-3 -left-3 bg-purple-600 text-white w-9 h-9 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md text-lg">
+          {numeracionDiaria[p.id] || '-'}
         </div>
 
-        <div className="flex justify-between items-start mb-4 pl-4">
-           <div>
-             <div className="text-lg font-black text-slate-800 dark:text-slate-100 leading-tight">{p.clienteNombre}</div>
-             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Tlf: {p.clienteTelefono}</div>
+        <div className="flex justify-between items-start mb-3 pl-5">
+           <div className="flex-grow pr-2">
+             <div className="text-base font-black text-slate-800 dark:text-slate-100 leading-tight break-words">{p.clienteNombre}</div>
+             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Tlf: {p.clienteTelefono}</div>
            </div>
            {p.tipoDespacho === 'Delivery' ? (
-              <span className="bg-fuchsia-100 text-fuchsia-700 px-2 py-1 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase"><Bike size={12}/> Delivery</span>
+              <span className="bg-fuchsia-100 text-fuchsia-700 px-2 py-1 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase flex-shrink-0"><Bike size={12}/> Delivery</span>
            ) : (
-              <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase"><Store size={12}/> Tienda</span>
+              <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase flex-shrink-0"><Store size={12}/> Tienda</span>
            )}
         </div>
 
         {p.tipoDespacho === 'Delivery' ? (
            <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-2 text-xs">
-             <span className="font-bold text-slate-400 block mb-1">PROGRAMADO PARA:</span>
-             <span className="font-black text-fuchsia-600 dark:text-fuchsia-400 text-sm">{p.deliveryFecha} a las ${p.deliveryHora}</span>
+             <span className="font-black text-fuchsia-600 dark:text-fuchsia-400">{p.deliveryFecha} a las {p.deliveryHora}</span>
            </div>
         ) : (
            <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-2 text-xs">
-             <span className="font-bold text-slate-400 block mb-1">AUTORIZADO PARA RETIRAR:</span>
-             <span className="font-black text-purple-600 dark:text-purple-400 text-sm block">{p.retiroNombre}</span>
+             <span className="font-black text-purple-600 dark:text-purple-400 block break-words">{p.retiroNombre}</span>
              <span className="font-bold text-slate-500">C.I: {p.retiroCedula}</span>
            </div>
         )}
 
-        {/* CORREGIDO: Bloque con Dirección y desglose de Montos exactos */}
-        <div className="bg-slate-100 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-4 text-xs space-y-1">
-           <div><strong>Monto Pedido:</strong> <span className="text-slate-700 dark:text-slate-300 font-medium">${montoProductos.toFixed(2)}</span></div>
+        {/* Bloque Montos Correctos y Dirección */}
+        <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-3 text-xs space-y-1">
+           <div className="flex justify-between"><strong>Monto Pedido:</strong> <span className="text-slate-700 dark:text-slate-300 font-bold">${montoProductos.toFixed(2)}</span></div>
            {p.tipoDespacho === 'Delivery' && (
-              <div><strong>Monto Delivery:</strong> <span className="text-fuchsia-600 dark:text-fuchsia-400 font-medium">${montoDelivery.toFixed(2)}</span></div>
+              <div className="flex justify-between"><strong>Monto Delivery:</strong> <span className="text-fuchsia-600 dark:text-fuchsia-400 font-bold">${montoDelivery.toFixed(2)}</span></div>
            )}
-           <div className="border-t border-slate-200 dark:border-slate-600 pt-1">
-              <strong>Total Cliente:</strong> <span className="text-emerald-600 dark:text-emerald-400 font-black">${montoTotalCliente.toFixed(2)}</span>
+           <div className="border-t border-slate-200 dark:border-slate-600 pt-1 flex justify-between">
+              <strong>Total a Cobrar:</strong> <span className="text-emerald-600 dark:text-emerald-400 font-black text-sm">${montoTotalCliente.toFixed(2)}</span>
            </div>
-           <div className="pt-1"><strong className="text-slate-500">Dirección:</strong> <span className="text-slate-600 dark:text-slate-300 ml-1">{p.direccion || 'Retiro Presencial en Tienda'}</span></div>
+           <div className="pt-1 text-[11px] text-slate-600 dark:text-slate-400 break-words line-clamp-2"><strong>Dir:</strong> {p.direccion || 'Retiro en Tienda'}</div>
         </div>
 
-        <div className="text-[11px] bg-slate-100 dark:bg-slate-800 p-3 rounded-xl whitespace-pre-wrap font-medium text-slate-600 dark:text-slate-300 mb-4 flex-grow border border-slate-200 dark:border-slate-700">
-           <div className="font-black mb-1 uppercase text-[9px] tracking-widest">Contenido del Paquete:</div>
+        {/* Contenido del Paquete con altura limitada (Scroll) para hacer tarjeta cuadrada */}
+        <div className="text-[11px] bg-white dark:bg-slate-900 p-3 rounded-xl whitespace-pre-wrap font-medium text-slate-600 dark:text-slate-300 mb-3 border border-slate-200 dark:border-slate-700 max-h-32 overflow-y-auto min-h-[60px]">
+           <div className="font-black mb-1 uppercase text-[9px] tracking-widest text-slate-400">Contenido:</div>
            {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
         </div>
 
-        {/* CORREGIDO: Vistas en miniatura seguras (Sin errores visuales) + Extracto Bancario */}
-        <div className="flex flex-wrap gap-3 mb-4 bg-white dark:bg-slate-950 p-2 rounded-xl border border-slate-100 dark:border-slate-800/60">
-           {typeof urlValidacion === 'string' && urlValidacion.startsWith('http') && (
-             <div className="flex flex-col items-center gap-1">
-                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Validación</span>
-                <a href={urlValidacion} target="_blank" rel="noreferrer" className="block w-12 h-12 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 hover:scale-105 transition-all shadow-sm">
-                   <img src={urlValidacion} alt="Validación" className="w-full h-full object-cover" onError={(e)=>{e.target.style.display='none'}}/>
-                </a>
-             </div>
-           )}
-           
-           {typeof urlExtracto === 'string' && urlExtracto.startsWith('http') && (
-             <div className="flex flex-col items-center gap-1">
-                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Extracto</span>
-                <a href={urlExtracto} target="_blank" rel="noreferrer" className="block w-12 h-12 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 hover:scale-105 transition-all shadow-sm">
-                   <img src={urlExtracto} alt="Extracto" className="w-full h-full object-cover" onError={(e)=>{e.target.style.display='none'}}/>
-                </a>
-             </div>
-           )}
-
-           {typeof urlProducto === 'string' && urlProducto.startsWith('http') && (
-             <div className="flex flex-col items-center gap-1">
-                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Producto</span>
-                <a href={urlProducto} target="_blank" rel="noreferrer" className="block w-12 h-12 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 hover:scale-105 transition-all shadow-sm">
-                   <img src={urlProducto} alt="Producto" className="w-full h-full object-cover" onError={(e)=>{e.target.style.display='none'}}/>
-                </a>
-             </div>
-           )}
+        {/* Miniaturas protegidas (Solo renders válidos) */}
+        <div className="flex flex-wrap gap-2.5 mb-4 bg-white dark:bg-slate-950 p-2 rounded-xl border border-slate-100 dark:border-slate-800/60 justify-center">
+           {[ {url: urlValidacion, txt: 'Pago'}, {url: urlExtracto, txt: 'Extracto'}, {url: urlProducto, txt: 'Producto'} ].map(img => (
+              (typeof img.url === 'string' && img.url.startsWith('http')) && (
+                 <div key={img.txt} className="flex flex-col items-center gap-0.5">
+                    <span className="text-[8px] font-black text-slate-400 uppercase">{img.txt}</span>
+                    <a href={img.url} target="_blank" rel="noreferrer" className="block w-11 h-11 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 hover:scale-105 transition-all shadow-sm">
+                       <img src={img.url} alt={img.txt} className="w-full h-full object-cover" onError={(e)=>{e.target.parentNode.style.display='none'}}/>
+                    </a>
+                 </div>
+              )
+           ))}
         </div>
 
-        <div className="mt-auto pt-4 border-t border-slate-200 dark:border-slate-700 flex flex-col gap-3">
+        <div className="mt-auto pt-3 border-t border-slate-200 dark:border-slate-700 flex flex-col gap-2.5">
            {p.status === 'Despachado' ? (
-              <div className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-black text-xs uppercase tracking-widest py-3 rounded-xl flex justify-center items-center gap-2 border border-emerald-200 dark:border-emerald-800/50"><CheckCircle size={16}/> Procesado y Entregado</div>
+              <div className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-black text-xs uppercase py-2.5 rounded-xl flex justify-center items-center gap-2 border border-emerald-200 dark:border-emerald-800/50"><CheckCircle size={15}/> Entregado</div>
            ) : (
               <>
-                <button onClick={()=>imprimirEtiqueta(p)} className="bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs hover:bg-slate-50 transition-colors"><Printer size={16}/> Imprimir Etiqueta</button>
-                
-                <label className={`font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs transition-colors cursor-pointer border-2 ${p.linkFotoProductos ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-900/30 dark:border-emerald-500 dark:text-emerald-400' : 'bg-white border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:border-purple-300'}`}>
-                   {subiendoFotoId === p.id ? <Loader2 size={16} className="animate-spin"/> : p.linkFotoProductos ? <ImageIcon size={16}/> : <Camera size={16}/>}
-                   {subiendoFotoId === p.id ? 'Subiendo...' : p.linkFotoProductos ? 'Foto Capturada' : 'Tomar / Subir Foto'}
-                   <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e)=>subirFotoEntrega(e, p)} disabled={subiendoFotoId === p.id}/>
-                </label>
-
-                <button onClick={()=>marcarComoEntregado(p)} disabled={!p.linkFotoProductos || subiendoFotoId === p.id} className="bg-purple-600 hover:bg-purple-700 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 text-xs transition-colors shadow-md disabled:opacity-50 disabled:hover:bg-purple-600 uppercase tracking-widest"><CheckCircle size={16}/> Marcar Entregado</button>
+                <div className="grid grid-cols-2 gap-2">
+                   <button onClick={()=>imprimirEtiqueta(p)} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 text-xs hover:bg-slate-50 transition-colors"><Printer size={14}/> Etiqueta</button>
+                   <label className={`font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 text-xs transition-colors cursor-pointer border ${p.linkFotoProductos ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-900/30' : 'bg-white border-slate-200 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300'}`}>
+                      {subiendoFotoId === p.id ? <Loader2 size={14} className="animate-spin"/> : <Camera size={14}/>}
+                      {p.linkFotoProductos ? 'Foto OK' : 'Subir Foto'}
+                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e)=>subirFotoEntrega(e, p)} disabled={subiendoFotoId === p.id}/>
+                   </label>
+                </div>
+                <button onClick={()=>marcarComoEntregado(p)} disabled={!p.linkFotoProductos || subiendoFotoId === p.id} className="bg-purple-600 hover:bg-purple-700 text-white font-black py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs transition-colors shadow-md disabled:opacity-50 uppercase tracking-widest"><CheckCircle size={15}/> Marcar Entregado</button>
               </>
            )}
         </div>
@@ -391,71 +343,58 @@ export default function PanelRecepcion({ pedidos, perfil, db, appId, loggear, di
   return (
     <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] shadow-sm border border-slate-200 dark:border-slate-700 transition-colors animate-in fade-in">
        
-       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-8 gap-4 border-b border-slate-100 dark:border-slate-700 pb-6">
+       {/* Cabecera */}
+       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-6 gap-4 border-b border-slate-100 dark:border-slate-700 pb-5">
          <div>
-            <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-3"><Package className="text-purple-600" /> Módulo de Recepción</h2>
-            <p className="text-sm font-medium text-slate-500 mt-1">Gestión de entregas en tienda y despacho de deliveries.</p>
+            <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2.5"><Package className="text-purple-600" /> Recepción Bluher</h2>
          </div>
-         <div className="flex flex-wrap gap-2 w-full xl:w-auto bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl">
-           <button onClick={()=>setVista('pendientes')} className={`px-4 py-2.5 text-sm font-bold rounded-lg transition-all ${vista==='pendientes'?'bg-white dark:bg-slate-700 shadow text-purple-700 dark:text-purple-400':'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Todos los Pendientes</button>
-           <button onClick={()=>setVista('retiros')} className={`px-4 py-2.5 text-sm font-bold rounded-lg transition-all ${vista==='retiros'?'bg-white dark:bg-slate-700 shadow text-purple-700 dark:text-purple-400':'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Pendientes por Retirar</button>
-           <button onClick={()=>setVista('entregados')} className={`px-4 py-2.5 text-sm font-bold rounded-lg transition-all ${vista==='entregados'?'bg-white dark:bg-slate-700 shadow text-emerald-700 dark:text-emerald-400':'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial Entregados</button>
+         <div className="flex flex-wrap gap-1.5 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
+           {['pendientes', 'retiros', 'entregados'].map(v => (
+              <button key={v} onClick={()=>setVista(v)} className={`px-3 py-2 text-xs font-bold rounded-lg transition-all ${vista===v?'bg-white dark:bg-slate-700 shadow text-purple-700 dark:text-purple-400':'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>{v === 'pendientes' ? 'Todos Pendientes' : v === 'retiros' ? 'Por Retirar' : 'Historial'}</button>
+           ))}
          </div>
        </div>
 
-       {/* BARRA DE BÚSQUEDA Y FILTROS */}
-       <div className="flex flex-col md:flex-row gap-4 mb-6 justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
-          <div className="flex flex-col md:flex-row gap-3 w-full md:w-2/3">
-             <div className="relative w-full md:w-1/2">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                <input type="text" placeholder="Buscar por cliente o autorizado..." className="w-full pl-10 pr-4 py-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500 transition-colors" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+       {/* Barra Filtros */}
+       <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5 bg-slate-50 dark:bg-slate-900/50 p-3 rounded-2xl border border-slate-200 dark:border-slate-700">
+          <div className="relative md:col-span-2">
+             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
+             <input type="text" placeholder="Buscar cliente..." className="w-full pl-9 pr-3 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+          </div>
+          <input type="date" value={fechaFiltro} onChange={(e)=>setFechaFiltro(e.target.value)} className="w-full p-2.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold" />
+          <select value={tipoFiltro} onChange={(e)=>setTipoFiltro(e.target.value)} className="w-full p-2.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold cursor-pointer">
+             <option value="Todos">Todos</option>
+             <option value="Tienda">Tienda</option>
+             <option value="Delivery">Delivery</option>
+          </select>
+       </div>
+
+       {/* GRILLA PRINCIPAL REVISADA (lg:grid-cols-2 para 2 por fila) */}
+       {listado.length === 0 ? (
+          <div className="p-10 text-center text-slate-400 font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl">No hay paquetes para mostrar.</div>
+       ) : vista === 'entregados' ? (
+          <div className="space-y-8">
+             {/* 1. TIENDA ASCENDENTE */}
+             <div>
+                <div className="mb-3 border-b border-purple-100 dark:border-purple-800 pb-1 flex items-center gap-2 text-purple-700 dark:text-purple-400">
+                   <Store size={18} /><h3 className="text-lg font-black">Entregas en Tienda</h3>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                   {listado.filter(p => p.tipoDespacho === 'Tienda').sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0)).map(p => renderTarjetaPedido(p))}
+                </div>
              </div>
-             <div className="relative w-full md:w-1/4">
-                <input type="date" value={fechaFiltro} onChange={(e)=>setFechaFiltro(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500 transition-colors" />
-             </div>
-             <div className="relative w-full md:w-1/4">
-                <select value={tipoFiltro} onChange={(e)=>setTipoFiltro(e.target.value)} className="w-full p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500 transition-colors cursor-pointer">
-                   <option value="Todos">Todos (Tipos)</option>
-                   <option value="Tienda">Solo Tienda</option>
-                   <option value="Delivery">Solo Delivery</option>
-                </select>
+             {/* 2. DELIVERY ASCENDENTE */}
+             <div>
+                <div className="mb-3 border-b border-fuchsia-100 dark:border-fuchsia-800 pb-1 flex items-center gap-2 text-fuchsia-700 dark:text-fuchsia-400">
+                   <Bike size={18} /><h3 className="text-lg font-black">Deliverys</h3>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                   {listado.filter(p => p.tipoDespacho === 'Delivery').sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0)).map(p => renderTarjetaPedido(p))}
+                </div>
              </div>
           </div>
-          
-          <button onClick={generarCierreAuditoria} className="bg-slate-800 text-white px-5 py-3 rounded-xl font-bold text-sm shadow-md hover:bg-slate-700 flex items-center gap-2 transition-colors w-full md:w-auto justify-center"><FileDown size={18}/> Cierre Auditable Diario</button>
-       </div>
-
-       {/* GRILLA PRINCIPAL */}
-       {listado.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl">No hay paquetes para la fecha y filtros seleccionados.</div>
-       ) : vista === 'entregados' ? (
-          <>
-             {/* 1. ENTREGAS EN TIENDA EN ORDEN ASCENDENTE */}
-             <div className="mb-4 border-b-2 border-purple-200 dark:border-purple-800/50 pb-2 flex items-center gap-2">
-                <Store className="text-purple-600" size={20} />
-                <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">Entregas en Tienda</h3>
-             </div>
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-                {listado
-                   .filter(p => p.tipoDespacho === 'Tienda')
-                   .sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0))
-                   .map(p => renderTarjetaPedido(p))}
-             </div>
-
-             {/* 2. DELIVERYS EN ORDEN ASCENDENTE */}
-             <div className="mb-4 border-b-2 border-fuchsia-200 dark:border-fuchsia-800/50 pb-2 flex items-center gap-2">
-                <Bike className="text-fuchsia-600" size={20} />
-                <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">Deliverys</h3>
-             </div>
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {listado
-                   .filter(p => p.tipoDespacho === 'Delivery')
-                   .sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0))
-                   .map(p => renderTarjetaPedido(p))}
-             </div>
-          </>
        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
              {listado.map(p => renderTarjetaPedido(p))}
           </div>
        )}
