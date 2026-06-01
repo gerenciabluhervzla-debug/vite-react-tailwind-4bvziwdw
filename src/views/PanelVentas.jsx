@@ -40,6 +40,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
  const [busquedaCliente, setBusquedaCliente] = useState('');
  const [fechaHistorial, setFechaHistorial] = useState(getLocalToday());
  const [filtroStatus, setFiltroStatus] = useState('Todos');
+ const [filtroTipoDespacho, setFiltroTipoDespacho] = useState('Todos'); // NUEVO FILTRO TIPO DESPACHO
 
  const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
  const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
@@ -77,15 +78,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
  const pedidosHistorialOrganizados = useMemo(() => {
    let lista = pedidos.filter(p => !p.esPublico);
+   
+   // Filtro de Búsqueda
    if (busquedaCliente.trim()) {
      const b = busquedaCliente.toLowerCase();
      lista = lista.filter(p => p.clienteNombre?.toLowerCase().includes(b));
    }
+   
+   // Filtro de Fecha
    if (fechaHistorial) {
      const [year, month, day] = fechaHistorial.split('-');
      const fechaFiltroStr = `${day}/${month}/${year}`;
      lista = lista.filter(p => p.fechaDespacho === fechaFiltroStr);
    }
+
+   // Filtro de Estatus
    if (filtroStatus !== 'Todos') {
      if (filtroStatus === 'Validados') {
        lista = lista.filter(p => p.status === 'Validado');
@@ -93,9 +100,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
        lista = lista.filter(p => p.status === filtroStatus);
      }
    }
-   lista.sort((a, b) => b.fechaCreacion - a.fechaCreacion); // Más recientes primero en la misma fecha
+
+   // Filtro de Tipo de Despacho
+   if (filtroTipoDespacho !== 'Todos') {
+     lista = lista.filter(p => (p.tipoDespacho || 'Nacional') === filtroTipoDespacho);
+   }
+
+   // ORDEN ASCENDENTE: Más antiguos primero
+   lista.sort((a, b) => a.fechaCreacion - b.fechaCreacion); 
    return lista;
- }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus]);
+ }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus, filtroTipoDespacho]);
 
  useEffect(() => {
    if (!formData.carritoObj) return;
@@ -773,7 +787,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         
          {/* BARRA DE BÚSQUEDA Y FILTROS */}
          <div className="bg-slate-50 dark:bg-slate-900/50 p-4 lg:p-6 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col md:flex-row gap-4 items-center justify-between">
-           <div className="relative w-full md:w-1/3">
+           <div className="relative w-full md:w-1/4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
               <input
                 type="text"
@@ -784,8 +798,22 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
               />
            </div>
           
-           <div className="flex gap-4 w-full md:w-auto">
-              <div className="flex flex-col w-full">
+           <div className="flex flex-wrap gap-4 w-full md:w-auto flex-1 md:justify-end">
+              <div className="flex flex-col w-full sm:w-auto flex-1 sm:flex-none">
+                <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1">Tipo Envío</label>
+                <select
+                  value={filtroTipoDespacho}
+                  onChange={e=>setFiltroTipoDespacho(e.target.value)}
+                  className="w-full sm:w-32 p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors"
+                >
+                   <option value="Todos">Todos</option>
+                   <option value="Nacional">Nacional</option>
+                   <option value="Delivery">Delivery</option>
+                   <option value="Tienda">Tienda</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col w-full sm:w-auto flex-1 sm:flex-none">
                 <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1">Fecha</label>
                 <input
                   type="date"
@@ -795,12 +823,12 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                 />
               </div>
              
-              <div className="flex flex-col w-full">
+              <div className="flex flex-col w-full sm:w-auto flex-1 sm:flex-none">
                 <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1">Estatus</label>
                 <select
                   value={filtroStatus}
                   onChange={e=>setFiltroStatus(e.target.value)}
-                  className="w-full p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors"
+                  className="w-full sm:w-32 p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors"
                 >
                    <option value="Todos">Todos</option>
                    <option value="Pendiente">Pendientes</option>
@@ -818,189 +846,208 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
              <div className="lg:col-span-2 font-bold tracking-wide">Estatus</div>
              {puedeCrear && <div className="lg:col-span-3 font-bold tracking-wide text-right">Acciones</div>}
            </div>
+           
            <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-700">
              {pedidosHistorialOrganizados.length === 0 ? (
                <div className="p-10 text-center text-slate-400 italic font-bold">No hay ventas que coincidan con la búsqueda.</div>
-             ) : pedidosHistorialOrganizados.map((p, index) => {
-               const isAnulado = p.status === 'Anulado';
-              
-               return (
-               <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${isAnulado ? 'opacity-60 grayscale-[50%]' : ''}`}>
-                
-                 {/* NÚMERO DE VENTA DEL DÍA INDEPENDIENTE */}
-                 <div className={`absolute top-4 lg:top-6 left-2 lg:left-3 text-white w-6 h-6 rounded-full flex items-center justify-center font-black text-xs shadow-sm ${p.tipoDespacho === 'Delivery' ? 'bg-fuchsia-600' : p.tipoDespacho === 'Tienda' ? 'bg-purple-600' : 'bg-[#003366] dark:bg-sky-600'}`}>
-                   {numeracionDiaria[p.id] || index + 1}
-                 </div>
+             ) : (
+               ['Nacional', 'Delivery', 'Tienda'].map(tipo => {
+                 const pedidosGrupo = pedidosHistorialOrganizados.filter(p => (p.tipoDespacho || 'Nacional') === tipo);
+                 if (pedidosGrupo.length === 0) return null;
 
-                 <div className="lg:col-span-4 flex flex-col justify-start pl-8 lg:pl-10">
-                   <div className={`font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2 ${isAnulado ? 'line-through text-slate-400' : ''}`}>
-                      {p.clienteNombre}
-                      {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
-                   </div>
-
-                   <div className={`text-sm font-semibold text-slate-600 dark:text-slate-300 mt-1 ${isAnulado ? 'line-through text-slate-400' : ''}`}>
-                      📱 {p.clienteTelefono}
-                   </div>
-                   <div className={`text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-tight pr-4 ${isAnulado ? 'line-through text-slate-400 opacity-60' : ''}`}>
-                      📍 {p.direccion}
-                   </div>
-                  
-                   <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1.5 flex flex-wrap items-center gap-2">
-                      {p.tipoDespacho === 'Delivery' ? (
-                        <span className="bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/50 dark:text-fuchsia-400 px-1.5 py-0.5 rounded text-[9px] border border-fuchsia-200 dark:border-fuchsia-800 flex items-center gap-1">
-                           <Bike size={10}/> DELIVERY
-                        </span>
-                      ) : p.tipoDespacho === 'Tienda' ? (
-                        <span className="bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-400 px-1.5 py-0.5 rounded text-[9px] border border-purple-200 dark:border-purple-800 flex items-center gap-1">
-                           <StoreIcon size={10}/> TIENDA
-                        </span>
-                      ) : (
-                        <>
-                           {p.courier}
-                           <span className={`px-1.5 py-0.5 rounded text-[9px] border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/50 dark:text-orange-400'}`}>
-                              {p.pagoEnvio === 'PAGADO' ? 'PAGADO' : 'COD'}
-                           </span>
-                        </>
-                      )}
-                      
-                      {p.origenPedido && (
-                         <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-1.5 py-0.5 rounded text-[9px] border border-indigo-200 dark:border-indigo-800">
-                            {p.origenPedido}
-                         </span>
-                      )}
-                   </div>
-
-                   {/* Resumen especial si es Tienda/Delivery */}
-                   {p.tipoDespacho === 'Tienda' && p.retiroNombre && (
-                      <div className="text-[10px] font-bold text-purple-700 dark:text-purple-400 mt-1 flex items-center gap-1 bg-purple-50 dark:bg-purple-900/20 p-1.5 rounded w-max border border-purple-100 dark:border-purple-800/50">
-                         Retira: {p.retiroNombre} - {p.retiroCedula}
-                      </div>
-                   )}
-                   {p.tipoDespacho === 'Delivery' && p.deliveryFecha && (
-                      <div className="text-[10px] font-bold text-fuchsia-700 dark:text-fuchsia-400 mt-1 flex items-center gap-1 bg-fuchsia-50 dark:bg-fuchsia-900/20 p-1.5 rounded w-max border border-fuchsia-100 dark:border-fuchsia-800/50">
-                         Pautado: {p.deliveryFecha} a las {p.deliveryHora}
-                      </div>
-                   )}
-
-                   {p.esMercadoLibre && p.numeroControlML && (
-                      <div className="text-[11px] font-bold text-yellow-700 dark:text-yellow-500 mt-1 flex items-center gap-1">
-                         <Package size={12}/> N° Control ML: {p.numeroControlML}
-                      </div>
-                   )}
-                   <div className="text-xs font-semibold text-slate-400 mt-1">
-                     {new Date(p.fechaCreacion).toLocaleDateString()} a las {new Date(p.fechaCreacion).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                   </div>
-                  
-                   <div className="mt-3 text-[12px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300 font-medium">
-                      {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
-                   </div>
-
-                   {p.notaVentas && (
-                      <div className="mt-3 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 p-3 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50 flex items-start gap-2 shadow-sm w-full">
-                        <MessageSquare size={16} className="shrink-0 mt-0.5" />
-                        <div className="flex-1 whitespace-pre-wrap font-bold">
-                          <span className="uppercase tracking-widest text-[9px] block mb-0.5 opacity-70">Nota de Ventas:</span>
-                          {p.notaVentas}
-                        </div>
-                      </div>
-                   )}
-
-                   {(p.linkGuiaML || p.linkGuia || p.linkComprobantePago || p.linkFotoProductos) && (
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        
-                         {p.linkComprobantePago && (
-                            <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg dark:bg-emerald-900/30 dark:border-emerald-800 dark:text-emerald-400 hover:bg-emerald-100 transition-colors shadow-sm">
-                               <FileText size={14}/> Ver Recibo Pago
-                            </a>
-                         )}
-                        
-                         {p.linkGuiaML && (
-                            <a href={p.linkGuiaML} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2.5 py-1.5 rounded-lg dark:bg-sky-900/30 dark:border-sky-800 dark:text-sky-400 hover:bg-sky-100 transition-colors shadow-sm">
-                               <FileText size={14}/> Ver Guía ML
-                            </a>
-                         )}
-                        
-                         {p.linkGuia && p.linkGuia.startsWith('http') && !p.linkGuiaML && (
-                            <a href={p.linkGuia} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1.5 rounded-lg dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400 hover:bg-indigo-100 transition-colors shadow-sm">
-                               <FileText size={14}/> Ver Foto Guía
-                            </a>
-                         )}
-                         {p.linkFotoProductos && (
-                            <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-lg dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400 hover:bg-amber-100 transition-colors shadow-sm">
-                               <Package size={14}/> Ver Paquete Físico
-                            </a>
-                         )}
-                      </div>
-                   )}
-                 </div>
-                 <div className="lg:col-span-3 flex flex-col justify-start mt-2 lg:mt-0">
-                   <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monto a pagar:</span>
-                   {isAnulado ? (
-                      <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-xl border border-slate-300 dark:border-slate-600">
-                         <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-1"><Ban size={12}/> ORDEN ANULADA</div>
-                         <div className="font-black text-slate-400 text-lg line-through">${(p.montoUsd||0).toFixed(2)}</div>
-                         <div className="text-[10px] text-red-500 font-bold mt-1 leading-tight">Motivo: {p.motivoAnulacion}</div>
-                      </div>
-                   ) : p.esRegalo ? (
-                      <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800/50">
-                         <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1 mb-1"><Gift size={14}/> REGALO VIP</div>
-                         {p.montoUsd > 0 && <div className="font-black text-purple-800 dark:text-purple-300 text-lg">+ ${p.montoUsd.toFixed(2)}</div>}
-                      </div>
-                   ) : p.moneda === 'ZELLE' ? (
-                      <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800/50">
-                         <div className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">ZELLE</div>
-                         <div className="font-black text-purple-800 dark:text-purple-300 text-xl">${(p.montoUsd||0).toFixed(2)}</div>
-                      </div>
-                   ) : (
-                      <>
-                       <div className="font-black text-slate-800 dark:text-slate-100 text-xl">${(p.montoUsd||0).toFixed(2)}</div>
-                       <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
-                       
-                       {p.costoEnvio > 0 && <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-1 uppercase">Incluye Despacho: ${p.costoEnvio}</div>}
-
-                       {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
-                         <div className="flex flex-col gap-1 mt-2 w-max">
-                           {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800/50">Campaña: {p.descuentoGlobalAplicado}%</span>}
-                           {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50">Asesor: {p.descuentoPorcentaje}%</span>}
-                         </div>
-                       )}
-                      </>
-                   )}
-                 </div>
-                 <div className="lg:col-span-2 flex flex-col justify-start mt-2 lg:mt-0 items-start">
-                   <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Estado de la orden:</span>
-                   <StatusBadge status={p.status} />
-                   {p.status === 'Rechazado' && <div className="text-[10px] text-red-600 mt-2 font-bold bg-red-50 dark:bg-red-900/30 p-2 rounded-lg border border-red-100 dark:border-red-800 leading-relaxed w-full">Motivo: {p.motivoRechazo}</div>}
-                 </div>
-                 {puedeCrear && (
-                   <div className="lg:col-span-3 flex flex-row lg:flex-col items-center lg:items-end justify-between lg:justify-start gap-3 mt-4 lg:mt-0 pt-4 lg:pt-0 border-t border-slate-100 dark:border-slate-700 lg:border-none w-full">
-                     <div className="flex flex-wrap lg:flex-col gap-2 w-full lg:w-auto items-center lg:items-end">
-                      
-                       {(p.status === 'Pendiente' || p.status === 'Rechazado') && (
-                         <>
-                           <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 dark:text-amber-400 text-xs font-bold py-2 px-4 rounded-lg transition-colors shadow-sm w-full lg:w-auto text-center border border-amber-200 dark:border-amber-800">
-                              Corregir / Modificar
-                           </button>
-                           <button onClick={() => anularPedidoVentas(p)} className="bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 text-xs font-bold py-2 px-4 rounded-lg transition-colors shadow-sm w-full lg:w-auto text-center flex justify-center items-center gap-1.5 border border-red-200 dark:border-red-800/50">
-                              <Ban size={14}/> Descartar
-                           </button>
-                           <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="text-xs text-slate-500 hover:text-amber-500 font-bold underline transition-colors p-2 lg:p-0">
-                              Mover a Espera
-                           </button>
-                         </>
-                       )}
-                       {p.status === 'Despachado' && (
-                         <>
-                           <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">Guía: {p.guia || '-'}</div>
-                           <button onClick={() => enviarWhatsApp(p)} className="bg-[#25D366]/10 text-[#128C7E] dark:text-[#25D366] hover:bg-[#25D366]/20 text-xs font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-1.5 transition-colors w-full lg:w-auto mt-1"><MessageCircle size={16} /> Notificar</button>
-                         </>
-                       )}
+                 return (
+                   <React.Fragment key={tipo}>
+                     {/* LÍNEA DIVISORIA Y TÍTULO POR TIPO DE DESPACHO */}
+                     <div className="bg-slate-100 dark:bg-slate-800/80 px-6 py-3 border-y border-slate-200 dark:border-slate-700 flex items-center gap-2 font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 text-xs">
+                       {tipo === 'Nacional' ? <Truck size={16} className="text-sky-600 dark:text-sky-400"/> : tipo === 'Tienda' ? <StoreIcon size={16} className="text-purple-600 dark:text-purple-400"/> : <Bike size={16} className="text-fuchsia-600 dark:text-fuchsia-400"/>}
+                       {tipo === 'Nacional' ? 'Envíos Nacionales' : tipo === 'Tienda' ? 'Entregas en Tienda' : 'Deliveries'}
                      </div>
-                     {p.auditado && p.status !== 'Anulado' && <span className="text-emerald-600 font-bold text-[10px] flex items-center justify-end gap-1 mt-1 uppercase tracking-widest w-full lg:w-auto"><ShieldCheck size={14}/> Auditado</span>}
-                   </div>
-                 )}
-               </div>
-             )})}
+
+                     {pedidosGrupo.map((p, index) => {
+                       const isAnulado = p.status === 'Anulado';
+                      
+                       return (
+                       <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${isAnulado ? 'opacity-60 grayscale-[50%]' : ''}`}>
+                        
+                         {/* NÚMERO DE VENTA DEL DÍA INDEPENDIENTE */}
+                         <div className={`absolute top-4 lg:top-6 left-2 lg:left-3 text-white w-6 h-6 rounded-full flex items-center justify-center font-black text-xs shadow-sm ${p.tipoDespacho === 'Delivery' ? 'bg-fuchsia-600' : p.tipoDespacho === 'Tienda' ? 'bg-purple-600' : 'bg-[#003366] dark:bg-sky-600'}`}>
+                           {numeracionDiaria[p.id] || index + 1}
+                         </div>
+
+                         <div className="lg:col-span-4 flex flex-col justify-start pl-8 lg:pl-10">
+                           <div className={`font-bold text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2 ${isAnulado ? 'line-through text-slate-400' : ''}`}>
+                              {p.clienteNombre}
+                              {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
+                           </div>
+
+                           <div className={`text-sm font-semibold text-slate-600 dark:text-slate-300 mt-1 ${isAnulado ? 'line-through text-slate-400' : ''}`}>
+                              📱 {p.clienteTelefono}
+                           </div>
+                           <div className={`text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-tight pr-4 ${isAnulado ? 'line-through text-slate-400 opacity-60' : ''}`}>
+                              📍 {p.direccion}
+                           </div>
+                          
+                           <div className="text-xs font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1.5 flex flex-wrap items-center gap-2">
+                              {p.tipoDespacho === 'Delivery' ? (
+                                <span className="bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/50 dark:text-fuchsia-400 px-1.5 py-0.5 rounded text-[9px] border border-fuchsia-200 dark:border-fuchsia-800 flex items-center gap-1">
+                                   <Bike size={10}/> DELIVERY
+                                </span>
+                              ) : p.tipoDespacho === 'Tienda' ? (
+                                <span className="bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-400 px-1.5 py-0.5 rounded text-[9px] border border-purple-200 dark:border-purple-800 flex items-center gap-1">
+                                   <StoreIcon size={10}/> TIENDA
+                                </span>
+                              ) : (
+                                <>
+                                   {p.courier}
+                                   <span className={`px-1.5 py-0.5 rounded text-[9px] border ${p.pagoEnvio === 'PAGADO' ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-400' : 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/50 dark:text-orange-400'}`}>
+                                      {p.pagoEnvio === 'PAGADO' ? 'PAGADO' : 'COD'}
+                                   </span>
+                                </>
+                              )}
+                              
+                              {p.origenPedido && (
+                                 <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-1.5 py-0.5 rounded text-[9px] border border-indigo-200 dark:border-indigo-800">
+                                    {p.origenPedido}
+                                 </span>
+                              )}
+                           </div>
+
+                           {/* Resumen especial si es Tienda/Delivery */}
+                           {p.tipoDespacho === 'Tienda' && p.retiroNombre && (
+                              <div className="text-[10px] font-bold text-purple-700 dark:text-purple-400 mt-1 flex items-center gap-1 bg-purple-50 dark:bg-purple-900/20 p-1.5 rounded w-max border border-purple-100 dark:border-purple-800/50">
+                                 Retira: {p.retiroNombre} - {p.retiroCedula}
+                              </div>
+                           )}
+                           {p.tipoDespacho === 'Delivery' && p.deliveryFecha && (
+                              <div className="text-[10px] font-bold text-fuchsia-700 dark:text-fuchsia-400 mt-1 flex items-center gap-1 bg-fuchsia-50 dark:bg-fuchsia-900/20 p-1.5 rounded w-max border border-fuchsia-100 dark:border-fuchsia-800/50">
+                                 Pautado: {p.deliveryFecha} a las {p.deliveryHora}
+                              </div>
+                           )}
+
+                           {p.esMercadoLibre && p.numeroControlML && (
+                              <div className="text-[11px] font-bold text-yellow-700 dark:text-yellow-500 mt-1 flex items-center gap-1">
+                                 <Package size={12}/> N° Control ML: {p.numeroControlML}
+                              </div>
+                           )}
+                           <div className="text-xs font-semibold text-slate-400 mt-1">
+                             {new Date(p.fechaCreacion).toLocaleDateString()} a las {new Date(p.fechaCreacion).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                           </div>
+                          
+                           <div className="mt-3 text-[12px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700 whitespace-pre-wrap text-slate-600 dark:text-slate-300 font-medium">
+                              {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
+                           </div>
+
+                           {p.notaVentas && (
+                              <div className="mt-3 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 p-3 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50 flex items-start gap-2 shadow-sm w-full">
+                                <MessageSquare size={16} className="shrink-0 mt-0.5" />
+                                <div className="flex-1 whitespace-pre-wrap font-bold">
+                                  <span className="uppercase tracking-widest text-[9px] block mb-0.5 opacity-70">Nota de Ventas:</span>
+                                  {p.notaVentas}
+                                </div>
+                              </div>
+                           )}
+
+                           {(p.linkGuiaML || p.linkGuia || p.linkComprobantePago || p.linkFotoProductos) && (
+                              <div className="flex flex-wrap gap-2 mt-3">
+                                 
+                                 {p.linkComprobantePago && (
+                                    <a href={p.linkComprobantePago} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg dark:bg-emerald-900/30 dark:border-emerald-800 dark:text-emerald-400 hover:bg-emerald-100 transition-colors shadow-sm">
+                                       <FileText size={14}/> Ver Recibo Pago
+                                    </a>
+                                 )}
+                                 
+                                 {p.linkGuiaML && (
+                                    <a href={p.linkGuiaML} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2.5 py-1.5 rounded-lg dark:bg-sky-900/30 dark:border-sky-800 dark:text-sky-400 hover:bg-sky-100 transition-colors shadow-sm">
+                                       <FileText size={14}/> Ver Guía ML
+                                    </a>
+                                 )}
+                                 
+                                 {p.linkGuia && p.linkGuia.startsWith('http') && !p.linkGuiaML && (
+                                    <a href={p.linkGuia} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1.5 rounded-lg dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400 hover:bg-indigo-100 transition-colors shadow-sm">
+                                       <FileText size={14}/> Ver Foto Guía
+                                    </a>
+                                 )}
+                                 {p.linkFotoProductos && (
+                                    <a href={p.linkFotoProductos} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-lg dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400 hover:bg-amber-100 transition-colors shadow-sm">
+                                       <Package size={14}/> Ver Paquete Físico
+                                    </a>
+                                 )}
+                              </div>
+                           )}
+                         </div>
+                         <div className="lg:col-span-3 flex flex-col justify-start mt-2 lg:mt-0">
+                           <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monto a pagar:</span>
+                           {isAnulado ? (
+                              <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-xl border border-slate-300 dark:border-slate-600">
+                                 <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-1"><Ban size={12}/> ORDEN ANULADA</div>
+                                 <div className="font-black text-slate-400 text-lg line-through">${(p.montoUsd||0).toFixed(2)}</div>
+                                 <div className="text-[10px] text-red-500 font-bold mt-1 leading-tight">Motivo: {p.motivoAnulacion}</div>
+                              </div>
+                           ) : p.esRegalo ? (
+                              <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800/50">
+                                 <div className="font-black text-purple-600 dark:text-purple-400 text-sm flex items-center gap-1 mb-1"><Gift size={14}/> REGALO VIP</div>
+                                 {p.montoUsd > 0 && <div className="font-black text-purple-800 dark:text-purple-300 text-lg">+ ${p.montoUsd.toFixed(2)}</div>}
+                              </div>
+                           ) : p.moneda === 'ZELLE' ? (
+                              <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800/50">
+                                 <div className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">ZELLE</div>
+                                 <div className="font-black text-purple-800 dark:text-purple-300 text-xl">${(p.montoUsd||0).toFixed(2)}</div>
+                              </div>
+                           ) : (
+                              <>
+                               <div className="font-black text-slate-800 dark:text-slate-100 text-xl">${(p.montoUsd||0).toFixed(2)}</div>
+                               <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
+                               
+                               {p.costoEnvio > 0 && <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-1 uppercase">Incluye Despacho: ${p.costoEnvio}</div>}
+
+                               {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
+                                 <div className="flex flex-col gap-1 mt-2 w-max">
+                                   {p.descuentoGlobalAplicado > 0 && <span className="text-[10px] font-bold text-pink-600 bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800/50">Campaña: {p.descuentoGlobalAplicado}%</span>}
+                                   {p.descuentoPorcentaje > 0 && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50">Asesor: {p.descuentoPorcentaje}%</span>}
+                                 </div>
+                               )}
+                              </>
+                           )}
+                         </div>
+                         <div className="lg:col-span-2 flex flex-col justify-start mt-2 lg:mt-0 items-start">
+                           <span className="lg:hidden text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Estado de la orden:</span>
+                           <StatusBadge status={p.status} />
+                           {p.status === 'Rechazado' && <div className="text-[10px] text-red-600 mt-2 font-bold bg-red-50 dark:bg-red-900/30 p-2 rounded-lg border border-red-100 dark:border-red-800 leading-relaxed w-full">Motivo: {p.motivoRechazo}</div>}
+                         </div>
+                         {puedeCrear && (
+                           <div className="lg:col-span-3 flex flex-row lg:flex-col items-center lg:items-end justify-between lg:justify-start gap-3 mt-4 lg:mt-0 pt-4 lg:pt-0 border-t border-slate-100 dark:border-slate-700 lg:border-none w-full">
+                             <div className="flex flex-wrap lg:flex-col gap-2 w-full lg:w-auto items-center lg:items-end">
+                              
+                               {(p.status === 'Pendiente' || p.status === 'Rechazado') && (
+                                 <>
+                                   <button onClick={() => cargarPedidoParaEditar(p)} className="bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 dark:text-amber-400 text-xs font-bold py-2 px-4 rounded-lg transition-colors shadow-sm w-full lg:w-auto text-center border border-amber-200 dark:border-amber-800">
+                                      Corregir / Modificar
+                                   </button>
+                                   <button onClick={() => anularPedidoVentas(p)} className="bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 text-xs font-bold py-2 px-4 rounded-lg transition-colors shadow-sm w-full lg:w-auto text-center flex justify-center items-center gap-1.5 border border-red-200 dark:border-red-800/50">
+                                      <Ban size={14}/> Descartar
+                                   </button>
+                                   <button onClick={() => cambiarEstadoPedido(p.id, 'En Espera (Sin Stock)')} className="text-xs text-slate-500 hover:text-amber-500 font-bold underline transition-colors p-2 lg:p-0">
+                                      Mover a Espera
+                                   </button>
+                                 </>
+                               )}
+                               {p.status === 'Despachado' && (
+                                 <>
+                                   <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">Guía: {p.guia || '-'}</div>
+                                   <button onClick={() => enviarWhatsApp(p)} className="bg-[#25D366]/10 text-[#128C7E] dark:text-[#25D366] hover:bg-[#25D366]/20 text-xs font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-1.5 transition-colors w-full lg:w-auto mt-1"><MessageCircle size={16} /> Notificar</button>
+                                 </>
+                               )}
+                             </div>
+                             {p.auditado && p.status !== 'Anulado' && <span className="text-emerald-600 font-bold text-[10px] flex items-center justify-end gap-1 mt-1 uppercase tracking-widest w-full lg:w-auto"><ShieldCheck size={14}/> Auditado</span>}
+                           </div>
+                         )}
+                       </div>
+                       )
+                     })}
+                   </React.Fragment>
+                 )
+               })
+             )}
            </div>
          </div>
        </div>

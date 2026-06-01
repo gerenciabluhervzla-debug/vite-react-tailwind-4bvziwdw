@@ -16,9 +16,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const [modalValidacion, setModalValidacion] = useState(null);
   const [backupLoading, setBackupLoading] = useState(false);
 
-  // ESTADOS PARA BUSCADOR Y ANULADOS
+  // ESTADOS PARA BUSCADOR, ANULADOS Y NUEVO FILTRO TIPO DESPACHO
   const [busqueda, setBusqueda] = useState('');
   const [mostrarAnulados, setMostrarAnulados] = useState(false);
+  const [filtroDespacho, setFiltroDespacho] = useState('Todos');
 
   const getVeneziaDate = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -26,7 +27,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   };
   const hoyStr = getVeneziaDate();
 
-  // Función: Calcula la fecha operativa basada en creación (corte a las 12:30 PM)
   const getFechaOperativaObj = (timestamp) => {
     const d = new Date(new Date(timestamp).toLocaleString("en-US", {timeZone: "America/Caracas"}));
     if (d.getHours() > 12 || (d.getHours() === 12 && d.getMinutes() >= 30)) {
@@ -37,7 +37,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     return { iso, visual };
   };
 
-  // Función: Determina la fecha real para los filtros e informes dando prioridad a la fecha de despacho
   const getFechaFiltroObj = (pedido) => {
     if (pedido.fechaDespacho && pedido.fechaDespacho.includes('/')) {
        const [dd, mm, yyyy] = pedido.fechaDespacho.split('/');
@@ -58,7 +57,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }
   }, [config]);
 
-  // --- LÓGICA DE BACKUP DIARIO A GOOGLE DRIVE ---
   const recolectarDataBackup = async () => {
     const data = { pedidos: [], cierres_inventario: [], movimientos: [], logs: [], users: [], inventario: {}, config: {} };
     const cols = ['pedidos', 'cierres_inventario', 'movimientos', 'logs', 'users'];
@@ -162,14 +160,12 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     e.target.value = '';
   };
 
-  // --- ORDENAMIENTO DE PENDIENTES (ASCENDENTE) ---
   const pendientesOrdenados = useMemo(() => {
     return pedidos
       .filter(p => p.status === 'Pendiente')
       .sort((a, b) => a.fechaCreacion - b.fechaCreacion); 
   }, [pedidos]);
  
-  // --- FILTRADO DEL HISTORIAL CON FECHA DESPACHO/OPERATIVA Y ORDEN ASCENDENTE ---
   const historialFiltrado = useMemo(() => {
     let todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
     
@@ -184,18 +180,22 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       });
     }
     
-    // ORDENAMIENTO ASCENDENTE (MÁS ANTIGUOS PRIMERO)
     return todosHistorial.sort((a, b) => a.fechaCreacion - b.fechaCreacion);
   }, [pedidos, fechaInicio, fechaFin, mostrarAnulados]);
 
-  // --- APLICAR BUSCADOR GLOBAL ---
+  // APLICAR BUSCADOR Y NUEVO FILTRO TIPO DESPACHO
   const listado = useMemo(() => {
-    const base = vistaAdmin === 'pendientes' ? pendientesOrdenados : historialFiltrado;
+    let base = vistaAdmin === 'pendientes' ? pendientesOrdenados : historialFiltrado;
+    
+    if (filtroDespacho !== 'Todos') {
+       base = base.filter(p => (p.tipoDespacho || 'Nacional') === filtroDespacho);
+    }
+
     if (!busqueda.trim()) return base;
     
     const busquedaMinuscula = busqueda.toLowerCase();
     return base.filter(p => p.clienteNombre?.toLowerCase().includes(busquedaMinuscula));
-  }, [vistaAdmin, pendientesOrdenados, historialFiltrado, busqueda]);
+  }, [vistaAdmin, pendientesOrdenados, historialFiltrado, busqueda, filtroDespacho]);
 
   const actualizarTasa = async () => {
     dialogs.prompt("Ingresa la nueva tasa del día en Bolívares (Bs/$):", async (nuevaTasa) => {
@@ -255,7 +255,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       file: null, 
       previewUrl: isEdit && pedido.linkComprobanteAdmin ? pedido.linkComprobanteAdmin : '', 
       subiendo: false,
-      isEdit: isEdit 
+      isEdit: isEdit,
+      // NUEVOS CAMPOS PUNTO Y EFECTIVO
+      montoPuntoVentaBs: pedido.montoPuntoVentaBs?.toString() || '',
+      montoEfectivoUsd: pedido.montoEfectivoUsd?.toString() || '',
+      vueltoUsd: pedido.vueltoUsd?.toString() || ''
     });
   };
 
@@ -273,7 +277,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
   const procesarValidacionDefinitiva = async () => {
     if (!modalValidacion) return;
-    const { pedido, tipoDiferencia, montoDiferencia, monedaDiferencia, file, isEdit } = modalValidacion;
+    const { pedido, tipoDiferencia, montoDiferencia, monedaDiferencia, file, isEdit, montoPuntoVentaBs, montoEfectivoUsd, vueltoUsd } = modalValidacion;
     
     if (tipoDiferencia !== 'ninguno' && (!montoDiferencia || parseFloat(montoDiferencia) <= 0)) {
         return dialogs.alert("Debes ingresar un monto válido para el faltante o sobrante.", "Monto Inválido");
@@ -294,11 +298,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         if (result.url) urlComprobanteAdmin = result.url;
       }
 
-      // 2. Descontar Inventario SOLO si NO es una edición (para no descontar dos veces)
+      // 2. Descontar Inventario SOLO si NO es una edición
       if (!isEdit) {
          const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
          const updates = {};
-         // LÓGICA DE MÚLTIPLES ALMACENES
          const almacenDestino = (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') ? 'recepcion' : 'envios';
          
          Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { 
@@ -328,6 +331,13 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           faltanteUsd: faltanteUsd 
       };
       
+      // NUEVO: Guardar pagos presenciales si es Tienda
+      if (pedido.tipoDespacho === 'Tienda') {
+          payloadPedido.montoPuntoVentaBs = parseFloat(montoPuntoVentaBs) || 0;
+          payloadPedido.montoEfectivoUsd = parseFloat(montoEfectivoUsd) || 0;
+          payloadPedido.vueltoUsd = parseFloat(vueltoUsd) || 0;
+      }
+
       if (urlComprobanteAdmin) payloadPedido.linkComprobanteAdmin = urlComprobanteAdmin;
 
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), payloadPedido);
@@ -519,7 +529,21 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           
           <div className="flex flex-col sm:flex-row items-center gap-4 w-full xl:w-auto">
              
-             <div className="relative w-full sm:w-64">
+             <div className="flex flex-col w-full sm:w-auto">
+               <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1">Tipo Despacho</label>
+               <select
+                 value={filtroDespacho}
+                 onChange={e=>setFiltroDespacho(e.target.value)}
+                 className="w-full sm:w-32 p-2 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-sm font-bold outline-none focus:border-sky-500 transition-colors"
+               >
+                  <option value="Todos">Todos</option>
+                  <option value="Nacional">Nacional</option>
+                  <option value="Delivery">Delivery</option>
+                  <option value="Tienda">Tienda</option>
+               </select>
+             </div>
+
+             <div className="relative w-full sm:w-64 mt-4 sm:mt-0 self-end">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
                 <input 
                   type="text" 
@@ -530,7 +554,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                 />
              </div>
 
-             <div className="flex flex-wrap sm:flex-nowrap overflow-x-auto scrollbar-hide gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full xl:w-max">
+             <div className="flex flex-wrap sm:flex-nowrap overflow-x-auto scrollbar-hide gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 w-full xl:w-max mt-4 sm:mt-0 self-end">
                {esAdmin && <button onClick={() => setVistaAdmin('pendientes')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'pendientes' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Pendientes ({pendientesOrdenados.length})</button>}
                <button onClick={() => setVistaAdmin('historial')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'historial' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Historial General</button>
                {esAuditor && <button onClick={() => setVistaAdmin('auditoria')} className={`px-5 py-2.5 text-sm font-bold rounded-lg whitespace-nowrap transition-all flex-grow sm:flex-grow-0 text-center ${vistaAdmin === 'auditoria' ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>Diario de Auditoría</button>}
@@ -660,6 +684,18 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                         </div>
                       </div>
                    )}
+
+                   {/* DETALLE PAGOS EN TIENDA */}
+                   {(p.montoPuntoVentaBs > 0 || p.montoEfectivoUsd > 0 || p.vueltoUsd > 0) && (
+                      <div className="mb-4 bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800">
+                         <div className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-400 mb-2">Detalles de Pago Presencial</div>
+                         <div className="flex flex-wrap gap-2">
+                            {p.montoPuntoVentaBs > 0 && <span className="text-[10px] font-bold text-slate-700 bg-white px-2 py-1 rounded border shadow-sm">Punto: Bs {p.montoPuntoVentaBs}</span>}
+                            {p.montoEfectivoUsd > 0 && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200 shadow-sm">Efectivo: ${p.montoEfectivoUsd}</span>}
+                            {p.vueltoUsd > 0 && <span className="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 shadow-sm">Vuelto Dado: ${p.vueltoUsd}</span>}
+                         </div>
+                      </div>
+                   )}
                    
                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 break-all mb-4">
                      <span className="text-slate-400 mr-1 block sm:inline">Ref:</span>{p.referencia}
@@ -783,7 +819,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><CheckCircle className="text-sky-600"/> {modalValidacion.isEdit ? 'Corregir Validación' : 'Confirmar Pago'}</h3>
                  <button onClick={() => setModalValidacion(null)} className="p-2 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20}/></button>
               </div>
-              <div className="p-6">
+              <div className="p-6 max-h-[80vh] overflow-y-auto">
                  <div className="bg-[#f0f4f8] dark:bg-slate-900 p-4 rounded-xl mb-6 flex justify-between items-center border border-slate-200 dark:border-slate-700">
                     <div>
                       <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cliente</div>
@@ -794,9 +830,22 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                       <div className="text-xl font-black text-emerald-600 dark:text-emerald-400">${modalValidacion.pedido.montoUsd}</div>
                     </div>
                  </div>
+
+                 {/* NUEVO: PAGOS EN TIENDA */}
+                 {modalValidacion.pedido.tipoDespacho === 'Tienda' && (
+                   <div className="mb-6 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl border border-purple-200 dark:border-purple-800">
+                      <label className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-400 block mb-3">Detalles de Pago Presencial (Opcional)</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                         <input type="number" step="0.01" value={modalValidacion.montoPuntoVentaBs} onChange={e=>setModalValidacion(p=>({...p, montoPuntoVentaBs: e.target.value}))} className="w-full border-2 border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-purple-500 font-bold text-sm" placeholder="Punto Venta (Bs)" />
+                         <input type="number" step="0.01" value={modalValidacion.montoEfectivoUsd} onChange={e=>setModalValidacion(p=>({...p, montoEfectivoUsd: e.target.value}))} className="w-full border-2 border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-purple-500 font-bold text-sm" placeholder="Efectivo ($)" />
+                         <input type="number" step="0.01" value={modalValidacion.vueltoUsd} onChange={e=>setModalValidacion(p=>({...p, vueltoUsd: e.target.value}))} className="w-full border-2 border-red-200 dark:border-red-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-red-500 font-bold text-sm" placeholder="Vuelto Dado ($)" />
+                      </div>
+                      <p className="text-[9px] text-purple-600 dark:text-purple-400 mt-2 font-bold uppercase tracking-widest">Estos montos se desglosarán en los Reportes Financieros.</p>
+                   </div>
+                 )}
                  
                  <div className="mb-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-                    <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block mb-3">¿Diferencia en el pago?</label>
+                    <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block mb-3">¿Diferencia en el pago? (Sobrante/Faltante)</label>
                     <div className="flex flex-wrap sm:flex-nowrap gap-3 mb-4">
                        <label className={`flex-1 flex items-center justify-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer font-bold text-xs transition-colors ${modalValidacion.tipoDiferencia === 'ninguno' ? 'bg-sky-50 border-sky-500 text-sky-700 dark:bg-sky-900/30 dark:border-sky-500 dark:text-sky-300' : 'bg-white border-slate-200 text-slate-500 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400'}`}>
                           <input type="radio" className="hidden" checked={modalValidacion.tipoDiferencia === 'ninguno'} onChange={() => setModalValidacion(p=>({...p, tipoDiferencia: 'ninguno'}))}/>
