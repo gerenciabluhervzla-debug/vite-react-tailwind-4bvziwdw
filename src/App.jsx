@@ -385,7 +385,7 @@ export default function App() {
                 {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} perfil={userProfile} />}
                 
                 {/* INYECCIÓN DE LOS NUEVOS PANELES */}
-                {activeTab === 'recepcion' && showRecepcion && <PanelRecepcion pedidos={pedidos} catalogo={catalogo} stock={stock} perfil={userProfile} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
+                {activeTab === 'recepcion' && showRecepcion && <PanelRecepcion pedidos={pedidos} catalogo={catalogo} stock={stockInventario} perfil={userProfile} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
                 {activeTab === 'clientes' && showClientes && <PanelClientes pedidos={pedidos} />}
 
                 {activeTab === 'reportes' && showReportes && <PanelReportes perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
