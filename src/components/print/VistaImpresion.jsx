@@ -1,27 +1,41 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Truck, MapPin, Phone, User, Package, CalendarDays, Clock } from 'lucide-react';
 import { BRAND_LOGO } from '../../config/constants';
 
 export default function VistaImpresion({ pedidos }) {
-  // Si no hay pedidos validados para imprimir hoy, no renderizamos nada en el DOM
-  if (!pedidos || pedidos.length === 0) return null;
+  // 1. ORDEN ASCENDENTE: Los más antiguos primero
+  const pedidosOrdenados = useMemo(() => {
+    if (!pedidos) return [];
+    return [...pedidos].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+  }, [pedidos]);
+
+  // Si no hay pedidos validados para imprimir, no renderizamos nada
+  if (pedidosOrdenados.length === 0) return null;
 
   return (
-    <div className="hidden print:block fixed inset-0 bg-white z-[9999] overflow-visible">
-      {pedidos.map((pedido, index) => {
-        // Aseguramos que los valores coincidan con la nueva arquitectura de base de datos
+    // 2. MULTIPLES POR HOJA: Usamos grid de 2 columnas en modo impresión
+    <div className="hidden print:grid fixed inset-0 bg-white z-[9999] grid-cols-2 gap-6 p-4 overflow-visible content-start text-black">
+      {pedidosOrdenados.map((pedido, index) => {
+        
+        // Mapeo seguro a la nueva arquitectura
         const tipoDespacho = pedido.tipoDespacho || 'Nacional';
         const isDelivery = tipoDespacho === 'Delivery';
         const isTienda = tipoDespacho === 'Tienda';
         const isNacional = tipoDespacho === 'Nacional';
 
         return (
-          <div key={pedido.id} className={`w-full max-w-[4in] mx-auto bg-white text-black p-6 ${index > 0 ? 'break-before-page' : ''}`}>
+          // break-inside-avoid evita que la etiqueta se corte a la mitad entre dos páginas
+          <div key={pedido.id} className="relative w-full bg-white p-6 border-2 border-gray-800 rounded-2xl break-inside-avoid">
             
-            <div className="flex flex-col items-center border-b-2 border-black pb-4 mb-4">
-              <img src={BRAND_LOGO} alt="Bluher" className="h-16 mb-2 grayscale object-contain" />
-              <h1 className="text-xl font-black tracking-widest uppercase text-center leading-tight">Etiqueta de Despacho</h1>
-              <div className="text-sm font-bold mt-2 bg-black text-white px-4 py-1 rounded-full uppercase tracking-widest">
+            {/* 3. NUMERACIÓN DIARIA */}
+            <div className="absolute top-0 left-0 bg-black text-white px-4 py-2 font-black text-xl rounded-tl-xl rounded-br-xl">
+               #{index + 1}
+            </div>
+
+            <div className="flex flex-col items-center border-b-2 border-black pb-4 mb-4 mt-2">
+              <img src={BRAND_LOGO} alt="Bluher" className="h-14 mb-2 grayscale object-contain" />
+              <h1 className="text-lg font-black tracking-widest uppercase text-center leading-tight">Etiqueta de Despacho</h1>
+              <div className="text-xs font-bold mt-2 bg-black text-white px-4 py-1 rounded-full uppercase tracking-widest">
                  {isTienda ? 'Retiro en Tienda' : isDelivery ? 'Delivery Local' : 'Envío Nacional'}
               </div>
             </div>
@@ -94,7 +108,7 @@ export default function VistaImpresion({ pedidos }) {
                          <span>{key.replace('|', ' ')}</span>
                       </li>
                    )) : (
-                      <li>{typeof pedido.productos === 'string' ? pedido.productos.replace(/\n/g, '<br>') : 'Verificar sistema para detalle'}</li>
+                      <li>{typeof pedido.productos === 'string' ? <span dangerouslySetInnerHTML={{__html: pedido.productos.replace(/\n/g, '<br>')}} /> : 'Verificar sistema para detalle'}</li>
                    )}
                 </ul>
               </div>
