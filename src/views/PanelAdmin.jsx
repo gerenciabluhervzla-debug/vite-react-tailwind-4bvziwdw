@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban, Search, Edit3, Truck, Store as StoreIcon, Bike } from 'lucide-react';
+import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban, Search, Edit3, Truck, Store as StoreIcon, Bike, RotateCcw } from 'lucide-react';
 import { StatusBadge, InputDark } from '../components/ui';
 import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
@@ -433,6 +433,55 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Añadir Comentario");
   };
 
+  const reversarValidacion = async (pedido) => {
+    dialogs.prompt(`⚠️ ATENCIÓN: Estás a punto de REVERSAR la validación de ${pedido.clienteNombre}.\n\nEsto devolverá los productos al inventario exacto y pondrá el pedido como Pendiente de nuevo.\n\nEscribe el motivo de la reversión para la auditoría:`, async (motivo) => {
+      if (!motivo) return;
+      
+      try {
+         // 1. Devolver el inventario
+         const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
+         const updates = {};
+         const almacenDestino = (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') ? 'recepcion' : 'envios';
+         
+         // Invertimos la lógica: En vez de restar, SUMAMOS el inventario de vuelta
+         Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { 
+             updates[itemKey] = { [almacenDestino]: increment(qty) }; 
+         });
+         
+         if (Object.keys(updates).length > 0) { 
+             await setDoc(stockRef, updates, { merge: true }); 
+         }
+
+         // 2. Limpiar datos financieros y devolver a estado Pendiente
+         const payloadPedido = { 
+            status: 'Pendiente', 
+            sobranteUsd: 0, 
+            faltanteUsd: 0,
+            montoPuntoVentaBs: 0,
+            montoEfectivoUsd: 0,
+            montoEfectivoBs: 0,
+            montoTarjetaCreditoBs: 0,
+            vueltoUsd: 0,
+            notasAuditoria: [...(pedido.notasAuditoria || []), { 
+               fecha: Date.now(), 
+               texto: `REVERSIÓN DE VALIDACIÓN (Inventario devuelto). Motivo: ${motivo}`, 
+               autor: perfil.nombre 
+            }]
+         };
+
+         // 3. Actualizar en Firebase
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), payloadPedido);
+         
+         loggear('VALIDACION_REVERSADA', `Admin Supremo reversó el pago de ${pedido.clienteNombre}. Stock devuelto.`);
+         dialogs.alert("La validación ha sido anulada. Los productos regresaron al stock y el pedido vuelve a estar Pendiente.", "Reversión Exitosa");
+         
+      } catch (e) { 
+         console.error(e); 
+         dialogs.alert("Ocurrió un error al intentar reversar el pedido.", "Error Crítico"); 
+      }
+    }, "Confirmar Reversión");
+  };
+
   const diasAuditoria = useMemo(() => {
     const dias = {};
     pedidos.forEach(p => {
@@ -733,8 +782,15 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                      )}
 
                      {vistaAdmin === 'historial' && esAdmin && p.status === 'Validado' && !p.auditado && (
-                        <button onClick={()=>abrirModalValidacion(p, true)} className="mt-auto mb-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm w-full">
+                        <button onClick={()=>abrirModalValidacion(p, true)} className="mb-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm w-full">
                            <Edit3 size={16}/> Corregir Validación
+                        </button>
+                     )}
+
+                     {/* NUEVO BOTÓN DE REVERSAR: Solo Admin Supremo en Historial de Validados */}
+                     {vistaAdmin === 'historial' && esAdminSupremo && p.status === 'Validado' && (
+                        <button onClick={()=>reversarValidacion(p)} className="mb-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm w-full">
+                           <RotateCcw size={16}/> Reversar y Devolver Stock
                         </button>
                      )}
                      
