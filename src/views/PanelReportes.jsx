@@ -77,11 +77,16 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     let ventasVES = 0; let ventasZelle = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
     let totalBrutoGeneralUsd = 0; let totalCobroEnviosUsd = 0;
     
-    // MÉTRICAS SEGMENTADAS DE VENTAS (NUEVAS)
+    // MÉTRICAS SEGMENTADAS DE VENTAS 
     let ventasEnviosUsd = 0; let ventasDeliveryUsd = 0; let ventasTiendaUsd = 0;
 
-    // MÉTRICAS TIENDA FÍSICA
-    let totalEfectivoTienda = 0; let totalPuntoTiendaBs = 0; let totalVueltosDados = 0;
+    // MÉTRICAS DE CAJAS FÍSICAS (Actualizadas para Tienda y Delivery)
+    let totalEfectivoTienda = 0; 
+    let totalEfectivoBs = 0;
+    let totalPuntoTiendaBs = 0; 
+    let totalTarjetaCreditoBs = 0;
+    let totalVueltosDados = 0; // Vueltos en USD
+    let totalVueltosBs = 0; // Vueltos en BS
 
     pedidosFiltrados.forEach(p => {
       let valorOriginalUsd = 0;
@@ -112,11 +117,14 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           ventasEnviosUsd += mUsd;
         }
 
-        // Registrar pagos físicos de Tienda
-        if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda') {
+        // Registrar pagos físicos (Ahora incluye Tienda Y Delivery)
+        if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda' || p.tipoDespacho === 'Delivery') {
            totalEfectivoTienda += (p.montoEfectivoUsd || 0);
+           totalEfectivoBs += (p.montoEfectivoBs || 0);
            totalPuntoTiendaBs += (p.montoPuntoVentaBs || 0);
+           totalTarjetaCreditoBs += (p.montoTarjetaCreditoBs || 0);
            totalVueltosDados += (p.vueltoUsd || 0);
+           totalVueltosBs += (p.vueltoBs || 0);
         }
 
         totalBrutoGeneralUsd += mUsd;
@@ -141,7 +149,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     return { 
        ventasVES, ventasZelle, mlUSD, mlVES, regalosUSD, descuentosUSD, 
        totalBrutoGeneralUsd, totalCobroEnviosUsd, totalNetoProductosUsd,
-       totalEfectivoTienda, totalPuntoTiendaBs, totalVueltosDados,
+       totalEfectivoTienda, totalEfectivoBs, totalPuntoTiendaBs, totalTarjetaCreditoBs, totalVueltosDados, totalVueltosBs,
        ventasEnviosUsd, ventasDeliveryUsd, ventasTiendaUsd
     };
   }, [pedidosFiltrados, catalogo]);
@@ -174,11 +182,9 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       return Object.values(map).sort((a,b) => (b.totalUsd + b.totalZelle) - (a.totalUsd + a.totalZelle));
   }, [pedidosFiltrados]);
 
-  // --- CÁLCULO INVENTARIO FÍSICO (RECEPCIÓN + ENVÍOS - DESCUENTOS BRUTOS DE VENDIDOS / REGALOS) ---
+  // --- CÁLCULO INVENTARIO FÍSICO ---
   const totalValInventario = useMemo(() => {
     let valorInicialStock = 0;
-    
-    // 1. Sumar el valor de catálogo base de todo el inventario físico inicial (recepción + envíos)
     Object.entries(stock).forEach(([key, val]) => {
       const cantEnvios = typeof val === 'object' ? (val.envios || 0) : (val || 0);
       const cantRecepcion = typeof val === 'object' ? (val.recepcion || 0) : 0;
@@ -195,7 +201,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       }
     });
 
-    // 2. Calcular y restar el valor total de catálogo original vendido (sin restar descuentos e incluyendo obsequios)
     let valorDescontarPorVentas = 0;
     pedidosFiltrados.forEach(p => {
       if (p.carritoObj) {
@@ -277,7 +282,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                 };
              }
              
-             // Separación de cantidades: Envíos vs Recepción (Tienda + Delivery)
              if (p.tipoDespacho === 'Delivery' || p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda') {
                 productosDetallados[key].unidadesRecepcion += qty;
              } else {
@@ -305,10 +309,15 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
     const listaProductosPDF = Object.values(productosDetallados).sort((a, b) => (b.unidadesEnvios + b.unidadesRecepcion) - (a.unidadesEnvios + a.unidadesRecepcion));
 
-    // Separación de Pedidos para el informe en 3 bloques
     const pedidosEnviosNacionales = pedidosFiltrados.filter(p => p.tipoDespacho !== 'Delivery' && p.tipoDespacho !== 'Tienda' && p.tipoDespacho !== 'Entrega en tienda');
     const pedidosEntregasTienda = pedidosFiltrados.filter(p => p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda');
     const pedidosDelivery = pedidosFiltrados.filter(p => p.tipoDespacho === 'Delivery');
+
+    // CÁLCULOS NETOS PARA CAJA FÍSICA PDF
+    const cajaFisicaUsd = metricas.totalEfectivoTienda - metricas.totalVueltosDados;
+    const cajaFisicaBs = metricas.totalEfectivoBs; // Efectivo físico no se le restan vueltos, porque los vueltos son por pago movil
+    const totalTransfPagoMovilNetoBs = metricas.ventasVES - metricas.totalVueltosBs;
+    const totalPuntosTDC = metricas.totalPuntoTiendaBs + metricas.totalTarjetaCreditoBs;
 
     let html = `
       <!DOCTYPE html>
@@ -379,25 +388,31 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            </div>
         </div>
 
+        <!-- REPORTE DE CAJAS FÍSICAS -->
+        <h2 style="margin-top:20px; margin-bottom:10px;">Cuadre de Cajas (Tienda / Delivery)</h2>
         <div class="kpi-container">
-           <div class="kpi-box tienda">
-              <h3>Efectivo Tienda</h3>
-              <p>$${metricas.totalEfectivoTienda.toFixed(2)}</p>
+           <div class="kpi-box tienda" style="background:#047857;">
+              <h3 style="color:#d1fae5;">Gaveta Dólares Físicos</h3>
+              <p>$${cajaFisicaUsd.toFixed(2)}</p>
+              <div style="font-size:9px; margin-top:4px; color:#a7f3d0;">Entró: $${metricas.totalEfectivoTienda.toFixed(2)} | Vueltos: $${metricas.totalVueltosDados.toFixed(2)}</div>
            </div>
-           <div class="kpi-box tienda">
-              <h3>Punto Venta Tienda</h3>
-              <p>Bs ${metricas.totalPuntoTiendaBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
+           <div class="kpi-box tienda" style="background:#0f766e;">
+              <h3 style="color:#ccfbf1;">Gaveta Bolívares Físicos</h3>
+              <p>Bs ${cajaFisicaBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
+              <div style="font-size:9px; margin-top:4px; color:#99f6e4;">No se restan vueltos (Son digitales)</div>
            </div>
-           <div class="kpi-box" style="background:#fef2f2; border-color:#fca5a5;">
-              <h3 style="color:#dc2626;">Vueltos Dados</h3>
-              <p style="color:#b91c1c;">-$${metricas.totalVueltosDados.toFixed(2)}</p>
+           <div class="kpi-box tienda" style="background:#4338ca;">
+              <h3 style="color:#e0e7ff;">Total Puntos y TDC</h3>
+              <p>Bs ${totalPuntosTDC.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
+              <div style="font-size:9px; margin-top:4px; color:#c7d2fe;">Punto: Bs ${metricas.totalPuntoTiendaBs.toLocaleString('es-VE')} | TDC (+15%): Bs ${metricas.totalTarjetaCreditoBs.toLocaleString('es-VE')}</div>
            </div>
         </div>
 
         <div class="kpi-container">
            <div class="kpi-box">
-              <h3>Ventas Restantes Bs</h3>
-              <p>Bs ${metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
+              <h3>Transf. / Pago Móvil (Neto)</h3>
+              <p>Bs ${totalTransfPagoMovilNetoBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
+              <div style="font-size:9px; margin-top:4px; color:#64748b;">Ingresó: Bs ${metricas.ventasVES.toLocaleString('es-VE')} | Vueltos Pagados: Bs ${metricas.totalVueltosBs.toLocaleString('es-VE')}</div>
            </div>
            <div class="kpi-box zelle">
               <h3>Ventas ZELLE ($)</h3>
@@ -442,7 +457,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        html += `</tbody></table>`;
     });
 
-    // RENDERIZADO DEL RESUMEN DE CANTIDADES DE PRODUCTOS (SEPARANDO ENVÍOS Y RECEPCIÓN)
     html += `
         <h2 style="margin-top: 50px;">Resumen de Productos Vendidos</h2>
         <div style="font-size: 10px; color: #64748b; margin-top: -5px; margin-bottom: 10px;">
@@ -474,8 +488,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     }
     html += `</tbody></table>`;
 
-
-    // FUNCIÓN DE AYUDA PARA AGREGAR TABLAS DE PEDIDOS SEGMENTADAS
     const macroTablaPedidos = (tituloSeccion, listadoPedidos) => {
        let tablaHtml = `<h2 style="margin-top: 50px;">${tituloSeccion} (${listadoPedidos.length})</h2><table>
           <thead>
@@ -513,7 +525,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        return tablaHtml;
     };
 
-    // Imprimir las 3 secciones requeridas de pedidos separadas
     html += macroTablaPedidos("Envíos Nacionales", pedidosEnviosNacionales);
     html += macroTablaPedidos("Entregas en Tienda", pedidosEntregasTienda);
     html += macroTablaPedidos("Delivery", pedidosDelivery);
@@ -577,7 +588,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                <div className="relative z-10">
                  <div className="text-[10px] uppercase font-black tracking-widest text-slate-400 mb-1">Total General Bruto ($)</div>
                  <div className="text-3xl lg:text-4xl font-black">${metricas.totalBrutoGeneralUsd.toFixed(2)}</div>
-                 {metricas.totalVueltosDados > 0 && <div className="text-xs text-red-400 font-bold mt-1">Ya se restaron ${metricas.totalVueltosDados} en vueltos.</div>}
+                 {metricas.totalVueltosDados > 0 && <div className="text-xs text-red-400 font-bold mt-1">Ya se restaron ${metricas.totalVueltosDados.toFixed(2)} en vueltos USD.</div>}
                </div>
                <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
             </div>
@@ -641,25 +652,30 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            
            {verDinero && (
               <>
-                 <div className="bg-sky-100 text-sky-900 p-5 rounded-2xl shadow-sm flex flex-col justify-center border-b-4 border-sky-300 relative overflow-hidden">
-                    <div className="relative z-10">
-                      <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1 flex items-center gap-1">Efectivo Tienda ($)</div>
-                      <div className="text-2xl font-black">${metricas.totalEfectivoTienda.toFixed(2)}</div>
-                    </div>
+                 <div className="bg-emerald-50 text-emerald-900 p-5 rounded-2xl shadow-sm border-b-4 border-emerald-300 relative overflow-hidden">
+                     <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Caja Física Dólares ($)</div>
+                     <div className="text-2xl font-black">${(metricas.totalEfectivoTienda - metricas.totalVueltosDados).toFixed(2)}</div>
+                     <div className="text-[11px] font-bold mt-2 opacity-80">
+                         Entró: ${metricas.totalEfectivoTienda.toFixed(2)} <br/> 
+                         Salió (Vueltos): ${metricas.totalVueltosDados.toFixed(2)}
+                     </div>
+                 </div>
+                 
+                 <div className="bg-teal-50 text-teal-900 p-5 rounded-2xl shadow-sm border-b-4 border-teal-300 relative overflow-hidden">
+                     <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Caja Física Bolívares (Bs)</div>
+                     <div className="text-2xl font-black">Bs. {metricas.totalEfectivoBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}</div>
+                     <div className="text-[11px] font-bold mt-2 opacity-80">
+                         Todo en gaveta (Los vueltos se dan digital)
+                     </div>
                  </div>
 
-                 <div className="bg-indigo-100 text-indigo-900 p-5 rounded-2xl shadow-sm flex flex-col justify-center border-b-4 border-indigo-300 relative overflow-hidden">
-                    <div className="relative z-10">
-                      <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1 flex items-center gap-1">Punto Tienda (Bs)</div>
-                      <div className="text-xl font-black">Bs. {metricas.totalPuntoTiendaBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}</div>
-                    </div>
-                 </div>
-
-                 <div className="bg-red-50 text-red-800 p-5 rounded-2xl shadow-sm flex flex-col justify-center border-b-4 border-red-200 relative overflow-hidden">
-                    <div className="relative z-10">
-                      <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1 flex items-center gap-1">Vueltos Dados ($)</div>
-                      <div className="text-2xl font-black flex items-center gap-2">-${metricas.totalVueltosDados.toFixed(2)}</div>
-                    </div>
+                 <div className="bg-indigo-50 text-indigo-900 p-5 rounded-2xl shadow-sm border-b-4 border-indigo-300 relative overflow-hidden">
+                     <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Punto de Venta y TDC (Bs)</div>
+                     <div className="text-2xl font-black">Bs. {(metricas.totalPuntoTiendaBs + metricas.totalTarjetaCreditoBs).toLocaleString('es-VE', {minimumFractionDigits: 2})}</div>
+                     <div className="text-[11px] font-bold mt-2 opacity-80">
+                         Punto normal: Bs. {metricas.totalPuntoTiendaBs.toLocaleString('es-VE', {minimumFractionDigits: 2})} <br/> 
+                         Tarjeta (+15%): Bs. {metricas.totalTarjetaCreditoBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}
+                     </div>
                  </div>
               </>
            )}
@@ -674,10 +690,14 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                   <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
                </div>
                
-               <div className="bg-emerald-50 text-emerald-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-emerald-200 relative overflow-hidden md:col-span-2">
+               <div className="bg-slate-100 text-slate-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-slate-300 relative overflow-hidden md:col-span-2">
                   <div className="relative z-10">
-                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Transf. y PagoMóvil Bs</div>
-                    <div className="text-xl lg:text-2xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Transferencias y Pago Móvil Netos (Bs)</div>
+                    <div className="text-xl lg:text-2xl font-black">Bs. {(metricas.ventasVES - metricas.totalVueltosBs).toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    <div className="text-[11px] font-bold mt-2 text-slate-500">
+                        Bruto ingresado: Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2})} <br/>
+                        Salió en Vueltos (Pago Móvil): Bs. {metricas.totalVueltosBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}
+                    </div>
                   </div>
                   <TrendingUp size={80} className="absolute -right-4 -bottom-4 opacity-5"/>
                </div>
@@ -686,13 +706,13 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
            {/* CAMPO DE INVENTARIO FÍSICO SOLO VISIBLE PARA ADMINISTRADORES */}
            {verTotalInventario && (
-             <div className="bg-slate-100 text-slate-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-slate-300 relative overflow-hidden col-span-full">
+             <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-slate-950 relative overflow-hidden col-span-full">
                 <div className="relative z-10">
-                  <div className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">Inventario Físico Restante Auditado ($)</div>
+                  <div className="text-[10px] uppercase font-black tracking-widest text-slate-400 mb-1">Inventario Físico Restante Auditado ($)</div>
                   <div className="text-2xl lg:text-3xl font-black">${totalValInventario.toFixed(2)}</div>
-                  <p className="text-[10px] text-slate-400 mt-1 font-semibold">* Suma base (Recepcion + Envios) descontando el total bruto de productos vendidos u obsequiados sin distorsión de ofertas.</p>
+                  <p className="text-[10px] text-slate-500 mt-1 font-semibold">* Suma base (Recepcion + Envios) descontando el total bruto de productos vendidos u obsequiados sin distorsión de ofertas.</p>
                 </div>
-                <Archive size={80} className="absolute -right-4 -bottom-4 opacity-5"/>
+                <Archive size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
              </div>
            )}
         </div>
