@@ -261,7 +261,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       montoEfectivoUsd: pedido.montoEfectivoUsd?.toString() || '',
       montoEfectivoBs: pedido.montoEfectivoBs?.toString() || '', // NUEVO
       montoTarjetaCreditoBs: pedido.montoTarjetaCreditoBs?.toString() || '', // NUEVO
-      vueltoUsd: pedido.vueltoUsd?.toString() || ''
+      vueltoUsd: pedido.vueltoUsd?.toString() || '',
+      vueltoBs: pedido.vueltoBs?.toString() || '' // NUEVO
     });
   };
 
@@ -279,7 +280,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
   const procesarValidacionDefinitiva = async () => {
     if (!modalValidacion) return;
-    const { pedido, tipoDiferencia, montoDiferencia, monedaDiferencia, file, isEdit, montoPuntoVentaBs, montoEfectivoUsd, vueltoUsd, montoEfectivoBs, montoTarjetaCreditoBs } = modalValidacion;
+    const { pedido, tipoDiferencia, montoDiferencia, monedaDiferencia, file, isEdit, montoPuntoVentaBs, montoEfectivoUsd, vueltoUsd, montoEfectivoBs, montoTarjetaCreditoBs, vueltoBs } = modalValidacion;
     
     if (tipoDiferencia !== 'ninguno' && (!montoDiferencia || parseFloat(montoDiferencia) <= 0)) {
         return dialogs.alert("Debes ingresar un monto válido para el faltante o sobrante.", "Monto Inválido");
@@ -350,6 +351,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           payloadPedido.montoEfectivoBs = parseFloat(montoEfectivoBs) || 0;
           payloadPedido.montoTarjetaCreditoBs = parseFloat(montoTarjetaCreditoBs) || 0;
           payloadPedido.vueltoUsd = parseFloat(vueltoUsd) || 0;
+          payloadPedido.vueltoBs = parseFloat(vueltoBs) || 0; // NUEVO
       }
 
       if (urlComprobanteAdmin) payloadPedido.linkComprobanteAdmin = urlComprobanteAdmin;
@@ -758,6 +760,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                             {p.montoEfectivoBs > 0 && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200 shadow-sm">Efectivo: Bs {p.montoEfectivoBs}</span>}
                             {p.montoTarjetaCreditoBs > 0 && <span className="text-[10px] font-bold text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200 shadow-sm">TDC (+15%): Bs {p.montoTarjetaCreditoBs}</span>}
                             {p.vueltoUsd > 0 && <span className="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 shadow-sm">Vuelto Dado: ${p.vueltoUsd}</span>}
+                            {p.vueltoBs > 0 && <span className="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 shadow-sm">Vuelto Dado: Bs {p.vueltoBs}</span>}
                          </div>
                       </div>
                    )}
@@ -913,6 +916,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                          <input type="number" step="0.01" value={modalValidacion.montoEfectivoBs} onChange={e=>setModalValidacion(p=>({...p, montoEfectivoBs: e.target.value}))} className="w-full border-2 border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-emerald-500 font-bold text-sm" placeholder="Efectivo (Bs)" />
                          <input type="number" step="0.01" value={modalValidacion.montoTarjetaCreditoBs} onChange={e=>setModalValidacion(p=>({...p, montoTarjetaCreditoBs: e.target.value}))} className="w-full border-2 border-orange-200 dark:border-orange-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-orange-500 font-bold text-sm" placeholder="TDC (+15% Recargo) (Bs)" />
                          <input type="number" step="0.01" value={modalValidacion.vueltoUsd} onChange={e=>setModalValidacion(p=>({...p, vueltoUsd: e.target.value}))} className="w-full sm:col-span-2 border-2 border-red-200 dark:border-red-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-red-500 font-bold text-sm" placeholder="Vuelto Dado ($)" />
+                         <input type="number" step="0.01" value={modalValidacion.vueltoBs} onChange={e=>setModalValidacion(p=>({...p, vueltoBs: e.target.value}))} className="w-full border-2 border-red-200 dark:border-red-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-red-500 font-bold text-sm" placeholder="Vuelto Dado (Bs)" />
                       </div>
                       <p className="text-[9px] text-purple-600 dark:text-purple-400 mt-2 font-bold uppercase tracking-widest">Estos montos se desglosarán en los Reportes Financieros.</p>
                    </div>
