@@ -256,9 +256,11 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       previewUrl: isEdit && pedido.linkComprobanteAdmin ? pedido.linkComprobanteAdmin : '', 
       subiendo: false,
       isEdit: isEdit,
-      // NUEVOS CAMPOS PUNTO Y EFECTIVO
+      // CAMPOS PUNTO Y EFECTIVO (Abarca Tienda y Delivery)
       montoPuntoVentaBs: pedido.montoPuntoVentaBs?.toString() || '',
       montoEfectivoUsd: pedido.montoEfectivoUsd?.toString() || '',
+      montoEfectivoBs: pedido.montoEfectivoBs?.toString() || '', // NUEVO
+      montoTarjetaCreditoBs: pedido.montoTarjetaCreditoBs?.toString() || '', // NUEVO
       vueltoUsd: pedido.vueltoUsd?.toString() || ''
     });
   };
@@ -277,7 +279,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
   const procesarValidacionDefinitiva = async () => {
     if (!modalValidacion) return;
-    const { pedido, tipoDiferencia, montoDiferencia, monedaDiferencia, file, isEdit, montoPuntoVentaBs, montoEfectivoUsd, vueltoUsd } = modalValidacion;
+    const { pedido, tipoDiferencia, montoDiferencia, monedaDiferencia, file, isEdit, montoPuntoVentaBs, montoEfectivoUsd, vueltoUsd, montoEfectivoBs, montoTarjetaCreditoBs } = modalValidacion;
     
     if (tipoDiferencia !== 'ninguno' && (!montoDiferencia || parseFloat(montoDiferencia) <= 0)) {
         return dialogs.alert("Debes ingresar un monto válido para el faltante o sobrante.", "Monto Inválido");
@@ -330,11 +332,23 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           sobranteUsd: sobranteUsd, 
           faltanteUsd: faltanteUsd 
       };
+
+      // REFLEJAR EN HISTORIAL: Inyectar nota automática de auditoría para clientes si hay diferencias
+      if (!isEdit && (sobranteUsd > 0 || faltanteUsd > 0)) {
+          const tipoNota = sobranteUsd > 0 ? `Sobrante a favor del cliente: $${sobranteUsd}` : `Faltante deudor: $${faltanteUsd}`;
+          payloadPedido.notasAuditoria = [...(pedido.notasAuditoria || []), {
+              fecha: Date.now(),
+              texto: `Validación con Diferencia - ${tipoNota}`,
+              autor: 'SISTEMA'
+          }];
+      }
       
-      // NUEVO: Guardar pagos presenciales si es Tienda
-      if (pedido.tipoDespacho === 'Tienda') {
+      // Guardar pagos presenciales para Tienda y Delivery
+      if (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') {
           payloadPedido.montoPuntoVentaBs = parseFloat(montoPuntoVentaBs) || 0;
           payloadPedido.montoEfectivoUsd = parseFloat(montoEfectivoUsd) || 0;
+          payloadPedido.montoEfectivoBs = parseFloat(montoEfectivoBs) || 0;
+          payloadPedido.montoTarjetaCreditoBs = parseFloat(montoTarjetaCreditoBs) || 0;
           payloadPedido.vueltoUsd = parseFloat(vueltoUsd) || 0;
       }
 
@@ -685,13 +699,15 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                       </div>
                    )}
 
-                   {/* DETALLE PAGOS EN TIENDA */}
-                   {(p.montoPuntoVentaBs > 0 || p.montoEfectivoUsd > 0 || p.vueltoUsd > 0) && (
+                   {/* DETALLE PAGOS EN TIENDA / DELIVERY */}
+                   {(p.montoPuntoVentaBs > 0 || p.montoEfectivoUsd > 0 || p.vueltoUsd > 0 || p.montoEfectivoBs > 0 || p.montoTarjetaCreditoBs > 0) && (
                       <div className="mb-4 bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800">
                          <div className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-400 mb-2">Detalles de Pago Presencial</div>
                          <div className="flex flex-wrap gap-2">
                             {p.montoPuntoVentaBs > 0 && <span className="text-[10px] font-bold text-slate-700 bg-white px-2 py-1 rounded border shadow-sm">Punto: Bs {p.montoPuntoVentaBs}</span>}
                             {p.montoEfectivoUsd > 0 && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200 shadow-sm">Efectivo: ${p.montoEfectivoUsd}</span>}
+                            {p.montoEfectivoBs > 0 && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200 shadow-sm">Efectivo: Bs {p.montoEfectivoBs}</span>}
+                            {p.montoTarjetaCreditoBs > 0 && <span className="text-[10px] font-bold text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200 shadow-sm">TDC (+15%): Bs {p.montoTarjetaCreditoBs}</span>}
                             {p.vueltoUsd > 0 && <span className="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 shadow-sm">Vuelto Dado: ${p.vueltoUsd}</span>}
                          </div>
                       </div>
@@ -831,14 +847,16 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                     </div>
                  </div>
 
-                 {/* NUEVO: PAGOS EN TIENDA */}
-                 {modalValidacion.pedido.tipoDespacho === 'Tienda' && (
+                 {/* NUEVO: PAGOS EN TIENDA Y DELIVERY */}
+                 {(modalValidacion.pedido.tipoDespacho === 'Tienda' || modalValidacion.pedido.tipoDespacho === 'Delivery') && (
                    <div className="mb-6 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl border border-purple-200 dark:border-purple-800">
                       <label className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-400 block mb-3">Detalles de Pago Presencial (Opcional)</label>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                          <input type="number" step="0.01" value={modalValidacion.montoPuntoVentaBs} onChange={e=>setModalValidacion(p=>({...p, montoPuntoVentaBs: e.target.value}))} className="w-full border-2 border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-purple-500 font-bold text-sm" placeholder="Punto Venta (Bs)" />
                          <input type="number" step="0.01" value={modalValidacion.montoEfectivoUsd} onChange={e=>setModalValidacion(p=>({...p, montoEfectivoUsd: e.target.value}))} className="w-full border-2 border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-purple-500 font-bold text-sm" placeholder="Efectivo ($)" />
-                         <input type="number" step="0.01" value={modalValidacion.vueltoUsd} onChange={e=>setModalValidacion(p=>({...p, vueltoUsd: e.target.value}))} className="w-full border-2 border-red-200 dark:border-red-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-red-500 font-bold text-sm" placeholder="Vuelto Dado ($)" />
+                         <input type="number" step="0.01" value={modalValidacion.montoEfectivoBs} onChange={e=>setModalValidacion(p=>({...p, montoEfectivoBs: e.target.value}))} className="w-full border-2 border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-emerald-500 font-bold text-sm" placeholder="Efectivo (Bs)" />
+                         <input type="number" step="0.01" value={modalValidacion.montoTarjetaCreditoBs} onChange={e=>setModalValidacion(p=>({...p, montoTarjetaCreditoBs: e.target.value}))} className="w-full border-2 border-orange-200 dark:border-orange-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-orange-500 font-bold text-sm" placeholder="TDC (+15% Recargo) (Bs)" />
+                         <input type="number" step="0.01" value={modalValidacion.vueltoUsd} onChange={e=>setModalValidacion(p=>({...p, vueltoUsd: e.target.value}))} className="w-full sm:col-span-2 border-2 border-red-200 dark:border-red-800 bg-white dark:bg-slate-900 dark:text-white p-2.5 rounded-lg outline-none focus:border-red-500 font-bold text-sm" placeholder="Vuelto Dado ($)" />
                       </div>
                       <p className="text-[9px] text-purple-600 dark:text-purple-400 mt-2 font-bold uppercase tracking-widest">Estos montos se desglosarán en los Reportes Financieros.</p>
                    </div>
