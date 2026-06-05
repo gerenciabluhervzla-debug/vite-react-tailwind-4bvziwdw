@@ -7,47 +7,47 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, stock, db,
   const [opcionesProductos, setOpcionesProductos] = useState([]);
   const [guardando, setGuardando] = useState(false);
 
-  // 1. Efecto para descubrir y armar la lista de productos a prueba de fallos
+  // 1. Efecto para desempaquetar el catálogo anidado (Categorías > Productos > Presentaciones)
   useEffect(() => {
     let lista = [];
 
-    // Intentamos extraer del catálogo (si es Array)
+    // Aplanamos la estructura real de tu base de datos
     if (Array.isArray(catalogo)) {
-      lista = catalogo.map(c => {
-        if (typeof c === 'string') return { id: c, nombre: c.replace(/\|/g, ' ') };
-        return { id: c.id || c.nombre, nombre: c.nombre || c.id };
-      });
-    } 
-    // Intentamos extraer del catálogo (si es Objeto)
-    else if (catalogo && typeof catalogo === 'object') {
-      lista = Object.keys(catalogo).map(key => ({
-        id: key,
-        nombre: (catalogo[key] && catalogo[key].nombre) ? catalogo[key].nombre : key.replace(/\|/g, ' ')
-      }));
-    }
-    // Fallback de emergencia: Extraer del inventario general (stock) si el catálogo falla
-    else if (stock && typeof stock === 'object') {
-      lista = Object.keys(stock).map(key => ({
-        id: key,
-        nombre: key.replace(/\|/g, ' ')
-      }));
-    }
-
-    // OBLIGATORIO: Asegurarnos de que los productos que ya están en este movimiento 
-    // existan en la lista desplegable para que se autoseleccionen correctamente.
-    if (movimiento && movimiento.items) {
-      Object.keys(movimiento.items).forEach(prodId => {
-        if (!lista.some(item => item.id === prodId)) {
-          lista.push({ id: prodId, nombre: prodId.replace(/\|/g, ' ') });
+      catalogo.forEach(cat => {
+        if (cat.productos && Array.isArray(cat.productos)) {
+          cat.productos.forEach(prod => {
+            if (prod.presentaciones && Array.isArray(prod.presentaciones)) {
+              prod.presentaciones.forEach(pres => {
+                const idOriginal = `${prod.nombre}|${pres}`; // Ej: "Zapato|Rojo"
+                const nombreAmigable = `${prod.nombre} - ${pres}`; // Ej: "Zapato - Rojo"
+                lista.push({ id: idOriginal, nombre: nombreAmigable });
+              });
+            }
+          });
         }
       });
     }
 
-    // Ordenar alfabéticamente para que sea fácil de buscar
-    lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    // OBLIGATORIO: Asegurarnos de que los productos que ya están en este movimiento 
+    // existan en la lista desplegable (incluso si los borraron del catálogo recientemente)
+    if (movimiento && movimiento.items) {
+      Object.keys(movimiento.items).forEach(prodId => {
+        if (!lista.some(item => item.id === prodId)) {
+          lista.push({ id: prodId, nombre: prodId.replace(/\|/g, ' - ') });
+        }
+      });
+    }
+
+    // Ordenamiento alfabético seguro
+    lista.sort((a, b) => {
+      const nombreA = String(a?.nombre || a?.id || "");
+      const nombreB = String(b?.nombre || b?.id || "");
+      return nombreA.localeCompare(nombreB);
+    });
+    
     setOpcionesProductos(lista);
 
-  }, [catalogo, stock, movimiento]);
+  }, [catalogo, movimiento]);
 
   // 2. Efecto para cargar las líneas del movimiento en pantalla
   useEffect(() => {
@@ -163,7 +163,7 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, stock, db,
                   <select
                     value={linea.id}
                     onChange={(e) => actualizarLinea(idx, 'id', e.target.value)}
-                    className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 outline-none focus:border-sky-500 transition-colors"
+                    className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 outline-none focus:border-sky-500 transition-colors font-medium text-sm"
                   >
                     <option value="">Selecciona un producto...</option>
                     {opcionesProductos.map(prod => (
