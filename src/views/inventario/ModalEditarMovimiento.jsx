@@ -6,11 +6,10 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
   const [lineas, setLineas] = useState([]);
   const [guardando, setGuardando] = useState(false);
 
-  // Al cargar el modal, convertimos el objeto de items a un arreglo para poder editarlo en la UI
   useEffect(() => {
     if (movimiento && movimiento.items) {
       const lineasIniciales = Object.entries(movimiento.items).map(([id, qty]) => ({
-        id,
+        id, // Mantenemos el ID original de Firebase (ej: Producto|Rojo)
         qty: Number(qty)
       }));
       setLineas(lineasIniciales);
@@ -32,7 +31,6 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
   };
 
   const guardarEdicion = async () => {
-    // Validaciones básicas
     if (lineas.length === 0) {
       dialogs.alert("Debes incluir al menos un producto.");
       return;
@@ -46,54 +44,44 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
     setGuardando(true);
 
     try {
-      // 1. Inicializamos el Batch (Transacción múltiple segura)
       const batch = writeBatch(db);
-      
       const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
       const movRef = doc(db, 'artifacts', appId, 'public', 'data', 'movimientos', movimiento.id);
 
-      // 2. Calculamos las diferencias de inventario
       const diferenciasDeStock = {};
       
-      // A. DEVOLVEMOS el stock del movimiento original (sumamos)
+      // A. DEVOLVEMOS el stock del producto erróneo (sumamos)
       Object.entries(movimiento.items).forEach(([prodId, qty]) => {
         diferenciasDeStock[prodId] = (diferenciasDeStock[prodId] || 0) + Number(qty);
       });
 
-      // B. DESCONTAMOS el stock de los nuevos items configurados (restamos)
+      // B. DESCONTAMOS el stock de los productos correctos (restamos)
       const nuevosItemsObj = {};
       lineas.forEach(linea => {
         const qty = Number(linea.qty);
         diferenciasDeStock[linea.id] = (diferenciasDeStock[linea.id] || 0) - qty;
-        
-        // Vamos armando el nuevo objeto que se guardará en el documento
         nuevosItemsObj[linea.id] = (nuevosItemsObj[linea.id] || 0) + qty;
       });
 
-      // 3. Preparamos las actualizaciones de stock para Firestore
       const stockUpdates = {};
       const origenStock = movimiento.origen ? movimiento.origen.toLowerCase() : 'envios';
 
       Object.entries(diferenciasDeStock).forEach(([prodId, diferencia]) => {
         if (diferencia !== 0) {
-          // Si la diferencia es positiva, se devuelve al inventario. Si es negativa, se descuenta.
           stockUpdates[prodId] = { [origenStock]: increment(diferencia) };
         }
       });
 
-      // Añadimos la actualización de stock al Batch (si hubo cambios reales)
       if (Object.keys(stockUpdates).length > 0) {
         batch.set(stockRef, stockUpdates, { merge: true });
       }
 
-      // 4. Actualizamos el documento del movimiento
       batch.update(movRef, {
         items: nuevosItemsObj,
         editadoPor: perfil.nombre,
         fechaEdicion: Date.now()
       });
 
-      // 5. EJECUTAMOS TODO SIMULTÁNEAMENTE
       await batch.commit();
 
       loggear('TRANSFERENCIA_EDITADA', `Usuario editó productos/cantidades de la transferencia enviada el ${new Date(movimiento.fechaCreacion).toLocaleDateString()}`);
@@ -112,14 +100,13 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
       <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[90vh]">
         
-        {/* Cabecera */}
         <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
           <div>
             <h2 className="text-xl font-black text-slate-800 dark:text-slate-100">
               Corregir Transferencia
             </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Modifica los productos o cantidades. El sistema ajustará el stock automáticamente.
+              Modifica los productos o cantidades. El stock se ajustará automáticamente.
             </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors text-slate-500">
@@ -127,15 +114,13 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
           </button>
         </div>
 
-        {/* Alerta Informativa */}
         <div className="p-4 bg-sky-50 dark:bg-sky-900/30 border-b border-sky-100 dark:border-sky-800 flex items-start gap-3">
           <AlertCircle size={18} className="text-sky-600 dark:text-sky-400 mt-0.5 flex-shrink-0" />
           <p className="text-sm text-sky-800 dark:text-sky-300">
-            <strong>Atención:</strong> Estás editando una operación pasada. Los productos que elimines de esta lista regresarán al almacén de origen, y los nuevos que agregues serán descontados de inmediato.
+            <strong>Atención:</strong> Los productos que elimines regresarán al almacén de origen, y los nuevos serán descontados de inmediato.
           </p>
         </div>
 
-        {/* Cuerpo / Líneas de Productos */}
         <div className="p-6 overflow-y-auto flex-1">
           <div className="space-y-3">
             {lineas.map((linea, idx) => (
@@ -150,11 +135,18 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
                     className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 outline-none focus:border-sky-500 transition-colors"
                   >
                     <option value="">Selecciona un producto...</option>
-                    {catalogo.map(prod => (
-                      <option key={prod.id} value={prod.id}>
-                        {prod.nombre}
-                      </option>
-                    ))}
+                    {catalogo && catalogo.map((prod, i) => {
+                      // AQUÍ ESTÁ LA MAGIA: Detectamos la estructura de tu catálogo automáticamente
+                      const esString = typeof prod === 'string';
+                      const valorOpcion = esString ? prod : prod.id;
+                      const nombreOpcion = esString ? prod.replace(/\|/g, ' ') : prod.nombre;
+
+                      return (
+                        <option key={esString ? i : prod.id} value={valorOpcion}>
+                          {nombreOpcion}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 
@@ -190,7 +182,6 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
           </button>
         </div>
 
-        {/* Footer / Controles */}
         <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex justify-end gap-3">
           <button
             onClick={onClose}
