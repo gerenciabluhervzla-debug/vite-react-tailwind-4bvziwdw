@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { PlusCircle, ArrowRightLeft, FileText, CheckCircle, AlertTriangle, Trash2, Settings2 } from 'lucide-react';
+import { PlusCircle, ArrowRightLeft, FileText, CheckCircle, AlertTriangle, Trash2, Settings2, Edit } from 'lucide-react'; 
 import { doc, updateDoc, deleteDoc, setDoc, increment } from 'firebase/firestore'; 
 import ModalCrearMovimiento from './ModalCrearMovimiento';
+import ModalEditarMovimiento from './ModalEditarMovimiento'; // <-- Aquí ya está importado correctamente
 import { ROLES } from '../../config/constants';
 
 export default function SubPanelMovimientos({ movimientos, stock, db, appId, loggear, perfil, catalogo, dialogs }) {
   const [modalType, setModalType] = useState(null); 
+  const [movimientoAEditar, setMovimientoAEditar] = useState(null); 
   
   const rol = perfil?.role;
   const puedeHacerIngreso = [ROLES.ADMIN, ROLES.DESPACHO].includes(rol);
@@ -21,7 +23,6 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
         const updates = {};
         
         Object.entries(mov.items).forEach(([key, qty]) => { 
-           // CORRECCIÓN: Solo sumamos a Recepción. El Modal ya restó de envíos.
            updates[key] = { recepcion: increment(qty) }; 
         });
         
@@ -153,10 +154,19 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
                       )}
                     </div>
                   )}
+                  
                   {esAdmin && (
-                     <button onClick={()=>eliminarMovimiento(m.id, m.tipo)} className="mt-3 text-[10px] text-red-400 hover:text-red-600 uppercase font-black tracking-widest flex items-center justify-end w-full gap-1 transition-colors opacity-50 hover:opacity-100">
-                        <Trash2 size={12}/> Borrar Registro
-                     </button>
+                    <div className="mt-4 flex flex-col gap-2">
+                       {m.status !== 'COMPLETADO' && (
+                         <button onClick={() => setMovimientoAEditar(m)} className="text-[10px] text-sky-500 hover:text-sky-700 uppercase font-black tracking-widest flex items-center justify-end w-full gap-1 transition-colors opacity-70 hover:opacity-100">
+                            <Edit size={12}/> Editar Productos
+                         </button>
+                       )}
+
+                       <button onClick={()=>eliminarMovimiento(m.id, m.tipo)} className="text-[10px] text-red-400 hover:text-red-600 uppercase font-black tracking-widest flex items-center justify-end w-full gap-1 transition-colors opacity-50 hover:opacity-100">
+                          <Trash2 size={12}/> Borrar Registro
+                       </button>
+                    </div>
                   )}
                 </td>
               </tr>
@@ -166,6 +176,20 @@ export default function SubPanelMovimientos({ movimientos, stock, db, appId, log
       </div>
 
       {modalType && <ModalCrearMovimiento tipo={modalType} catalogo={catalogo} stock={stock} db={db} appId={appId} loggear={loggear} perfil={perfil} dialogs={dialogs} onClose={()=>setModalType(null)} />}
+      
+      {/* Aquí ya está listo el bloque que muestra el nuevo Modal de Edición */}
+      {movimientoAEditar && (
+         <ModalEditarMovimiento 
+            movimiento={movimientoAEditar} 
+            catalogo={catalogo} 
+            db={db} 
+            appId={appId} 
+            loggear={loggear} 
+            perfil={perfil} 
+            dialogs={dialogs} 
+            onClose={() => setMovimientoAEditar(null)} 
+         />
+      )}
     </div>
   );
 }
