@@ -2,28 +2,68 @@ import React, { useState, useEffect } from 'react';
 import { X, Save, Plus, Trash2, AlertCircle } from 'lucide-react';
 import { doc, writeBatch, increment } from 'firebase/firestore';
 
-export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId, loggear, perfil, dialogs, onClose }) {
+export default function ModalEditarMovimiento({ movimiento, catalogo, stock, db, appId, loggear, perfil, dialogs, onClose }) {
   const [lineas, setLineas] = useState([]);
+  const [opcionesProductos, setOpcionesProductos] = useState([]);
   const [guardando, setGuardando] = useState(false);
 
+  // 1. Efecto para descubrir y armar la lista de productos a prueba de fallos
+  useEffect(() => {
+    let lista = [];
+
+    // Intentamos extraer del catálogo (si es Array)
+    if (Array.isArray(catalogo)) {
+      lista = catalogo.map(c => {
+        if (typeof c === 'string') return { id: c, nombre: c.replace(/\|/g, ' ') };
+        return { id: c.id || c.nombre, nombre: c.nombre || c.id };
+      });
+    } 
+    // Intentamos extraer del catálogo (si es Objeto)
+    else if (catalogo && typeof catalogo === 'object') {
+      lista = Object.keys(catalogo).map(key => ({
+        id: key,
+        nombre: (catalogo[key] && catalogo[key].nombre) ? catalogo[key].nombre : key.replace(/\|/g, ' ')
+      }));
+    }
+    // Fallback de emergencia: Extraer del inventario general (stock) si el catálogo falla
+    else if (stock && typeof stock === 'object') {
+      lista = Object.keys(stock).map(key => ({
+        id: key,
+        nombre: key.replace(/\|/g, ' ')
+      }));
+    }
+
+    // OBLIGATORIO: Asegurarnos de que los productos que ya están en este movimiento 
+    // existan en la lista desplegable para que se autoseleccionen correctamente.
+    if (movimiento && movimiento.items) {
+      Object.keys(movimiento.items).forEach(prodId => {
+        if (!lista.some(item => item.id === prodId)) {
+          lista.push({ id: prodId, nombre: prodId.replace(/\|/g, ' ') });
+        }
+      });
+    }
+
+    // Ordenar alfabéticamente para que sea fácil de buscar
+    lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    setOpcionesProductos(lista);
+
+  }, [catalogo, stock, movimiento]);
+
+  // 2. Efecto para cargar las líneas del movimiento en pantalla
   useEffect(() => {
     if (movimiento && movimiento.items) {
       const lineasIniciales = Object.entries(movimiento.items).map(([id, qty]) => ({
-        id, // Mantenemos el ID original de Firebase (ej: Producto|Rojo)
+        id: id,
         qty: Number(qty)
       }));
       setLineas(lineasIniciales);
     }
   }, [movimiento]);
 
-  const agregarLinea = () => {
-    setLineas([...lineas, { id: '', qty: 1 }]);
-  };
-
-  const eliminarLinea = (index) => {
-    setLineas(lineas.filter((_, i) => i !== index));
-  };
-
+  const agregarLinea = () => setLineas([...lineas, { id: '', qty: 1 }]);
+  
+  const eliminarLinea = (index) => setLineas(lineas.filter((_, i) => i !== index));
+  
   const actualizarLinea = (index, campo, valor) => {
     const nuevasLineas = [...lineas];
     nuevasLineas[index][campo] = valor;
@@ -35,9 +75,8 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
       dialogs.alert("Debes incluir al menos un producto.");
       return;
     }
-    
     if (lineas.some(l => !l.id || l.qty <= 0)) {
-      dialogs.alert("Todas las líneas deben tener un producto válido seleccionado y una cantidad mayor a 0.");
+      dialogs.alert("Todas las líneas deben tener un producto válido y cantidad mayor a 0.");
       return;
     }
 
@@ -50,12 +89,12 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
 
       const diferenciasDeStock = {};
       
-      // A. DEVOLVEMOS el stock del producto erróneo (sumamos)
+      // A. Sumar al origen lo que se había restado antes (Reversión)
       Object.entries(movimiento.items).forEach(([prodId, qty]) => {
         diferenciasDeStock[prodId] = (diferenciasDeStock[prodId] || 0) + Number(qty);
       });
 
-      // B. DESCONTAMOS el stock de los productos correctos (restamos)
+      // B. Restar al origen lo nuevo que configuró el usuario
       const nuevosItemsObj = {};
       lineas.forEach(linea => {
         const qty = Number(linea.qty);
@@ -102,16 +141,10 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
         
         <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
           <div>
-            <h2 className="text-xl font-black text-slate-800 dark:text-slate-100">
-              Corregir Transferencia
-            </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Modifica los productos o cantidades. El stock se ajustará automáticamente.
-            </p>
+            <h2 className="text-xl font-black text-slate-800 dark:text-slate-100">Corregir Transferencia</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Modifica los productos o cantidades. El stock se ajustará automáticamente.</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors text-slate-500">
-            <X size={20} />
-          </button>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors text-slate-500"><X size={20} /></button>
         </div>
 
         <div className="p-4 bg-sky-50 dark:bg-sky-900/30 border-b border-sky-100 dark:border-sky-800 flex items-start gap-3">
@@ -126,34 +159,21 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
             {lineas.map((linea, idx) => (
               <div key={idx} className="flex gap-3 items-start animate-in slide-in-from-left-2">
                 <div className="flex-1">
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-1 block">
-                    Producto
-                  </label>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-1 block">Producto</label>
                   <select
                     value={linea.id}
                     onChange={(e) => actualizarLinea(idx, 'id', e.target.value)}
                     className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 outline-none focus:border-sky-500 transition-colors"
                   >
                     <option value="">Selecciona un producto...</option>
-                    {catalogo && catalogo.map((prod, i) => {
-                      // AQUÍ ESTÁ LA MAGIA: Detectamos la estructura de tu catálogo automáticamente
-                      const esString = typeof prod === 'string';
-                      const valorOpcion = esString ? prod : prod.id;
-                      const nombreOpcion = esString ? prod.replace(/\|/g, ' ') : prod.nombre;
-
-                      return (
-                        <option key={esString ? i : prod.id} value={valorOpcion}>
-                          {nombreOpcion}
-                        </option>
-                      );
-                    })}
+                    {opcionesProductos.map(prod => (
+                      <option key={prod.id} value={prod.id}>{prod.nombre}</option>
+                    ))}
                   </select>
                 </div>
 
                 <div className="w-24">
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-1 block">
-                    Cant.
-                  </label>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-1 block">Cant.</label>
                   <input
                     type="number"
                     min="1"
@@ -163,48 +183,22 @@ export default function ModalEditarMovimiento({ movimiento, catalogo, db, appId,
                   />
                 </div>
 
-                <button
-                  onClick={() => eliminarLinea(idx)}
-                  className="mt-6 p-3 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-colors"
-                  title="Eliminar producto"
-                >
+                <button onClick={() => eliminarLinea(idx)} className="mt-6 p-3 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-colors" title="Eliminar producto">
                   <Trash2 size={20} />
                 </button>
               </div>
             ))}
           </div>
 
-          <button
-            onClick={agregarLinea}
-            className="mt-4 w-full py-3 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl text-slate-500 hover:text-sky-600 hover:border-sky-200 dark:hover:border-sky-800 dark:hover:text-sky-400 flex items-center justify-center gap-2 font-bold text-sm transition-colors"
-          >
+          <button onClick={agregarLinea} className="mt-4 w-full py-3 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl text-slate-500 hover:text-sky-600 hover:border-sky-200 dark:hover:border-sky-800 dark:hover:text-sky-400 flex items-center justify-center gap-2 font-bold text-sm transition-colors">
             <Plus size={16} /> Agregar otro producto
           </button>
         </div>
 
         <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            disabled={guardando}
-            className="px-6 py-2.5 rounded-xl font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
-          >
-            Cancelar
-          </button>
-          
-          <button
-            onClick={guardarEdicion}
-            disabled={guardando}
-            className="px-6 py-2.5 rounded-xl font-bold text-white bg-sky-600 hover:bg-sky-700 shadow-md flex items-center gap-2 transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:transform-none"
-          >
-            {guardando ? (
-              <span className="flex items-center gap-2">
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> Procesando...
-              </span>
-            ) : (
-              <>
-                <Save size={18} /> Guardar Cambios
-              </>
-            )}
+          <button onClick={onClose} disabled={guardando} className="px-6 py-2.5 rounded-xl font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50">Cancelar</button>
+          <button onClick={guardarEdicion} disabled={guardando} className="px-6 py-2.5 rounded-xl font-bold text-white bg-sky-600 hover:bg-sky-700 shadow-md flex items-center gap-2 transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:transform-none">
+            {guardando ? <span className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> Procesando...</span> : <><Save size={18} /> Guardar Cambios</>}
           </button>
         </div>
 
