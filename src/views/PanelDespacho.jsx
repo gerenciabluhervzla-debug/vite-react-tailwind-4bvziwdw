@@ -48,13 +48,13 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const [notasConteo, setNotasConteo] = useState({});
   const [filtroFechaCierre, setFiltroFechaCierre] = useState('');
 
-  // NUEVA LÓGICA DE NUMERACIÓN INDEPENDIENTE
+  // LÓGICA DE NUMERACIÓN INDEPENDIENTE
   const numeracionDiaria = useMemo(() => {
     const map = {};
     const agrupados = {};
     pedidos.forEach(p => {
        const fecha = p.fechaDespacho || 'Sin Fecha';
-       const tipo = p.tipoDespacho || 'Nacional'; // Nacional, Tienda o Delivery
+       const tipo = p.tipoDespacho || 'Nacional'; 
        const key = `${fecha}_${tipo}`;
        
        if (!agrupados[key]) agrupados[key] = [];
@@ -80,8 +80,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const hoyKardex = useMemo(() => {
     const aggr = {};
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
-        // Añadimos 'regalos' a la estructura base
-        aggr[`${p.nombre}|${pres}`] = { ventas: 0, regalos: 0, recepcion: 0, ingresos: 0, salidas: 0 };
+        aggr[`${p.nombre}|${pres}`] = { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
     })));
 
     const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -89,20 +88,35 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     const todayStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
     const startOfDay = new Date(tDate.getFullYear(), tDate.getMonth(), tDate.getDate()).getTime();
 
+    const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+
     pedidos.forEach(p => {
-       // Kardex de Despacho solo resta Ventas/Regalos de Envío Nacional
+       // Kardex de Despacho
        if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')) {
-           // Sumar ventas pagadas
-           if (p.carritoObj) {
-               Object.entries(p.carritoObj).forEach(([k, qty]) => {
-                   if (aggr[k]) aggr[k].ventas += qty;
-               });
-           }
-           // Sumar regalos / obsequios
+           
+           // Unimos ventas y obsequios en un solo objeto para el cuadre
+           const carritoTotal = { ...(p.carritoObj || {}) };
            if (p.carritoObsequiosObj) {
                Object.entries(p.carritoObsequiosObj).forEach(([k, qty]) => {
-                   if (aggr[k]) aggr[k].regalos += qty;
+                   carritoTotal[k] = (carritoTotal[k] || 0) + qty;
                });
+           }
+
+           let countBoosters = 0;
+           Object.entries(carritoTotal).forEach(([k, qty]) => {
+               if (aggr[k]) aggr[k].ventas += qty;
+               if (boosterKeys.includes(k)) countBoosters += qty;
+           });
+
+           // Si faltan concentrados, forzamos la suma como venta para que el cierre descuente el stock físico
+           if (countBoosters > 0) {
+               const concentradosActuales = carritoTotal["Concentrado|Unidad"] || 0;
+               if (concentradosActuales < countBoosters) {
+                   const faltantes = countBoosters - concentradosActuales;
+                   if (aggr["Concentrado|Unidad"]) {
+                       aggr["Concentrado|Unidad"].ventas += faltantes;
+                   }
+               }
            }
        }
     });
@@ -111,7 +125,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
        if (m.fechaCreacion >= startOfDay) {
            if (m.tipo === 'TRANSFERENCIA') {
                Object.entries(m.items || {}).forEach(([k, qty]) => {
-                   if (aggr[k]) aggr[k].recepcion += qty; // Esto actúa como Traslados Out
+                   if (aggr[k]) aggr[k].recepcion += qty; 
                });
            } else if (m.tipo === 'INGRESO') {
                Object.entries(m.items || {}).forEach(([k, qty]) => {
@@ -255,16 +269,30 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       try {
         const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
         const updates = {};
-        Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { 
-            updates[itemKey] = { envios: increment(qty) }; 
+        
+        // Consolidamos ventas, regalos y concentrados perdidos para devolverlos
+        const carritoDevolver = { ...(pedido.carritoObj || {}) };
+        if (pedido.carritoObsequiosObj) {
+           Object.entries(pedido.carritoObsequiosObj).forEach(([k, qty]) => {
+              carritoDevolver[k] = (carritoDevolver[k] || 0) + qty;
+           });
+        }
+
+        let countBoosters = 0;
+        const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+        Object.entries(carritoDevolver).forEach(([k, qty]) => {
+           if (boosterKeys.includes(k)) countBoosters += qty;
         });
-        // Devolver obsequios al stock también
-        Object.entries(pedido.carritoObsequiosObj || {}).forEach(([itemKey, qty]) => { 
-            if (updates[itemKey]) {
-                updates[itemKey].envios.operant += qty;
-            } else {
-                updates[itemKey] = { envios: increment(qty) };
-            }
+
+        if (countBoosters > 0) {
+           const concentradosActuales = carritoDevolver["Concentrado|Unidad"] || 0;
+           if (concentradosActuales < countBoosters) {
+              carritoDevolver["Concentrado|Unidad"] = concentradosActuales + (countBoosters - concentradosActuales);
+           }
+        }
+
+        Object.entries(carritoDevolver).forEach(([itemKey, qty]) => { 
+            updates[itemKey] = { envios: increment(qty) }; 
         });
 
         if (Object.keys(updates).length > 0) { 
@@ -306,10 +334,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   };
 
   const generarCSV = (cierre) => {
-    let csv = 'Categoria,Producto,Presentacion,Inicio Dia,Ingresos,Recepcion,Salidas,Ventas,Regalos,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
+    let csv = 'Categoria,Producto,Presentacion,Inicio Dia,Ingresos,Recepcion,Salidas,Ventas/Regalos,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
     cierre.productos.forEach(p => {
       const estatus = p.diferencia === 0 ? 'OK' : (p.diferencia > 0 ? 'SOBRANTE' : 'FALTANTE');
-      csv += `"${p.categoria}","${p.nombre}","${p.presentacion}",${p.inicioDia||0},${p.ingresos||0},${p.recepcion||0},${p.salidas||0},${p.ventas||0},${p.regalos||0},${p.sistema},${p.fisico},${p.diferencia},"${estatus}","${p.nota}"\n`;
+      csv += `"${p.categoria}","${p.nombre}","${p.presentacion}",${p.inicioDia||0},${p.ingresos||0},${p.recepcion||0},${p.salidas||0},${p.ventas||0},${p.sistema},${p.fisico},${p.diferencia},"${estatus}","${p.nota}"\n`;
     });
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' }); 
     const url = URL.createObjectURL(blob);
@@ -383,8 +411,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
               <th style="text-align:center; color:#2563eb;">Ingresos</th>
               <th style="text-align:center; color:#9333ea;">A Recepción</th>
               <th style="text-align:center; color:#ea580c;">Salidas</th>
-              <th style="text-align:center; color:#059669;">Ventas</th>
-              <th style="text-align:center; color:#db2777;">Regalos</th>
+              <th style="text-align:center; color:#059669;">Ventas + Regalos</th>
               <th style="text-align:center; background:#f8fafc;">Stock Final (Sis)</th>
               <th style="text-align:center;">Físico Real</th>
               <th style="text-align:center;">Dif.</th>
@@ -401,7 +428,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
        const rec = p.recepcion !== undefined ? p.recepcion : '-';
        const sal = p.salidas !== undefined ? p.salidas : '-';
        const vta = p.ventas !== undefined ? p.ventas : '-';
-       const reg = p.regalos !== undefined ? p.regalos : '-';
 
        html += `<tr>
          <td>${p.categoria}</td>
@@ -411,7 +437,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
          <td style="text-align:center; color:#9333ea; font-weight:bold;">${rec}</td>
          <td style="text-align:center; color:#ea580c; font-weight:bold;">${sal}</td>
          <td style="text-align:center; color:#059669; font-weight:bold;">${vta}</td>
-         <td style="text-align:center; color:#db2777; font-weight:bold;">${reg}</td>
          <td style="text-align:center; font-weight:bold; font-size:13px; background:#f8fafc;">${p.sistema}</td>
          <td style="text-align:center; font-weight:900; font-size:13px;">${p.fisico}</td>
          <td class="${claseDif}" style="text-align:center;">${textDif}</td>
@@ -434,11 +459,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       
       catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
         const key = `${p.nombre}|${pres}`;
-        const kData = hoyKardex[key] || { ventas: 0, regalos: 0, recepcion: 0, ingresos: 0, salidas: 0 };
+        const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
         
         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
-        // Inicio del día incluye los regalos como salidas que se restan del stock
-        const inicioDia = sistema + kData.ventas + kData.regalos + kData.recepcion + kData.salidas - kData.ingresos;
+        const inicioDia = sistema + kData.ventas + kData.recepcion + kData.salidas - kData.ingresos;
         const fisico = conteoFisico[key] || 0;
         const diferencia = fisico - sistema; 
         
@@ -452,7 +476,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
            recepcion: kData.recepcion,
            salidas: kData.salidas,
            ventas: kData.ventas,
-           regalos: kData.regalos, // Añadido regalos
            ingresos: kData.ingresos,
            sistema, 
            fisico, 
@@ -670,7 +693,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                     <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm w-full h-full flex flex-col">
                       <div className="text-sm mb-4"><span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block mb-1">Número de Guía</span> <span className="font-black text-slate-800 dark:text-slate-100 text-lg break-all">{p.guia}</span></div>
                       
-                      {/* MINIATURAS MEJORADAS (VISTA ENVIADOS) */}
                       <div className="flex gap-3 mt-1 mb-5">
                           {p.linkGuia && !p.esMercadoLibre && (
                               <div className="flex-1 relative group cursor-pointer" title="Ver comprobante de envío">
@@ -732,7 +754,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                           </div>
                       </div>
 
-                      {/* MINIATURAS MEJORADAS (VISTA PENDIENTES) */}
                       {(valorLinkGuia || valorLinkFoto) && (
                         <div className="flex gap-3 mt-1 mb-1">
                             {valorLinkGuia && !isLinkML && (
@@ -820,8 +841,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                        <th className="p-4 font-black text-center w-24 text-blue-600">Ingresos</th>
                        <th className="p-4 font-black text-center w-24 text-purple-600">A Recepción</th>
                        <th className="p-4 font-black text-center w-24 text-orange-600">Salidas</th>
-                       <th className="p-4 font-black text-center w-24 text-emerald-600">Ventas</th>
-                       <th className="p-4 font-black text-center w-24 text-pink-600">Regalos</th>
+                       <th className="p-4 font-black text-center w-24 text-emerald-600">Ventas/Obsequios</th>
                        <th className="p-4 font-black text-center w-24">Stock Final</th>
                        <th className="p-4 font-black text-center bg-sky-100 dark:bg-sky-900/40 w-32">Validación Física</th>
                        <th className="p-4 font-black text-center w-28">Diferencia</th>
@@ -831,10 +851,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                    <tbody>
                      {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
                         const key = `${p.nombre}|${pres}`;
-                        const kData = hoyKardex[key] || { ventas: 0, regalos: 0, recepcion: 0, ingresos: 0, salidas: 0 };
+                        const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
                         
                         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
-                        const inicioDia = sistema + kData.ventas + kData.regalos + kData.recepcion + kData.salidas - kData.ingresos;
+                        const inicioDia = sistema + kData.ventas + kData.recepcion + kData.salidas - kData.ingresos;
                         const fisico = conteoFisico[key] ?? sistema;
                         const diferencia = fisico - sistema;
                         
@@ -853,7 +873,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                              <td className="p-4 text-center font-bold text-lg text-purple-600">{kData.recepcion}</td>
                              <td className="p-4 text-center font-bold text-lg text-orange-600">{kData.salidas}</td>
                              <td className="p-4 text-center font-bold text-lg text-emerald-600">{kData.ventas}</td>
-                             <td className="p-4 text-center font-bold text-lg text-pink-600">{kData.regalos}</td>
                              <td className="p-4 text-center font-black text-lg text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-900/30">{sistema}</td>
                              <td className="p-4 text-center bg-sky-50 dark:bg-sky-900/20">
                                 <input 
