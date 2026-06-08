@@ -80,35 +80,53 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     // MÉTRICAS SEGMENTADAS DE VENTAS 
     let ventasEnviosUsd = 0; let ventasDeliveryUsd = 0; let ventasTiendaUsd = 0;
 
-    // MÉTRICAS DE CAJAS FÍSICAS (Actualizadas para Tienda y Delivery)
+    // MÉTRICAS DE CAJAS FÍSICAS (Tienda y Delivery)
     let totalEfectivoTienda = 0; 
     let totalEfectivoBs = 0;
     let totalPuntoTiendaBs = 0; 
     let totalTarjetaCreditoBs = 0;
-    let totalVueltosDados = 0; // Vueltos en USD
-    let totalVueltosBs = 0; // Vueltos en BS
+    let totalVueltosDados = 0; 
+    let totalVueltosBs = 0; 
 
     pedidosFiltrados.forEach(p => {
-      let valorOriginalUsd = 0;
+      let valorVentaUsd = 0;
       if (p.carritoObj) {
         Object.entries(p.carritoObj).forEach(([key, qty]) => {
           const [n, pr] = key.split('|');
           catalogo.forEach(cat => cat.productos.forEach(prod => {
             if (prod.nombre === n) {
               const idx = prod.presentaciones.indexOf(pr);
-              if (idx >= 0 && prod.precios) { valorOriginalUsd += (prod.precios[idx] * qty); }
+              if (idx >= 0 && prod.precios) { valorVentaUsd += (prod.precios[idx] * qty); }
             }
           }));
         });
       }
 
+      let valorObsequiosUsd = 0;
+      if (p.carritoObsequiosObj) {
+        Object.entries(p.carritoObsequiosObj).forEach(([key, qty]) => {
+          const [n, pr] = key.split('|');
+          catalogo.forEach(cat => cat.productos.forEach(prod => {
+            if (prod.nombre === n) {
+              const idx = prod.presentaciones.indexOf(pr);
+              if (idx >= 0 && prod.precios) { valorObsequiosUsd += (prod.precios[idx] * qty); }
+            }
+          }));
+        });
+      }
+
+      const creditoRegalo = parseFloat(p.montoCreditoRegaloUsd) || 0;
+
       if (p.esRegalo) {
-        regalosUSD += valorOriginalUsd;
+        // Soporte a registros antiguos donde todo era regalo por un switch
+        regalosUSD += valorVentaUsd + valorObsequiosUsd;
       } else {
         const mUsd = p.montoUsd || 0;
         const costoEnvio = parseFloat(p.costoEnvio) || 0;
         
-        // Acumular Ventas por Tipo de Despacho
+        // El total en obsequios es el valor de los productos regalados + el crédito concedido
+        regalosUSD += valorObsequiosUsd + creditoRegalo;
+        
         if (p.tipoDespacho === 'Delivery') {
           ventasDeliveryUsd += mUsd;
         } else if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda') {
@@ -117,7 +135,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           ventasEnviosUsd += mUsd;
         }
 
-        // Registrar pagos físicos (Ahora incluye Tienda Y Delivery)
         if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda' || p.tipoDespacho === 'Delivery') {
            totalEfectivoTienda += (p.montoEfectivoUsd || 0);
            totalEfectivoBs += (p.montoEfectivoBs || 0);
@@ -138,7 +155,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
         if (p.esMercadoLibre) { mlUSD += mUsd; mlVES += (p.montoVes || 0); }
 
-        const diferenciaReal = (valorOriginalUsd + costoEnvio) - mUsd;
+        // El descuento real (Campaña/Asesor) se aísla restando primero el crédito
+        const diferenciaReal = (valorVentaUsd + costoEnvio) - (mUsd + creditoRegalo);
         if (diferenciaReal > 0) descuentosUSD += diferenciaReal;
       }
     });
@@ -176,13 +194,14 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              moneda: p.moneda,
              origen: p.origenPedido || 'Sin Origen',
              costoEnvio: parseFloat(p.costoEnvio) || 0,
-             tipoDespacho: p.tipoDespacho || 'Nacional'
+             tipoDespacho: p.tipoDespacho || 'Nacional',
+             creditoRegalo: parseFloat(p.montoCreditoRegaloUsd) || 0
          });
       });
       return Object.values(map).sort((a,b) => (b.totalUsd + b.totalZelle) - (a.totalUsd + a.totalZelle));
   }, [pedidosFiltrados]);
 
-  // --- CÁLCULO INVENTARIO FÍSICO ---
+  // --- CÁLCULO INVENTARIO FÍSICO (Ventas + Obsequios) ---
   const totalValInventario = useMemo(() => {
     let valorInicialStock = 0;
     Object.entries(stock).forEach(([key, val]) => {
@@ -201,44 +220,53 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       }
     });
 
-    let valorDescontarPorVentas = 0;
+    let valorDescontarPorDespachos = 0;
     pedidosFiltrados.forEach(p => {
-      if (p.carritoObj) {
-        Object.entries(p.carritoObj).forEach(([key, qty]) => {
-          const [n, pr] = key.split('|');
-          catalogo.forEach(cat => cat.productos.forEach(prod => {
-            if (prod.nombre === n) {
-              const idx = prod.presentaciones.indexOf(pr);
-              if (idx >= 0 && prod.precios) { 
-                valorDescontarPorVentas += (prod.precios[idx] * qty); 
+      const sumarAlDescuento = (carrito) => {
+         if (!carrito) return;
+         Object.entries(carrito).forEach(([key, qty]) => {
+            const [n, pr] = key.split('|');
+            catalogo.forEach(cat => cat.productos.forEach(prod => {
+              if (prod.nombre === n) {
+                const idx = prod.presentaciones.indexOf(pr);
+                if (idx >= 0 && prod.precios) { 
+                  valorDescontarPorDespachos += (prod.precios[idx] * qty); 
+                }
               }
-            }
-          }));
-        });
-      }
+            }));
+          });
+      };
+      
+      sumarAlDescuento(p.carritoObj);
+      sumarAlDescuento(p.carritoObsequiosObj);
     });
 
-    return Math.max(0, valorInicialStock - valorDescontarPorVentas);
+    return Math.max(0, valorInicialStock - valorDescontarPorDespachos);
   }, [stock, catalogo, pedidosFiltrados]);
 
+  // --- TOP 10 PRODUCTOS (Ventas + Obsequios) ---
   const topProductos = useMemo(() => {
     const map = {};
     pedidosFiltrados.forEach(p => {
-      if (p.carritoObj) {
-        Object.entries(p.carritoObj).forEach(([key, qty]) => {
-          if (!map[key]) map[key] = { cantidad: 0, valor: 0 };
-          map[key].cantidad += qty;
-          const [n, pr] = key.split('|');
-          let precioUnitario = 0;
-          catalogo.forEach(c => c.productos.forEach(prod => {
-            if (prod.nombre === n) {
-              const idx = prod.presentaciones.indexOf(pr);
-              if (idx >= 0) precioUnitario = prod.precios[idx] || 0;
-            }
-          }));
-          map[key].valor += (qty * precioUnitario);
-        });
-      }
+      const contabilizar = (carrito) => {
+         if (!carrito) return;
+         Object.entries(carrito).forEach(([key, qty]) => {
+            if (!map[key]) map[key] = { cantidad: 0, valor: 0 };
+            map[key].cantidad += qty;
+            const [n, pr] = key.split('|');
+            let precioUnitario = 0;
+            catalogo.forEach(c => c.productos.forEach(prod => {
+              if (prod.nombre === n) {
+                const idx = prod.presentaciones.indexOf(pr);
+                if (idx >= 0) precioUnitario = prod.precios[idx] || 0;
+              }
+            }));
+            map[key].valor += (qty * precioUnitario);
+          });
+      };
+      
+      contabilizar(p.carritoObj);
+      contabilizar(p.carritoObsequiosObj);
     });
     return Object.entries(map).map(([key, data]) => ({ key, ...data })).sort((a, b) => b.cantidad - a.cantidad).slice(0, 10);
   }, [pedidosFiltrados, catalogo]);
@@ -271,11 +299,14 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        const descuentoGlobal = p.descuentoGlobalAplicado || 0;
        const descuentoRealAplicado = Math.max(descuentoAsesora, descuentoGlobal); 
 
-       if (p.carritoObj) {
-          Object.entries(p.carritoObj).forEach(([key, qty]) => {
-             if (!productosDetallados[key]) {
-                productosDetallados[key] = { 
-                   nombre: key.replace('|', ' - '), 
+       const procesarParaPDF = (carrito, esObsequio) => {
+          if (!carrito) return;
+          Object.entries(carrito).forEach(([key, qty]) => {
+             const keyPdf = esObsequio ? `${key} (OBSEQUIO)` : key;
+             
+             if (!productosDetallados[keyPdf]) {
+                productosDetallados[keyPdf] = { 
+                   nombre: keyPdf.replace('|', ' - '), 
                    unidadesEnvios: 0, 
                    unidadesRecepcion: 0, 
                    valorRealUsd: 0 
@@ -283,28 +314,32 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              }
              
              if (p.tipoDespacho === 'Delivery' || p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda') {
-                productosDetallados[key].unidadesRecepcion += qty;
+                productosDetallados[keyPdf].unidadesRecepcion += qty;
              } else {
-                productosDetallados[key].unidadesEnvios += qty;
+                productosDetallados[keyPdf].unidadesEnvios += qty;
              }
              
-             const [n, pr] = key.split('|');
-             let precioUnitarioCata = 0;
-             catalogo.forEach(c => c.productos.forEach(prod => {
-                if (prod.nombre === n) {
-                   const idx = prod.presentaciones.indexOf(pr);
-                   if (idx >= 0) precioUnitarioCata = prod.precios[idx] || 0;
-                }
-             }));
-             
-             let precioConDescuento = precioUnitarioCata;
-             if (descuentoRealAplicado > 0) {
-                 precioConDescuento = precioUnitarioCata - (precioUnitarioCata * (descuentoRealAplicado / 100));
+             if (!esObsequio) {
+                 const [n, pr] = key.split('|');
+                 let precioUnitarioCata = 0;
+                 catalogo.forEach(c => c.productos.forEach(prod => {
+                    if (prod.nombre === n) {
+                       const idx = prod.presentaciones.indexOf(pr);
+                       if (idx >= 0) precioUnitarioCata = prod.precios[idx] || 0;
+                    }
+                 }));
+                 
+                 let precioConDescuento = precioUnitarioCata;
+                 if (descuentoRealAplicado > 0) {
+                     precioConDescuento = precioUnitarioCata - (precioUnitarioCata * (descuentoRealAplicado / 100));
+                 }
+                 productosDetallados[keyPdf].valorRealUsd += (precioConDescuento * qty);
              }
-             
-             productosDetallados[key].valorRealUsd += (precioConDescuento * qty);
           });
-       }
+       };
+
+       procesarParaPDF(p.carritoObj, false);
+       procesarParaPDF(p.carritoObsequiosObj, true);
     });
 
     const listaProductosPDF = Object.values(productosDetallados).sort((a, b) => (b.unidadesEnvios + b.unidadesRecepcion) - (a.unidadesEnvios + a.unidadesRecepcion));
@@ -315,7 +350,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
     // CÁLCULOS NETOS PARA CAJA FÍSICA PDF
     const cajaFisicaUsd = metricas.totalEfectivoTienda - metricas.totalVueltosDados;
-    const cajaFisicaBs = metricas.totalEfectivoBs; // Efectivo físico no se le restan vueltos, porque los vueltos son por pago movil
+    const cajaFisicaBs = metricas.totalEfectivoBs; 
     const totalTransfPagoMovilNetoBs = metricas.ventasVES - metricas.totalVueltosBs;
     const totalPuntosTDC = metricas.totalPuntoTiendaBs + metricas.totalTarjetaCreditoBs;
 
@@ -356,6 +391,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           .products-list { color: #475569; line-height: 1.5; }
           .zelle-tag { background: #f3e8ff; color: #6b21a8; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 9px; }
           .envio-tag { background: #fff7ed; color: #c2410c; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 9px; display: inline-block; margin-top: 4px; border: 1px solid #ffedd5; }
+          .credito-tag { background: #fce7f3; color: #be185d; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 9px; display: inline-block; margin-top: 4px; border: 1px solid #fbcfe8; }
           
           @media print { body { padding: 0; } .no-print { display: none; } }
         </style>
@@ -388,7 +424,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            </div>
         </div>
 
-        <!-- REPORTE DE CAJAS FÍSICAS -->
         <h2 style="margin-top:20px; margin-bottom:10px;">Cuadre de Cajas (Tienda / Delivery)</h2>
         <div class="kpi-container">
            <div class="kpi-box tienda" style="background:#047857;">
@@ -451,6 +486,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              <td style="text-align:right; font-weight:bold;">
                 $${c.montoUsd.toFixed(2)} ${isZelle ? '<span class="zelle-tag">ZELLE</span>' : ''}
                 ${c.costoEnvio > 0 ? `<br><span class="envio-tag">Incluye Envío: $${c.costoEnvio.toFixed(2)}</span>` : ''}
+                ${c.creditoRegalo > 0 ? `<br><span class="credito-tag">Crédito/Regalo: -$${c.creditoRegalo.toFixed(2)}</span>` : ''}
              </td>
           </tr>`;
        });
@@ -460,7 +496,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     html += `
         <h2 style="margin-top: 50px;">Resumen de Productos Vendidos</h2>
         <div style="font-size: 10px; color: #64748b; margin-top: -5px; margin-bottom: 10px;">
-           * El "Valor Real ($)" refleja lo que realmente ingresó por ese producto luego de aplicar descuentos si los hubo.
+           * El "Valor Real ($)" refleja lo que realmente ingresó por ese producto luego de aplicar descuentos si los hubo (Los obsequios reflejan $0.00).
         </div>
         <table>
           <thead>
@@ -482,7 +518,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            <td><strong>${prod.nombre}</strong></td>
            <td style="text-align:center; font-weight:bold; color:#ea580c;">${prod.unidadesEnvios}</td>
            <td style="text-align:center; font-weight:bold; color:#3b82f6;">${prod.unidadesRecepcion}</td>
-           <td style="text-align:right; font-weight:bold; color:#059669;">$${prod.valorRealUsd.toFixed(2)}</td>
+           <td style="text-align:right; font-weight:bold; ${prod.valorRealUsd === 0 ? 'color:#94a3b8;' : 'color:#059669;'}">$${prod.valorRealUsd.toFixed(2)}</td>
          </tr>`;
       });
     }
@@ -508,6 +544,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
              const isZelle = p.moneda === 'ZELLE';
              const costoEnvio = parseFloat(p.costoEnvio) || 0;
+             const creditoPdf = parseFloat(p.montoCreditoRegaloUsd) || 0;
              
              tablaHtml += `<tr>
                <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${p.fechaDespacho}</span><br><span style="font-size:10px; font-weight:bold;">Asesora: ${p.asesora}</span></td>
@@ -517,6 +554,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                <td style="text-align:right; font-weight:900; font-size:13px;">
                   $${(p.montoUsd || 0).toFixed(2)} ${isZelle ? '<br><span class="zelle-tag">ZELLE</span>' : ''}
                   ${costoEnvio > 0 ? `<br><span class="envio-tag">Costo: $${costoEnvio.toFixed(2)}</span>` : ''}
+                  ${creditoPdf > 0 ? `<br><span class="credito-tag">Crédito/Regalo: -$${creditoPdf.toFixed(2)}</span>` : ''}
                </td>
              </tr>`;
           });
@@ -738,7 +776,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
             <div>
               <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Costo por Obsequios</div>
               <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.regalosUSD.toFixed(2)}</div>
-              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Dinero no ingresado por VIPs</div>
+              <div className="text-[11px] font-bold text-slate-400 mt-0.5">Dinero en crédito/regalos</div>
             </div>
           </div>
 
@@ -814,6 +852,11 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                                   {c.costoEnvio > 0 && (
                                      <div className="text-[9px] font-bold text-orange-600 dark:text-orange-400 uppercase tracking-widest bg-orange-50 dark:bg-orange-900/30 px-2 py-0.5 rounded border border-orange-200 dark:border-orange-800/50 w-max">
                                         Incluye Envío: ${c.costoEnvio.toFixed(2)}
+                                     </div>
+                                  )}
+                                  {c.creditoRegalo > 0 && (
+                                     <div className="text-[9px] font-bold text-pink-600 dark:text-pink-400 uppercase tracking-widest bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800/50 w-max">
+                                        Crédito: -${c.creditoRegalo.toFixed(2)}
                                      </div>
                                   )}
                                </td>

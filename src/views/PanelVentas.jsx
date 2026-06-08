@@ -25,10 +25,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', pagoEnvio: 'COD', origenPedido: '',
    direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '',
    montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false,
-   descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '', numeroControlML: '', notaVentas: '' 
+   descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '', numeroControlML: '', notaVentas: '',
+   
+   // NUEVOS CAMPOS DE OBSEQUIOS Y CRÉDITO
+   carritoObsequiosObj: null,
+   montoObsequios: '0',
+   montoCreditoRegalo: ''
  };
 
  const [formData, setFormData] = useState(defaultForm);
+ const [modoCatalogo, setModoCatalogo] = useState('venta'); // Controla si añadimos al carrito de venta o de obsequio
  const [editId, setEditId] = useState(null);
  const [pedidoDevuelto, setPedidoDevuelto] = useState(null);
  const [enviando, setEnviando] = useState(false);
@@ -40,7 +46,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
  const [busquedaCliente, setBusquedaCliente] = useState('');
  const [fechaHistorial, setFechaHistorial] = useState(getLocalToday());
  const [filtroStatus, setFiltroStatus] = useState('Todos');
- const [filtroTipoDespacho, setFiltroTipoDespacho] = useState('Todos'); // NUEVO FILTRO TIPO DESPACHO
+ const [filtroTipoDespacho, setFiltroTipoDespacho] = useState('Todos');
 
  const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
  const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
@@ -57,13 +63,12 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
  const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
 
- // NUEVA LÓGICA DE NUMERACIÓN INDEPENDIENTE
  const numeracionDiaria = useMemo(() => {
    const map = {};
    const agrupados = {};
    pedidos.forEach(p => {
       const fecha = p.fechaDespacho || 'Sin Fecha';
-      const tipo = p.tipoDespacho || 'Nacional'; // Nacional, Tienda o Delivery
+      const tipo = p.tipoDespacho || 'Nacional';
       const key = `${fecha}_${tipo}`;
       
       if (!agrupados[key]) agrupados[key] = [];
@@ -79,20 +84,17 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
  const pedidosHistorialOrganizados = useMemo(() => {
    let lista = pedidos.filter(p => !p.esPublico);
    
-   // Filtro de Búsqueda
    if (busquedaCliente.trim()) {
      const b = busquedaCliente.toLowerCase();
      lista = lista.filter(p => p.clienteNombre?.toLowerCase().includes(b));
    }
    
-   // Filtro de Fecha
    if (fechaHistorial) {
      const [year, month, day] = fechaHistorial.split('-');
      const fechaFiltroStr = `${day}/${month}/${year}`;
      lista = lista.filter(p => p.fechaDespacho === fechaFiltroStr);
    }
 
-   // Filtro de Estatus
    if (filtroStatus !== 'Todos') {
      if (filtroStatus === 'Validados') {
        lista = lista.filter(p => p.status === 'Validado');
@@ -101,25 +103,33 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      }
    }
 
-   // Filtro de Tipo de Despacho
    if (filtroTipoDespacho !== 'Todos') {
      lista = lista.filter(p => (p.tipoDespacho || 'Nacional') === filtroTipoDespacho);
    }
 
-   // ORDEN ASCENDENTE: Más antiguos primero
-   lista.sort((a, b) => a.fechaCreacion - b.fechaCreacion); 
+   lista.sort((a, b) => b.fechaCreacion - a.fechaCreacion); // Más recientes primero para mejor UX
    return lista;
  }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus, filtroTipoDespacho]);
 
+ // LÓGICA DE CÁLCULO ACTUALIZADA PARA OBSEQUIOS Y CRÉDITO
  useEffect(() => {
-   if (!formData.carritoObj) return;
-   let sub = 0;
-   Object.entries(formData.carritoObj).forEach(([key, qty]) => {
-     const [n, p] = key.split('|');
-     catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const i=prod.presentaciones.indexOf(p); if (i >= 0 && prod.precios) sub += (prod.precios[i]*qty); }}));
-   });
+   let subVentas = 0;
+   if (formData.carritoObj) {
+     Object.entries(formData.carritoObj).forEach(([key, qty]) => {
+       const [n, p] = key.split('|');
+       catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const i=prod.presentaciones.indexOf(p); if (i >= 0 && prod.precios) subVentas += (prod.precios[i]*qty); }}));
+     });
+   }
+
+   let subObsequios = 0;
+   if (formData.carritoObsequiosObj) {
+     Object.entries(formData.carritoObsequiosObj).forEach(([key, qty]) => {
+       const [n, p] = key.split('|');
+       catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const i=prod.presentaciones.indexOf(p); if (i >= 0 && prod.precios) subObsequios += (prod.precios[i]*qty); }}));
+     });
+   }
   
-   const subConCampaña = sub * (1 - globalDiscountPercent / 100);
+   const subConCampaña = subVentas * (1 - globalDiscountPercent / 100);
    const dExtra = parseFloat(formData.descuentoPorcentaje) || 0;
    const finalProducts = subConCampaña * (1 - dExtra / 100);
 
@@ -128,15 +138,23 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
        costoEnvioFinal = parseFloat(formData.costoEnvio) || 0;
    }
 
-   const final = finalProducts + costoEnvioFinal;
+   const subTotalAntesDeCredito = finalProducts + costoEnvioFinal;
+   const credito = parseFloat(formData.montoCreditoRegalo) || 0;
+   
+   let finalPagar = subTotalAntesDeCredito - credito;
+   if (finalPagar < 0) finalPagar = 0; // Evitar saldos negativos si el crédito es mayor a la deuda
+
+   // El gasto de la empresa incluye el valor de los productos obsequiados + el crédito regalado
+   let totalReporteObsequios = subObsequios + credito;
   
    setFormData(prev => ({
      ...prev,
-     montoPago: prev.esRegalo ? prev.montoPago : final.toFixed(2),
+     montoPago: prev.esRegalo ? '0' : finalPagar.toFixed(2),
+     montoObsequios: prev.esRegalo ? (subTotalAntesDeCredito + subObsequios).toFixed(2) : totalReporteObsequios.toFixed(2),
      moneda: prev.moneda === 'ZELLE' ? 'ZELLE' : 'USD',
      tasa: prev.tasa || config?.tasaDia
    }));
- }, [formData.carritoObj, formData.descuentoPorcentaje, formData.tipoDespacho, formData.pagoEnvio, formData.costoEnvio, config?.tasaDia, catalogo, globalDiscountPercent]);
+ }, [formData.carritoObj, formData.carritoObsequiosObj, formData.descuentoPorcentaje, formData.montoCreditoRegalo, formData.tipoDespacho, formData.pagoEnvio, formData.costoEnvio, config?.tasaDia, catalogo, globalDiscountPercent, formData.esRegalo]);
 
  const copiarLinkTienda = () => {
    const linkTienda = `${window.location.origin}${window.location.pathname}#tienda`;
@@ -228,15 +246,29 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    } catch(e) { console.error(e); dialogs.alert("Error comunicando con la IA. Ingresa manual.", "Error"); } finally { setAnalizando(false); }
  };
 
- const eliminarDelCarrito = (itemKey) => {
+ // FUNCIÓN DE CARRITO ACTUALIZADA
+ const eliminarDelCarrito = (itemKey, esObsequio = false) => {
    setFormData(prev => {
-     const nuevoCarrito = { ...prev.carritoObj };
-     delete nuevoCarrito[itemKey];
+     const targetObj = esObsequio ? { ...(prev.carritoObsequiosObj || {}) } : { ...(prev.carritoObj || {}) };
+     delete targetObj[itemKey];
+
      let nuevoTexto = "";
-     Object.entries(nuevoCarrito).forEach(([key, qty]) => {
-        nuevoTexto += `- ${qty}x ${key.replace('|', ' ')}\n`;
-     });
-     return { ...prev, carritoObj: nuevoCarrito, productos: nuevoTexto.trim() };
+     
+     const currentVentas = esObsequio ? prev.carritoObj : targetObj;
+     if (currentVentas) {
+        Object.entries(currentVentas).forEach(([key, qty]) => nuevoTexto += `- ${qty}x ${key.replace('|', ' ')}\n`);
+     }
+     
+     const currentObsequios = esObsequio ? targetObj : prev.carritoObsequiosObj;
+     if (currentObsequios) {
+        Object.entries(currentObsequios).forEach(([key, qty]) => nuevoTexto += `- ${qty}x ${key.replace('|', ' ')} (OBSEQUIO)\n`);
+     }
+
+     return { 
+       ...prev, 
+       [esObsequio ? 'carritoObsequiosObj' : 'carritoObj']: targetObj, 
+       productos: nuevoTexto.trim() 
+     };
    });
  };
 
@@ -250,7 +282,11 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      deliveryFecha: pedido.deliveryFecha || getLocalToday(),
      deliveryHora: pedido.deliveryHora || '',
      clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier || '', pagoEnvio: pedido.pagoEnvio || 'COD', origenPedido: pedido.origenPedido || '', direccion: pedido.direccion,
-     productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), carritoObj: pedido.carritoObj, asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD',
+     productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), 
+     carritoObj: pedido.carritoObj, 
+     carritoObsequiosObj: pedido.carritoObsequiosObj || null, // Cargar obsequios
+     montoCreditoRegalo: pedido.montoCreditoRegaloUsd?.toString() || '', // Cargar crédito
+     asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD',
      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: '',
      numeroControlML: pedido.numeroControlML || '', notaVentas: pedido.notaVentas || '' 
    });
@@ -321,10 +357,14 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
  const handleSubmit = async (e) => {
    e.preventDefault();
    if (!tasaActualizadaHoy && !editId) return dialogs.alert("NO puedes registrar ventas nuevas porque la Tasa del Día no ha sido actualizada hoy por Administración.", "Tasa Desactualizada");
-   if (!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) return dialogs.alert("Debes seleccionar productos del Catálogo Visual.", "Carrito Vacío");
+   
+   // Validar que al menos haya un producto pagado o regalado
+   const hayVentas = formData.carritoObj && Object.keys(formData.carritoObj).length > 0;
+   const hayObsequios = formData.carritoObsequiosObj && Object.keys(formData.carritoObsequiosObj).length > 0;
+   
+   if (!hayVentas && !hayObsequios) return dialogs.alert("Debes seleccionar productos o obsequios del Catálogo.", "Carrito Vacío");
    if (!formData.origenPedido) return dialogs.alert("Por favor selecciona de dónde viene el pedido.", "Falta Origen");
   
-   // Validaciones según el tipo de despacho
    if (formData.tipoDespacho === 'Nacional' && !formData.courier) return dialogs.alert("Por favor selecciona la Empresa de Envío.", "Falta Agencia");
    if (formData.tipoDespacho === 'Tienda') {
       if (!formData.retiroNombre || !formData.retiroCedula || !formData.retiroTelefono) return dialogs.alert("Debes completar los datos de la persona que retira en tienda.", "Datos Incompletos");
@@ -342,7 +382,16 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    let sinStock = false;
    let itemsFaltantes = [];
    let extraConcentrados = 0;
-   Object.entries(formData.carritoObj).forEach(([key, qty]) => {
+   
+   // Verificar stock sumando tanto ventas como obsequios
+   const carritoTotal = { ...(formData.carritoObj || {}) };
+   if (formData.carritoObsequiosObj) {
+      Object.entries(formData.carritoObsequiosObj).forEach(([key, qty]) => {
+         carritoTotal[key] = (carritoTotal[key] || 0) + qty;
+      });
+   }
+
+   Object.entries(carritoTotal).forEach(([key, qty]) => {
      let maxDisp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key]||0);
      if (qty > maxDisp) {
        sinStock = true;
@@ -352,8 +401,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         extraConcentrados += qty;
      }
    });
+
    if (extraConcentrados > 0) {
-      const qtyConcentradosActual = formData.carritoObj["Concentrado|Unidad"] || 0;
+      const qtyConcentradosActual = carritoTotal["Concentrado|Unidad"] || 0;
       const totalConcentradosNecesarios = qtyConcentradosActual + extraConcentrados;
       const dispConcentrado = typeof stock["Concentrado|Unidad"] === 'object' ? stock["Concentrado|Unidad"].envios : (stock["Concentrado|Unidad"]||0);
      
@@ -379,6 +429,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    const tasa = parseFloat(formData.tasa) || 1;
    let descuento = parseFloat(formData.descuentoPorcentaje) || 0;
    let costoEnvioFinal = parseFloat(formData.costoEnvio) || 0;
+   let creditoRegalo = parseFloat(formData.montoCreditoRegalo) || 0;
 
    let pagoExtUsd = 0;
    if (editId && pedidoDevuelto?.faltanteUsd > 0 && formData.pagoAdicional) {
@@ -397,17 +448,23 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
        calculo.ves = montoNum;
        calculo.usd = tasa > 0 ? montoNum / tasa : 0;
    }
+
    let finalCarrito = { ...formData.carritoObj };
+   let finalCarritoObsequios = { ...formData.carritoObsequiosObj };
    let finalProductosText = formData.productos || '';
+   
+   // Calcular boosters globales
    let countBoosters = 0;
    const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+   
    Object.entries(finalCarrito).forEach(([key, qty]) => { if (boosterKeys.includes(key)) countBoosters += qty; });
+   Object.entries(finalCarritoObsequios).forEach(([key, qty]) => { if (boosterKeys.includes(key)) countBoosters += qty; });
+
    if (countBoosters > 0) {
      finalCarrito["Concentrado|Unidad"] = (finalCarrito["Concentrado|Unidad"] || 0) + countBoosters;
      if (!finalProductosText.includes("Concentrado (Unidad)")) finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Auto]`;
    }
    
-   // LÓGICA DE FECHAS (Cortes de Despacho)
    const getVeneziaTime = () => {
      const now = new Date();
      return new Date(now.toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -465,6 +522,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
         costoEnvio: costoEnvioFinal,
         productos: finalProductosText,
         carritoObj: finalCarrito,
+        carritoObsequiosObj: finalCarritoObsequios,
+        montoObsequiosUsd: parseFloat(formData.montoObsequios) || 0,
+        montoCreditoRegaloUsd: creditoRegalo,
         monto: montoNum,
         montoUsd: calculo.usd,
         montoVes: calculo.ves,
@@ -708,7 +768,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                    }}
                    className="w-5 h-5 accent-purple-600 cursor-pointer rounded"
                 />
-                <label htmlFor="regalo-check" className="text-sm font-bold text-purple-700 dark:text-purple-400 cursor-pointer uppercase tracking-wider flex items-center gap-1"><Gift size={16}/> Es Regalo / Obsequio VIP</label>
+                <label htmlFor="regalo-check" className="text-sm font-bold text-purple-700 dark:text-purple-400 cursor-pointer uppercase tracking-wider flex items-center gap-1"><Gift size={16}/> Es Regalo / Obsequio VIP TOTAL</label>
               </div>
             </div>
            
@@ -722,26 +782,42 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
               <textarea name="notaVentas" value={formData.notaVentas} onChange={(e)=>setFormData({...formData, notaVentas: e.target.value})} rows={2} placeholder="Observación adicional para administración o despacho..." className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm"></textarea>
             </div>
            
+            {/* CARRITO PARALELO */}
             <div className="md:col-span-2 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl border-2 border-slate-100 dark:border-slate-700">
-              <div className="flex justify-between items-center mb-4">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
                  <label className="font-black text-slate-800 dark:text-white flex items-center gap-2 uppercase tracking-tighter text-sm"><Package className="text-sky-600"/> Carrito de la Orden</label>
-                 <button type="button" onClick={() => setIsCatalogOpen(true)} className="text-xs font-black bg-sky-600 text-white px-4 py-2 rounded-xl flex items-center gap-1 shadow-md"><Search size={14}/> Catálogo</button>
+                 <div className="flex gap-2">
+                    <button type="button" onClick={() => { setModoCatalogo('venta'); setIsCatalogOpen(true); }} className="text-xs font-black bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-xl flex items-center gap-1 shadow-md transition-colors"><Search size={14}/> Añadir Venta</button>
+                    <button type="button" onClick={() => { setModoCatalogo('regalo'); setIsCatalogOpen(true); }} className="text-xs font-black bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl flex items-center gap-1 shadow-md transition-colors"><Gift size={14}/> Añadir Obsequio</button>
+                 </div>
               </div>
-              {formData.carritoObj && Object.keys(formData.carritoObj).length > 0 ? (
-                <div className="space-y-2">
-                   {Object.entries(formData.carritoObj).map(([key, qty]) => (
-                     <div key={key} className="flex justify-between items-center bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                        <div className="text-sm font-bold dark:text-slate-200">
-                           <span className="text-sky-600 dark:text-sky-400 mr-2">{qty}x</span> {key.replace('|', ' ')}
-                        </div>
-                        <button type="button" onClick={() => eliminarDelCarrito(key)} className="text-red-400 hover:text-red-600"><XCircle size={18}/></button>
-                     </div>
-                   ))}
-                </div>
-              ) : (
-                <div className="text-center p-8 text-slate-400 font-bold border-2 border-dashed dark:border-slate-700 rounded-xl">El carrito está vacío. Haz clic en "Catálogo" para agregar productos.</div>
-              )}
+
+              <div className="space-y-2">
+                 {formData.carritoObj && Object.entries(formData.carritoObj).map(([key, qty]) => (
+                   <div key={`venta-${key}`} className="flex justify-between items-center bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                      <div className="text-sm font-bold dark:text-slate-200">
+                         <span className="text-sky-600 dark:text-sky-400 mr-2">{qty}x</span> {key.replace('|', ' ')}
+                      </div>
+                      <button type="button" onClick={() => eliminarDelCarrito(key, false)} className="text-red-400 hover:text-red-600"><XCircle size={18}/></button>
+                   </div>
+                 ))}
+
+                 {formData.carritoObsequiosObj && Object.entries(formData.carritoObsequiosObj).map(([key, qty]) => (
+                   <div key={`obs-${key}`} className="flex justify-between items-center bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800 shadow-sm">
+                      <div className="text-sm font-bold text-purple-800 dark:text-purple-300">
+                         <span className="text-purple-600 dark:text-purple-400 mr-2">{qty}x</span> {key.replace('|', ' ')}
+                         <span className="ml-2 text-[9px] font-black uppercase tracking-widest bg-purple-200 dark:bg-purple-800 px-1.5 py-0.5 rounded text-purple-700 dark:text-purple-300">Obsequio</span>
+                      </div>
+                      <button type="button" onClick={() => eliminarDelCarrito(key, true)} className="text-red-400 hover:text-red-600"><XCircle size={18}/></button>
+                   </div>
+                 ))}
+
+                 {(!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) && (!formData.carritoObsequiosObj || Object.keys(formData.carritoObsequiosObj).length === 0) && (
+                   <div className="text-center p-8 text-slate-400 font-bold border-2 border-dashed dark:border-slate-700 rounded-xl">El carrito está vacío. Añade productos o obsequios.</div>
+                 )}
+              </div>
             </div>
+
             <div className={`md:col-span-2 p-8 rounded-3xl shadow-inner grid grid-cols-1 md:grid-cols-4 gap-6 transition-colors ${formData.esRegalo ? 'bg-purple-900/20 border-2 border-purple-500 text-purple-300' : 'bg-[#003366] dark:bg-slate-950 text-white'}`}>
               <div className="flex flex-col"><InputDark disabled={formData.moneda === 'ZELLE'} type="number" step="0.01" label="Tasa Aplicada (Bs/$)" value={formData.tasa} onChange={(e)=>setFormData({...formData, tasa: e.target.value})} required placeholder="Ej: 45.20" /></div>
               <div className="flex flex-col">
@@ -770,7 +846,10 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
               <InputDark label="Referencia / Banco" value={formData.referencia} onChange={(e)=>setFormData({...formData, referencia: e.target.value})} required placeholder="Ej. 1234 Banesco" />
              
               {!formData.esRegalo && (
-                <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-6"><InputDark type="number" step="0.01" label="Añadir Descuento Asesor (%)" value={formData.descuentoPorcentaje} onChange={(e)=>setFormData({...formData, descuentoPorcentaje: e.target.value})} placeholder="Ej: 5" /></div>
+                <div className="md:col-span-4 mt-2 border-t border-slate-700 pt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                   <InputDark type="number" step="0.01" label="Añadir Descuento Asesor (%)" value={formData.descuentoPorcentaje} onChange={(e)=>setFormData({...formData, descuentoPorcentaje: e.target.value})} placeholder="Ej: 5" />
+                   <InputDark type="number" step="0.01" label="Crédito / Monto Regalo a Favor ($)" value={formData.montoCreditoRegalo} onChange={(e)=>setFormData({...formData, montoCreditoRegalo: e.target.value})} placeholder="Ej: 20.00" />
+                </div>
               )}
             </div>
            
@@ -912,7 +991,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                               )}
                            </div>
 
-                           {/* Resumen especial si es Tienda/Delivery */}
                            {p.tipoDespacho === 'Tienda' && p.retiroNombre && (
                               <div className="text-[10px] font-bold text-purple-700 dark:text-purple-400 mt-1 flex items-center gap-1 bg-purple-50 dark:bg-purple-900/20 p-1.5 rounded w-max border border-purple-100 dark:border-purple-800/50">
                                  Retira: {p.retiroNombre} - {p.retiroCedula}
@@ -999,6 +1077,12 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                                <div className="text-[11px] font-semibold text-slate-400 mt-0.5">Tasa: Bs. {p.tasaAplicada || '-'}</div>
                                
                                {p.costoEnvio > 0 && <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-1 uppercase">Incluye Despacho: ${p.costoEnvio}</div>}
+
+                               {p.montoCreditoRegaloUsd > 0 && (
+                                 <div className="text-[10px] font-bold text-sky-600 dark:text-sky-400 mt-1 bg-sky-50 dark:bg-sky-900/30 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-800/50 w-max">
+                                    Crédito / Regalo: -${p.montoCreditoRegaloUsd}
+                                 </div>
+                               )}
 
                                {(p.descuentoPorcentaje > 0 || p.descuentoGlobalAplicado > 0) && (
                                  <div className="flex flex-col gap-1 mt-2 w-max">
@@ -1133,12 +1217,26 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
        globalDiscountPercent={globalDiscountPercent}
        isGlobalDiscountActive={isGlobalDiscountActive}
        onConfirm={(txt, obj)=>{
-         setFormData(prev => ({
-           ...prev,
-           productos: prev.productos ? `${prev.productos}\n${txt}` : txt,
-           carritoObj: { ...(prev.carritoObj || {}), ...obj },
-           moneda: prev.moneda === 'ZELLE' ? 'ZELLE' : 'USD'
-         }));
+         setFormData(prev => {
+           let nuevoCarritoObj = { ...(prev.carritoObj || {}) };
+           let nuevoCarritoObsequios = { ...(prev.carritoObsequiosObj || {}) };
+           let lineaTexto = txt;
+
+           if (modoCatalogo === 'regalo') {
+               nuevoCarritoObsequios = { ...nuevoCarritoObsequios, ...obj };
+               lineaTexto = txt.split('\n').map(line => `${line} (OBSEQUIO)`).join('\n');
+           } else {
+               nuevoCarritoObj = { ...nuevoCarritoObj, ...obj };
+           }
+
+           return {
+             ...prev,
+             productos: prev.productos ? `${prev.productos}\n${lineaTexto}` : lineaTexto,
+             carritoObj: nuevoCarritoObj,
+             carritoObsequiosObj: nuevoCarritoObsequios,
+             moneda: prev.moneda === 'ZELLE' ? 'ZELLE' : 'USD'
+           };
+         });
          setIsCatalogOpen(false);
        }}
      />
