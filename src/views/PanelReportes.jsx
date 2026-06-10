@@ -366,23 +366,33 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           .logo { height: 60px; object-fit: contain; }
           h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; text-transform: uppercase; }
           
-          .kpi-container { display: flex; gap: 15px; margin-bottom: 15px; }
-          .kpi-box { flex: 1; background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; }
-          .kpi-box.main { background: #0f172a; color: white; border: none; }
-          .kpi-box.envios { background: #ea580c; color: white; border: none; }
-          .kpi-box.neto { background: #059669; color: white; border: none; }
-          .kpi-box.zelle { background: #581c87; color: white; border: none; }
-          .kpi-box.tienda { background: #3b82f6; color: white; border: none; }
+          /* Nuevos estilos adaptados al Dashboard UI */
+          .dashboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px; }
+          .grid-col-span-2 { grid-column: span 2; }
+          .card { border-radius: 16px; padding: 18px; box-sizing: border-box; position: relative; overflow: hidden; }
+          .card-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+          .card-border { border: 1px solid #e2e8f0; background: #ffffff; }
           
-          .kpi-box h3 { margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
-          .kpi-box.main h3 { color: #94a3b8; }
-          .kpi-box.envios h3 { color: #fed7aa; }
-          .kpi-box.neto h3 { color: #a7f3d0; }
-          .kpi-box.zelle h3 { color: #d8b4fe; }
-          .kpi-box.tienda h3 { color: #bfdbfe; }
+          .bg-dark { background: #0f172a; color: white; border-bottom: 4px solid #020617; }
+          .bg-orange { background: #ea580c; color: white; border-bottom: 4px solid #9a3412; }
+          .bg-emerald { background: #059669; color: white; border-bottom: 4px solid #065f46; }
           
-          .kpi-box p { margin: 0; font-size: 20px; font-weight: 900; }
-          .kpi-box.main p, .kpi-box.neto p { font-size: 26px; }
+          .bg-light-green { background: #ecfdf5; color: #064e3b; border-bottom: 4px solid #6ee7b7; }
+          .bg-light-cyan { background: #f0fdfa; color: #134e4a; border-bottom: 4px solid #5eead4; }
+          .bg-light-indigo { background: #eef2ff; color: #312e81; border-bottom: 4px solid #a5b4fc; }
+          
+          .bg-purple { background: #6b21a8; color: white; border-bottom: 4px solid #3b0764; }
+          .bg-light-slate { background: #f8fafc; color: #0f172a; border-bottom: 4px solid #cbd5e1; }
+          
+          .kpi-title { font-size: 10px; text-transform: uppercase; font-weight: 900; letter-spacing: 0.5px; margin-bottom: 6px; }
+          .kpi-value { font-size: 26px; font-weight: 900; margin: 0; }
+          .kpi-sub { font-size: 10px; font-weight: 700; margin-top: 8px; opacity: 0.8; line-height: 1.4; }
+          
+          .flex-row { display: flex; align-items: center; gap: 12px; }
+          .icon-box { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+          .icon-orange { background: #ffedd5; color: #ea580c; }
+          .icon-blue { background: #e0f2fe; color: #0284c7; }
+          .icon-indigo { background: #e0e7ff; color: #4f46e5; }
           
           h2 { font-size: 14px; font-weight: 900; border-left: 4px solid #0ea5e9; padding-left: 8px; margin-top: 40px; color: #0f172a; text-transform: uppercase; }
           table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
@@ -409,53 +419,78 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
         </div>
 
-        <div class="kpi-container">
-           <div class="kpi-box main">
-              <h3>Ingreso Bruto Total ($)</h3>
-              <p>$${metricas.totalBrutoGeneralUsd.toFixed(2)}</p>
+        <div class="dashboard-grid">
+           <div class="card bg-dark card-shadow">
+              <div class="kpi-title" style="color: #94a3b8;">Total General Bruto ($)</div>
+              <div class="kpi-value">$${metricas.totalBrutoGeneralUsd.toFixed(2)}</div>
            </div>
-           <div class="kpi-box envios">
-              <h3>Total Envíos/Delivery ($)</h3>
-              <p>$${metricas.totalCobroEnviosUsd.toFixed(2)}</p>
+           <div class="card bg-orange card-shadow">
+              <div class="kpi-title" style="color: #fed7aa;">Recaudado por Envíos/Delivery ($)</div>
+              <div class="kpi-value">$${metricas.totalCobroEnviosUsd.toFixed(2)}</div>
            </div>
-           <div class="kpi-box neto">
-              <h3>Ventas Netas de Prod. ($)</h3>
-              <p>$${metricas.totalNetoProductosUsd.toFixed(2)}</p>
-           </div>
-        </div>
-
-        <h2 style="margin-top:20px; margin-bottom:10px;">Cuadre de Cajas (Tienda / Delivery)</h2>
-        <div class="kpi-container">
-           <div class="kpi-box tienda" style="background:#047857;">
-              <h3 style="color:#d1fae5;">Gaveta Dólares Físicos</h3>
-              <p>$${cajaFisicaUsd.toFixed(2)}</p>
-              <div style="font-size:9px; margin-top:4px; color:#a7f3d0;">Entró: $${metricas.totalEfectivoTienda.toFixed(2)} | Vueltos: $${metricas.totalVueltosDados.toFixed(2)}</div>
-           </div>
-           <div class="kpi-box tienda" style="background:#0f766e;">
-              <h3 style="color:#ccfbf1;">Gaveta Bolívares Físicos</h3>
-              <p>Bs ${cajaFisicaBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
-              <div style="font-size:9px; margin-top:4px; color:#99f6e4;">No se restan vueltos (Son digitales)</div>
-           </div>
-           <div class="kpi-box tienda" style="background:#4338ca;">
-              <h3 style="color:#e0e7ff;">Total Puntos y TDC</h3>
-              <p>Bs ${totalPuntosTDC.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
-              <div style="font-size:9px; margin-top:4px; color:#c7d2fe;">Punto: Bs ${metricas.totalPuntoTiendaBs.toLocaleString('es-VE')} | TDC (+15%): Bs ${metricas.totalTarjetaCreditoBs.toLocaleString('es-VE')}</div>
+           <div class="card bg-emerald card-shadow">
+              <div class="kpi-title" style="color: #a7f3d0;">Ventas Netas (Solo Productos) ($)</div>
+              <div class="kpi-value">$${metricas.totalNetoProductosUsd.toFixed(2)}</div>
            </div>
         </div>
 
-        <div class="kpi-container">
-           <div class="kpi-box">
-              <h3>Transf. / Pago Móvil (Neto)</h3>
-              <p>Bs ${totalTransfPagoMovilNetoBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</p>
-              <div style="font-size:9px; margin-top:4px; color:#64748b;">Ingresó: Bs ${metricas.ventasVES.toLocaleString('es-VE')} | Vueltos Pagados: Bs ${metricas.totalVueltosBs.toLocaleString('es-VE')}</div>
+        <div class="dashboard-grid">
+           <div class="card card-border flex-row">
+              <div class="icon-box icon-orange">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11"/><path d="M14 9h4l4 4v5c0 .6-.4 1-1 1h-2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+              </div>
+              <div>
+                 <div class="kpi-title" style="color: #64748b; margin-bottom: 2px;">Ventas en Envíos</div>
+                 <div class="kpi-value" style="font-size: 20px; color: #0f172a;">$${metricas.ventasEnviosUsd.toFixed(2)}</div>
+              </div>
            </div>
-           <div class="kpi-box zelle">
-              <h3>Ventas ZELLE ($)</h3>
-              <p>$${metricas.ventasZelle.toFixed(2)}</p>
+           <div class="card card-border flex-row">
+              <div class="icon-box icon-blue">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+              </div>
+              <div>
+                 <div class="kpi-title" style="color: #64748b; margin-bottom: 2px;">Ventas Delivery</div>
+                 <div class="kpi-value" style="font-size: 20px; color: #0f172a;">$${metricas.ventasDeliveryUsd.toFixed(2)}</div>
+              </div>
            </div>
-           <div class="kpi-box" style="border-color: #c084fc; background: #faf5ff;">
-              <h3 style="color: #9333ea;">Acum. General Mes ($)</h3>
-              <p style="color: #7e22ce;">$${ventasMesUsdPDF.toFixed(2)}</p>
+           <div class="card card-border flex-row">
+              <div class="icon-box icon-indigo">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2v0a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12v0a2 2 0 0 1-2-2V7"/></svg>
+              </div>
+              <div>
+                 <div class="kpi-title" style="color: #64748b; margin-bottom: 2px;">Ventas Entrega en Tienda</div>
+                 <div class="kpi-value" style="font-size: 20px; color: #0f172a;">$${metricas.ventasTiendaUsd.toFixed(2)}</div>
+              </div>
+           </div>
+        </div>
+
+        <div class="dashboard-grid">
+           <div class="card bg-light-green card-shadow">
+              <div class="kpi-title" style="color: #065f46;">Caja Física Dólares ($)</div>
+              <div class="kpi-value">$${cajaFisicaUsd.toFixed(2)}</div>
+              <div class="kpi-sub">Entró: $${metricas.totalEfectivoTienda.toFixed(2)}<br/>Salió (Vueltos): $${metricas.totalVueltosDados.toFixed(2)}</div>
+           </div>
+           <div class="card bg-light-cyan card-shadow">
+              <div class="kpi-title" style="color: #115e59;">Caja Física Bolívares (Bs)</div>
+              <div class="kpi-value">Bs. ${cajaFisicaBs.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
+              <div class="kpi-sub">Todo en gaveta (Los vueltos se dan digital)</div>
+           </div>
+           <div class="card bg-light-indigo card-shadow">
+              <div class="kpi-title" style="color: #3730a3;">Punto de Venta y TDC (Bs)</div>
+              <div class="kpi-value">Bs. ${totalPuntosTDC.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
+              <div class="kpi-sub">Punto normal: Bs. ${metricas.totalPuntoTiendaBs.toLocaleString('es-VE')}<br/>Tarjeta (+15%): Bs. ${metricas.totalTarjetaCreditoBs.toLocaleString('es-VE')}</div>
+           </div>
+        </div>
+
+        <div class="dashboard-grid">
+           <div class="card bg-purple card-shadow">
+              <div class="kpi-title" style="color: #e9d5ff;">Pagos ZELLE ($)</div>
+              <div class="kpi-value">$${metricas.ventasZelle.toFixed(2)}</div>
+           </div>
+           <div class="card bg-light-slate card-shadow grid-col-span-2">
+              <div class="kpi-title" style="color: #475569;">Transferencias y Pago Móvil Netos (Bs)</div>
+              <div class="kpi-value">Bs. ${(metricas.ventasVES - metricas.totalVueltosBs).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
+              <div class="kpi-sub" style="color: #64748b;">Bruto ingresado: Bs. ${metricas.ventasVES.toLocaleString('es-VE')}<br/>Salió en Vueltos (Pago Móvil): Bs. ${metricas.totalVueltosBs.toLocaleString('es-VE')}</div>
            </div>
         </div>
 
