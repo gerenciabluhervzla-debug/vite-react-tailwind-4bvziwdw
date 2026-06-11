@@ -47,6 +47,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
  const [fechaHistorial, setFechaHistorial] = useState(getLocalToday());
  const [filtroStatus, setFiltroStatus] = useState('Todos');
  const [filtroTipoDespacho, setFiltroTipoDespacho] = useState('Todos');
+ // NUEVO: Estado para el filtro de asesora
+ const [filtroAsesora, setFiltroAsesora] = useState('Todas');
 
  const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
  const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
@@ -62,6 +64,12 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
     hoyTimestamp <= new Date(config.descuentoGlobalFin + 'T23:59:59').getTime();
 
  const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
+
+ // NUEVO: Extraer asesoras únicas dinámicamente para el filtro
+ const asesorasUnicas = useMemo(() => {
+    const names = pedidos.filter(p => p.asesora).map(p => p.asesora.trim());
+    return ['Todas', ...Array.from(new Set(names))].sort();
+ }, [pedidos]);
 
  const numeracionDiaria = useMemo(() => {
    const map = {};
@@ -86,7 +94,11 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    
    if (busquedaCliente.trim()) {
      const b = busquedaCliente.toLowerCase();
-     lista = lista.filter(p => p.clienteNombre?.toLowerCase().includes(b));
+     // OPTIMIZACIÓN: Permite buscar también por teléfono si el cliente no está guardado por nombre
+     lista = lista.filter(p => 
+       p.clienteNombre?.toLowerCase().includes(b) || 
+       p.clienteTelefono?.includes(b)
+     );
    }
    
    if (fechaHistorial) {
@@ -107,9 +119,14 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      lista = lista.filter(p => (p.tipoDespacho || 'Nacional') === filtroTipoDespacho);
    }
 
+   // NUEVO: Filtro por Asesora
+   if (filtroAsesora !== 'Todas') {
+     lista = lista.filter(p => p.asesora === filtroAsesora);
+   }
+
    lista.sort((a, b) => b.fechaCreacion - a.fechaCreacion); // Más recientes primero para mejor UX
    return lista;
- }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus, filtroTipoDespacho]);
+ }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus, filtroTipoDespacho, filtroAsesora]);
 
  // LÓGICA DE CÁLCULO ACTUALIZADA PARA OBSEQUIOS Y CRÉDITO
  useEffect(() => {
@@ -383,6 +400,9 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    let itemsFaltantes = [];
    let extraConcentrados = 0;
    
+   const tipoInventario = formData.tipoDespacho === 'Nacional' ? 'envios' : 'recepcion';
+   const nombreAlmacen = formData.tipoDespacho === 'Nacional' ? 'Envíos' : 'Recepción';
+
    // Verificar stock sumando tanto ventas como obsequios
    const carritoTotal = { ...(formData.carritoObj || {}) };
    if (formData.carritoObsequiosObj) {
@@ -392,7 +412,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    }
 
    Object.entries(carritoTotal).forEach(([key, qty]) => {
-     let maxDisp = typeof stock[key] === 'object' ? stock[key].envios : (stock[key]||0);
+     let maxDisp = typeof stock[key] === 'object' ? (stock[key][tipoInventario] || 0) : (stock[key]||0);
      if (qty > maxDisp) {
        sinStock = true;
        itemsFaltantes.push(key.replace('|', ' '));
@@ -405,8 +425,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    if (extraConcentrados > 0) {
       const qtyConcentradosActual = carritoTotal["Concentrado|Unidad"] || 0;
       const totalConcentradosNecesarios = qtyConcentradosActual + extraConcentrados;
-      const dispConcentrado = typeof stock["Concentrado|Unidad"] === 'object' ? stock["Concentrado|Unidad"].envios : (stock["Concentrado|Unidad"]||0);
-     
+      const dispConcentrado = typeof stock["Concentrado|Unidad"] === 'object' ? (stock["Concentrado|Unidad"][tipoInventario] || 0) : (stock["Concentrado|Unidad"]||0);
+      
       if (totalConcentradosNecesarios > dispConcentrado) {
          sinStock = true;
          if (!itemsFaltantes.some(i => i.includes("Concentrado"))) {
@@ -414,10 +434,17 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
          }
       }
    }
+
    if (sinStock) {
-     dialogs.confirm(`Falta stock en almacén de envíos para:\n\n${itemsFaltantes.join('\n')}\n\n¿Guardar en la "Lista de Espera" para procesar luego?`, () => {
+     const confirmarFuerza = window.confirm(
+       `Falta stock en el almacén de ${nombreAlmacen} para:\n\n${itemsFaltantes.join('\n')}\n\n¿Deseas montar el pedido de todas formas (se enviará en NEGATIVO para validación)?\n\n• Pulsa ACEPTAR para enviarlo a Validación.\n• Pulsa CANCELAR para guardarlo en la Lista de Espera.`
+     );
+     
+     if (confirmarFuerza) {
+       procesarVenta('Pendiente');
+     } else {
        procesarVenta('En Espera (Sin Stock)');
-     }, "Stock Insuficiente");
+     }
      return;
    }
    procesarVenta('Pendiente');
@@ -870,7 +897,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
               <input
                 type="text"
-                placeholder="Buscar por cliente..."
+                placeholder="Buscar por cliente o teléfono..."
                 className="w-full pl-10 pr-4 py-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm font-bold outline-none focus:border-sky-500 transition-colors"
                 value={busquedaCliente}
                 onChange={(e) => setBusquedaCliente(e.target.value)}
@@ -889,6 +916,17 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                    <option value="Nacional">Nacional</option>
                    <option value="Delivery">Delivery</option>
                    <option value="Tienda">Tienda</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col w-full sm:w-auto flex-1 sm:flex-none">
+                <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1">Asesora</label>
+                <select
+                  value={filtroAsesora}
+                  onChange={e=>setFiltroAsesora(e.target.value)}
+                  className="w-full sm:w-32 p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors"
+                >
+                   {asesorasUnicas.map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
               </div>
 
@@ -959,8 +997,11 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                               {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-yellow-300">ML</span>}
                            </div>
 
-                           <div className={`text-sm font-semibold text-slate-600 dark:text-slate-300 mt-1 ${isAnulado ? 'line-through text-slate-400' : ''}`}>
+                           <div className={`text-sm font-semibold text-slate-600 dark:text-slate-300 mt-1 flex items-center flex-wrap gap-2 ${isAnulado ? 'line-through text-slate-400' : ''}`}>
                               📱 {p.clienteTelefono}
+                              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 flex items-center gap-1">
+                                 👤 Asesora: {p.asesora || 'N/A'}
+                              </span>
                            </div>
                            <div className={`text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-tight pr-4 ${isAnulado ? 'line-through text-slate-400 opacity-60' : ''}`}>
                               📍 {p.direccion}
@@ -1181,7 +1222,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                     <div className="font-black text-lg uppercase tracking-tight">{p.clienteNombre} <span className="text-xs font-normal text-slate-500">({p.clienteTelefono})</span></div>
                     <div className="text-xs font-semibold text-emerald-600 mt-1">Total Cotizado: ${p.montoUsd}</div>
                     <div className="text-xs text-slate-500 mt-2 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg whitespace-pre-wrap">{p.productos}</div>
-                   
+                    
                     {p.notaVentas && (
                       <div className="mt-3 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 p-3 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50 flex items-start gap-2 shadow-sm w-full">
                         <MessageSquare size={16} className="shrink-0 mt-0.5" />
