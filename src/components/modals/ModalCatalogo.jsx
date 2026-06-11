@@ -7,7 +7,7 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
   
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
-  const [previewImage, setPreviewImage] = useState(null); // NUEVO ESTADO PARA EL VISOR DE IMÁGENES
+  const [previewImage, setPreviewImage] = useState(null);
 
   // FUNCIÓN MAESTRA
   const getDirectUrl = (url) => {
@@ -26,36 +26,17 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
     return url;
   };
 
+  // Se eliminó la validación restrictiva de stock. Ahora permite agregar libremente.
   const updateQty = (key, delta) => { 
     setCarrito(prev => { 
       const actual = prev[key] || 0;
       const nuevo = Math.max(0, actual + delta); 
 
-      if (delta > 0) {
-         const maxDisp = stock && stock[key] ? (typeof stock[key] === 'object' ? stock[key].envios : stock[key]) : 0;
-         if (nuevo > maxDisp) {
-            if(dialogs) dialogs.alert(`Solo tenemos ${maxDisp} unidades disponibles de este producto.`, "Stock Límite");
-            return prev;
-         }
-
-         const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
-         const isBooster = boosterKeys.includes(key);
-         const isConcentrado = key === "Concentrado|Unidad";
-
-         if (isBooster || isConcentrado) {
-            let currentNeeded = prev["Concentrado|Unidad"] || 0;
-            boosterKeys.forEach(bk => { currentNeeded += (prev[bk] || 0); });
-            
-            const dispConcentrado = stock && stock["Concentrado|Unidad"] ? (typeof stock["Concentrado|Unidad"] === 'object' ? stock["Concentrado|Unidad"].envios : stock["Concentrado|Unidad"]) : 0;
-            
-            if (currentNeeded + delta > dispConcentrado) {
-              if(dialogs) dialogs.alert(`No puedes agregar más. Solo quedan ${dispConcentrado} Concentrados en stock (se requiere 1 Concentrado por cada Booster añadido).`, "Stock de Concentrado Límite");
-              return prev;
-            }
-         }
-      }
-
-      if(nuevo === 0){const c={...prev}; delete c[key]; return c;} 
+      if(nuevo === 0){
+        const c={...prev}; 
+        delete c[key]; 
+        return c;
+      } 
       return {...prev, [key]:nuevo}; 
     }); 
   };
@@ -235,7 +216,7 @@ export default function ModalCatalogo({ catalogo, stock, isOpen, onClose, onConf
         </div>
       </div>
 
-      {/* NUEVO: MODAL PARA AMPLIAR LA IMAGEN */}
+      {/* MODAL PARA AMPLIAR LA IMAGEN */}
       {previewImage && (
         <div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in" onClick={() => setPreviewImage(null)}>
            <button className="absolute top-6 right-6 text-white bg-white/10 hover:bg-red-500 rounded-full p-2 transition-colors"><X size={24}/></button>
