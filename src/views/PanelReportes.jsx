@@ -161,7 +161,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       }
     });
 
-    totalBrutoGeneralUsd -= totalVueltosDados;
     const totalNetoProductosUsd = totalBrutoGeneralUsd - totalCobroEnviosUsd;
 
     return { 
@@ -661,7 +660,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                <div className="relative z-10">
                  <div className="text-[10px] uppercase font-black tracking-widest text-slate-400 mb-1">Total General Bruto ($)</div>
                  <div className="text-3xl lg:text-4xl font-black">${metricas.totalBrutoGeneralUsd.toFixed(2)}</div>
-                 {metricas.totalVueltosDados > 0 && <div className="text-xs text-red-400 font-bold mt-1">Ya se restaron ${metricas.totalVueltosDados.toFixed(2)} en vueltos USD.</div>}
                </div>
                <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
             </div>
