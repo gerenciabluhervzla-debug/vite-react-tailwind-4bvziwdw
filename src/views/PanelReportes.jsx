@@ -351,7 +351,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     // CÁLCULOS NETOS PARA CAJA FÍSICA PDF
     const cajaFisicaUsd = metricas.totalEfectivoTienda - metricas.totalVueltosDados;
     const cajaFisicaBs = metricas.totalEfectivoBs; 
-    const totalTransfPagoMovilNetoBs = metricas.ventasVES - metricas.totalVueltosBs;
+    const totalTransfPagoMovilNetoBs = metricas.ventasVES;
     const totalPuntosTDC = metricas.totalPuntoTiendaBs + metricas.totalTarjetaCreditoBs;
 
     let html = `
@@ -489,7 +489,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            </div>
            <div class="card bg-light-slate card-shadow grid-col-span-2">
               <div class="kpi-title" style="color: #475569;">Transferencias y Pago Móvil Netos (Bs)</div>
-              <div class="kpi-value">Bs. ${(metricas.ventasVES - metricas.totalVueltosBs).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
+              <div class="kpi-value">Bs. ${metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
               <div class="kpi-sub" style="color: #64748b;">Bruto ingresado: Bs. ${metricas.ventasVES.toLocaleString('es-VE')}<br/>Salió en Vueltos (Pago Móvil): Bs. ${metricas.totalVueltosBs.toLocaleString('es-VE')}</div>
            </div>
         </div>
@@ -765,8 +765,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                
                <div className="bg-slate-100 text-slate-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-slate-300 relative overflow-hidden md:col-span-2">
                   <div className="relative z-10">
-                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Transferencias y Pago Móvil Netos (Bs)</div>
-                    <div className="text-xl lg:text-2xl font-black">Bs. {(metricas.ventasVES - metricas.totalVueltosBs).toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Ingresos en Bs Netos</div>
+                    <div className="text-xl lg:text-2xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                     <div className="text-[11px] font-bold mt-2 text-slate-500">
                         Bruto ingresado: Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2})} <br/>
                         Salió en Vueltos (Pago Móvil): Bs. {metricas.totalVueltosBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}

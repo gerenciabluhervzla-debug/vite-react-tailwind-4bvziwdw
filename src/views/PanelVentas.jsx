@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, FileType, Ban, MessageSquare, Truck, Store as StoreIcon, Bike } from 'lucide-react';
+import { ShoppingCart, ClipboardList, Clock, Store, Link, AlertTriangle, Sparkles, Loader2, Gift, Package, Search, CheckCircle, FileText, XCircle, MessageCircle, ShieldCheck, Percent, FileType, Ban, MessageSquare, Truck, StoreIcon, Bike } from 'lucide-react';
 import { Input, InputDark, StatusBadge } from '../components/ui';
 import ModalCatalogo from '../components/modals/ModalCatalogo';
 import { updateDoc, doc, addDoc, collection } from 'firebase/firestore';
@@ -27,14 +27,13 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false,
    descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '', numeroControlML: '', notaVentas: '',
    
-   // NUEVOS CAMPOS DE OBSEQUIOS Y CRÉDITO
    carritoObsequiosObj: null,
    montoObsequios: '0',
    montoCreditoRegalo: ''
  };
 
  const [formData, setFormData] = useState(defaultForm);
- const [modoCatalogo, setModoCatalogo] = useState('venta'); // Controla si añadimos al carrito de venta o de obsequio
+ const [modoCatalogo, setModoCatalogo] = useState('venta'); 
  const [editId, setEditId] = useState(null);
  const [pedidoDevuelto, setPedidoDevuelto] = useState(null);
  const [enviando, setEnviando] = useState(false);
@@ -47,8 +46,10 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
  const [fechaHistorial, setFechaHistorial] = useState(getLocalToday());
  const [filtroStatus, setFiltroStatus] = useState('Todos');
  const [filtroTipoDespacho, setFiltroTipoDespacho] = useState('Todos');
- // NUEVO: Estado para el filtro de asesora
  const [filtroAsesora, setFiltroAsesora] = useState('Todas');
+
+ // NUEVO: Estado para mostrar sugerencias de clientes
+ const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
 
  const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
  const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
@@ -65,7 +66,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
  const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
 
- // NUEVO: Extraer asesoras únicas dinámicamente para el filtro
+ // NUEVO: Extraer clientes únicos para el autocompletado
+ const clientesUnicos = useMemo(() => {
+    const map = new Map();
+    pedidos.forEach(p => {
+       if (p.clienteNombre && !map.has(p.clienteNombre.toLowerCase())) {
+          map.set(p.clienteNombre.toLowerCase(), {
+             nombre: p.clienteNombre,
+             cedula: p.clienteCedula || '',
+             telefono: p.clienteTelefono || ''
+          });
+       }
+    });
+    return Array.from(map.values());
+ }, [pedidos]);
+
  const asesorasUnicas = useMemo(() => {
     const names = pedidos.filter(p => p.asesora).map(p => p.asesora.trim());
     return ['Todas', ...Array.from(new Set(names))].sort();
@@ -94,7 +109,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    
    if (busquedaCliente.trim()) {
      const b = busquedaCliente.toLowerCase();
-     // OPTIMIZACIÓN: Permite buscar también por teléfono si el cliente no está guardado por nombre
      lista = lista.filter(p => 
        p.clienteNombre?.toLowerCase().includes(b) || 
        p.clienteTelefono?.includes(b)
@@ -119,16 +133,14 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      lista = lista.filter(p => (p.tipoDespacho || 'Nacional') === filtroTipoDespacho);
    }
 
-   // NUEVO: Filtro por Asesora
    if (filtroAsesora !== 'Todas') {
      lista = lista.filter(p => p.asesora === filtroAsesora);
    }
 
-   lista.sort((a, b) => b.fechaCreacion - a.fechaCreacion); // Más recientes primero para mejor UX
+   lista.sort((a, b) => b.fechaCreacion - a.fechaCreacion); 
    return lista;
  }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus, filtroTipoDespacho, filtroAsesora]);
 
- // LÓGICA DE CÁLCULO ACTUALIZADA PARA OBSEQUIOS Y CRÉDITO
  useEffect(() => {
    let subVentas = 0;
    if (formData.carritoObj) {
@@ -159,9 +171,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    const credito = parseFloat(formData.montoCreditoRegalo) || 0;
    
    let finalPagar = subTotalAntesDeCredito - credito;
-   if (finalPagar < 0) finalPagar = 0; // Evitar saldos negativos si el crédito es mayor a la deuda
+   if (finalPagar < 0) finalPagar = 0; 
 
-   // El gasto de la empresa incluye el valor de los productos obsequiados + el crédito regalado
    let totalReporteObsequios = subObsequios + credito;
   
    setFormData(prev => ({
@@ -263,7 +274,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    } catch(e) { console.error(e); dialogs.alert("Error comunicando con la IA. Ingresa manual.", "Error"); } finally { setAnalizando(false); }
  };
 
- // FUNCIÓN DE CARRITO ACTUALIZADA
  const eliminarDelCarrito = (itemKey, esObsequio = false) => {
    setFormData(prev => {
      const targetObj = esObsequio ? { ...(prev.carritoObsequiosObj || {}) } : { ...(prev.carritoObj || {}) };
@@ -301,8 +311,8 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier || '', pagoEnvio: pedido.pagoEnvio || 'COD', origenPedido: pedido.origenPedido || '', direccion: pedido.direccion,
      productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), 
      carritoObj: pedido.carritoObj, 
-     carritoObsequiosObj: pedido.carritoObsequiosObj || null, // Cargar obsequios
-     montoCreditoRegalo: pedido.montoCreditoRegaloUsd?.toString() || '', // Cargar crédito
+     carritoObsequiosObj: pedido.carritoObsequiosObj || null,
+     montoCreditoRegalo: pedido.montoCreditoRegaloUsd?.toString() || '',
      asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD',
      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: '',
      numeroControlML: pedido.numeroControlML || '', notaVentas: pedido.notaVentas || '' 
@@ -371,11 +381,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    }
  };
 
+ // NUEVO: Función para rellenar datos al seleccionar un cliente sugerido
+ const handleSeleccionarCliente = (cliente) => {
+    setFormData(prev => ({
+        ...prev,
+        clienteNombre: cliente.nombre,
+        clienteCedula: cliente.cedula,
+        clienteTelefono: cliente.telefono
+    }));
+    setMostrarSugerencias(false);
+ };
+
  const handleSubmit = async (e) => {
    e.preventDefault();
    if (!tasaActualizadaHoy && !editId) return dialogs.alert("NO puedes registrar ventas nuevas porque la Tasa del Día no ha sido actualizada hoy por Administración.", "Tasa Desactualizada");
    
-   // Validar que al menos haya un producto pagado o regalado
    const hayVentas = formData.carritoObj && Object.keys(formData.carritoObj).length > 0;
    const hayObsequios = formData.carritoObsequiosObj && Object.keys(formData.carritoObsequiosObj).length > 0;
    
@@ -403,7 +423,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    const tipoInventario = formData.tipoDespacho === 'Nacional' ? 'envios' : 'recepcion';
    const nombreAlmacen = formData.tipoDespacho === 'Nacional' ? 'Envíos' : 'Recepción';
 
-   // Verificar stock sumando tanto ventas como obsequios
    const carritoTotal = { ...(formData.carritoObj || {}) };
    if (formData.carritoObsequiosObj) {
       Object.entries(formData.carritoObsequiosObj).forEach(([key, qty]) => {
@@ -480,7 +499,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
    let finalCarritoObsequios = { ...formData.carritoObsequiosObj };
    let finalProductosText = formData.productos || '';
    
-   // Calcular boosters globales
    let countBoosters = 0;
    const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
    
@@ -678,22 +696,37 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
            </div>
          )}
          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Input label="Nombre de Asesora" name="asesora" value={formData.asesora} onChange={(e)=>setFormData({...formData, asesora: e.target.value})} required />
+            
+            {/* NUEVO: Lógica de la asesora con trim y mayúscula inicial */}
+            <Input 
+              label="Nombre de Asesora" 
+              name="asesora" 
+              value={formData.asesora} 
+              onChange={(e) => {
+                 let val = e.target.value.replace(/\s/g, ''); 
+                 if (val.length > 0) {
+                    val = val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
+                 }
+                 setFormData({...formData, asesora: val});
+              }} 
+              required 
+            />
            
             <div className="flex flex-col">
               <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Origen del Pedido</label>
               <select name="origenPedido" value={formData.origenPedido} onChange={(e)=>setFormData({...formData, origenPedido: e.target.value})} required className="p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm">
                 <option value="" disabled>Seleccionar origen...</option>
-                <option value="CADENITA DIA MADRE">CADENITA DIA MADRE</option>
-                <option value="CADENITA 15% DESCUENTO">CADENITA 15% DESCUENTO</option>
-                <option value="CADENITA 30% DESCUENTO">CADENITA 30% DESCUENTO</option>
+                <option value="CLIENTE NUEVO">CLIENTE NUEVO</option>
+                <option value="CADENITA DIA MADRE">PROMOCIONES</option>
+                <option value="CADENITA 15% DESCUENTO">15% DESCUENTO</option>
+                <option value="CADENITA 30% DESCUENTO">30% DESCUENTO</option>
                 <option value="PAUTA">PAUTA</option>
                 <option value="PAGINA WEB">PAGINA WEB</option>
                 <option value="RECOMPRA">RECOMPRA</option>
+                <option value="GARANTIA">GARANTIA</option>
               </select>
             </div>
 
-            {/* SECCIÓN DE TIPO DE DESPACHO */}
             <div className="flex flex-col md:col-span-2 mt-2 pt-4 border-t border-slate-100 dark:border-slate-700">
                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-2 ml-2 transition-colors">Tipo de Despacho</label>
                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -707,7 +740,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                </div>
             </div>
 
-            {/* CAMPOS CONDICIONALES SEGÚN DESPACHO */}
             {formData.tipoDespacho === 'Nacional' && (
               <>
                 <div className="flex flex-col">
@@ -743,7 +775,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
               </div>
             )}
 
-            {/* Campo Costo Envío si aplica */}
             {((formData.tipoDespacho === 'Nacional' && formData.pagoEnvio === 'PAGADO') || formData.tipoDespacho === 'Delivery') && (
               <div className="md:col-span-2 bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-xl border border-emerald-200 dark:border-emerald-800">
                  <Input label="Costo del Despacho / Delivery ($)" type="number" step="0.01" value={formData.costoEnvio} onChange={e=>setFormData({...formData, costoEnvio: e.target.value})} placeholder="Ej: 5.00" />
@@ -751,7 +782,33 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
               </div>
             )}
 
-            <Input label="Nombre del Cliente" name="clienteNombre" value={formData.clienteNombre} onChange={(e)=>setFormData({...formData, clienteNombre: e.target.value})} required />
+            {/* NUEVO: Menú Autocompletado de Clientes */}
+            <div className="flex flex-col relative md:col-span-1">
+               <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Nombre del Cliente</label>
+               <input 
+                 type="text" 
+                 value={formData.clienteNombre} 
+                 onChange={(e) => {
+                    setFormData({...formData, clienteNombre: e.target.value});
+                    setMostrarSugerencias(true);
+                 }} 
+                 onFocus={() => setMostrarSugerencias(true)}
+                 onBlur={() => setTimeout(() => setMostrarSugerencias(false), 200)}
+                 className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm"
+                 required 
+               />
+               {mostrarSugerencias && formData.clienteNombre && (
+                 <div className="absolute z-10 top-[76px] left-0 w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-48 overflow-y-auto">
+                    {clientesUnicos.filter(c => c.nombre.toLowerCase().includes(formData.clienteNombre.toLowerCase())).slice(0, 5).map(c => (
+                       <div key={c.nombre} onClick={() => handleSeleccionarCliente(c)} className="p-3 hover:bg-sky-50 dark:hover:bg-sky-900/30 cursor-pointer border-b border-slate-100 dark:border-slate-700 last:border-0 transition-colors">
+                          <div className="font-bold text-sm text-slate-800 dark:text-slate-200">{c.nombre}</div>
+                          <div className="text-xs text-slate-500">{c.cedula} • {c.telefono}</div>
+                       </div>
+                    ))}
+                 </div>
+               )}
+            </div>
+
             <Input label="Cédula/RIF" name="clienteCedula" value={formData.clienteCedula} onChange={(e)=>setFormData({...formData, clienteCedula: e.target.value})} required />
            
             <div className="md:col-span-2">
@@ -809,7 +866,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
               <textarea name="notaVentas" value={formData.notaVentas} onChange={(e)=>setFormData({...formData, notaVentas: e.target.value})} rows={2} placeholder="Observación adicional para administración o despacho..." className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 transition-all font-bold text-slate-700 dark:text-slate-200 shadow-sm"></textarea>
             </div>
            
-            {/* CARRITO PARALELO */}
             <div className="md:col-span-2 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl border-2 border-slate-100 dark:border-slate-700">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
                  <label className="font-black text-slate-800 dark:text-white flex items-center gap-2 uppercase tracking-tighter text-sm"><Package className="text-sky-600"/> Carrito de la Orden</label>
@@ -891,27 +947,27 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      {vista === 'historial' && (
        <div className="animate-in fade-in space-y-6">
         
-         {/* BARRA DE BÚSQUEDA Y FILTROS */}
-         <div className="bg-slate-50 dark:bg-slate-900/50 p-4 lg:p-6 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col md:flex-row gap-4 items-center justify-between">
-           <div className="relative w-full md:w-1/4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-              <input
-                type="text"
-                placeholder="Buscar por cliente o teléfono..."
-                className="w-full pl-10 pr-4 py-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-sm font-bold outline-none focus:border-sky-500 transition-colors"
-                value={busquedaCliente}
-                onChange={(e) => setBusquedaCliente(e.target.value)}
-              />
+         {/* NUEVO REDISEÑO: BARRA DE BÚSQUEDA Y FILTROS SEGÚN IMAGEN */}
+         <div className="bg-slate-50 dark:bg-slate-900/40 p-5 lg:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 flex flex-col xl:flex-row gap-6 items-center justify-between shadow-sm">
+           
+           <div className="w-full xl:w-1/3">
+             <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20}/>
+                <input
+                  type="text"
+                  placeholder="Buscar por cliente..."
+                  className="w-full pl-12 pr-4 py-3.5 border-2 border-slate-200 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-800 text-sm font-bold outline-none focus:border-sky-500 transition-all shadow-sm text-slate-700 dark:text-slate-200"
+                  value={busquedaCliente}
+                  onChange={(e) => setBusquedaCliente(e.target.value)}
+                />
+             </div>
            </div>
-          
-           <div className="flex flex-wrap gap-4 w-full md:w-auto flex-1 md:justify-end">
-              <div className="flex flex-col w-full sm:w-auto flex-1 sm:flex-none">
-                <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1">Tipo Envío</label>
-                <select
-                  value={filtroTipoDespacho}
-                  onChange={e=>setFiltroTipoDespacho(e.target.value)}
-                  className="w-full sm:w-32 p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors"
-                >
+
+           <div className="w-full xl:w-2/3 flex flex-wrap md:flex-nowrap gap-4 justify-end">
+              
+              <div className="flex flex-col flex-1 min-w-[120px]">
+                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-2 mb-1.5 tracking-wider">Tipo Envío</label>
+                <select value={filtroTipoDespacho} onChange={e=>setFiltroTipoDespacho(e.target.value)} className="w-full p-3.5 border-2 border-slate-200 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-all shadow-sm text-slate-700 dark:text-slate-200 cursor-pointer">
                    <option value="Todos">Todos</option>
                    <option value="Nacional">Nacional</option>
                    <option value="Delivery">Delivery</option>
@@ -919,34 +975,21 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                 </select>
               </div>
 
-              <div className="flex flex-col w-full sm:w-auto flex-1 sm:flex-none">
-                <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1">Asesora</label>
-                <select
-                  value={filtroAsesora}
-                  onChange={e=>setFiltroAsesora(e.target.value)}
-                  className="w-full sm:w-32 p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors"
-                >
+              <div className="flex flex-col flex-1 min-w-[120px]">
+                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-2 mb-1.5 tracking-wider">Asesora</label>
+                <select value={filtroAsesora} onChange={e=>setFiltroAsesora(e.target.value)} className="w-full p-3.5 border-2 border-slate-200 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-all shadow-sm text-slate-700 dark:text-slate-200 cursor-pointer">
                    {asesorasUnicas.map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
               </div>
 
-              <div className="flex flex-col w-full sm:w-auto flex-1 sm:flex-none">
-                <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1">Fecha</label>
-                <input
-                  type="date"
-                  value={fechaHistorial}
-                  onChange={e=>setFechaHistorial(e.target.value)}
-                  className="w-full p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors"
-                />
+              <div className="flex flex-col flex-1 min-w-[130px]">
+                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-2 mb-1.5 tracking-wider">Fecha</label>
+                <input type="date" value={fechaHistorial} onChange={e=>setFechaHistorial(e.target.value)} className="w-full p-3.5 border-2 border-slate-200 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-all shadow-sm text-slate-700 dark:text-slate-200 cursor-pointer" />
               </div>
-             
-              <div className="flex flex-col w-full sm:w-auto flex-1 sm:flex-none">
-                <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1">Estatus</label>
-                <select
-                  value={filtroStatus}
-                  onChange={e=>setFiltroStatus(e.target.value)}
-                  className="w-full sm:w-32 p-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-colors"
-                >
+              
+              <div className="flex flex-col flex-1 min-w-[120px]">
+                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-2 mb-1.5 tracking-wider">Estatus</label>
+                <select value={filtroStatus} onChange={e=>setFiltroStatus(e.target.value)} className="w-full p-3.5 border-2 border-slate-200 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-all shadow-sm text-slate-700 dark:text-slate-200 cursor-pointer">
                    <option value="Todos">Todos</option>
                    <option value="Pendiente">Pendientes</option>
                    <option value="Validados">Validados</option>
@@ -954,8 +997,10 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                    <option value="Anulado">Anulados</option>
                 </select>
               </div>
+
            </div>
          </div>
+
          <div className="rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden bg-white dark:bg-slate-800/20">
            <div className="hidden lg:grid lg:grid-cols-12 gap-6 p-4 bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-b dark:border-slate-700 text-sm">
              <div className="lg:col-span-4 font-bold tracking-wide pl-8">Cliente y Fecha</div>
@@ -974,7 +1019,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
                  return (
                    <React.Fragment key={tipo}>
-                     {/* LÍNEA DIVISORIA Y TÍTULO POR TIPO DE DESPACHO */}
                      <div className="bg-slate-100 dark:bg-slate-800/80 px-6 py-3 border-y border-slate-200 dark:border-slate-700 flex items-center gap-2 font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 text-xs">
                        {tipo === 'Nacional' ? <Truck size={16} className="text-sky-600 dark:text-sky-400"/> : tipo === 'Tienda' ? <StoreIcon size={16} className="text-purple-600 dark:text-purple-400"/> : <Bike size={16} className="text-fuchsia-600 dark:text-fuchsia-400"/>}
                        {tipo === 'Nacional' ? 'Envíos Nacionales' : tipo === 'Tienda' ? 'Entregas en Tienda' : 'Deliveries'}
@@ -986,7 +1030,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
                        return (
                        <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${isAnulado ? 'opacity-60 grayscale-[50%]' : ''}`}>
                         
-                         {/* NÚMERO DE VENTA DEL DÍA INDEPENDIENTE */}
                          <div className={`absolute top-4 lg:top-6 left-2 lg:left-3 text-white w-6 h-6 rounded-full flex items-center justify-center font-black text-xs shadow-sm ${p.tipoDespacho === 'Delivery' ? 'bg-fuchsia-600' : p.tipoDespacho === 'Tienda' ? 'bg-purple-600' : 'bg-[#003366] dark:bg-sky-600'}`}>
                            {numeracionDiaria[p.id] || index + 1}
                          </div>
