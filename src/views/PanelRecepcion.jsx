@@ -88,23 +88,23 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   const numeracionDiaria = useMemo(() => {
     const map = {};
     const agrupados = {};
-    const [year, month, day] = fechaFiltro.split('-');
-    const fechaFiltroStr = `${day}/${month}/${year}`;
-    const pedidosDelDia = pedidosRecepcionBase.filter(p => p.fechaDespacho === fechaFiltroStr);
 
-    pedidosDelDia.forEach(p => {
+    // Agrupamos por tipo y por fecha para mantener la numeración estable sin importar el filtro activo
+    pedidosRecepcionBase.forEach(p => {
        const tipo = p.tipoDespacho || 'Tienda'; 
-       if (!agrupados[tipo]) agrupados[tipo] = [];
-       agrupados[tipo].push(p);
+       const fecha = p.fechaDespacho || 'SinFecha';
+       const key = `${tipo}-${fecha}`;
+       if (!agrupados[key]) agrupados[key] = [];
+       agrupados[key].push(p);
     });
 
-    Object.keys(agrupados).forEach(tipo => {
-       agrupados[tipo].sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0));
-       agrupados[tipo].forEach((p, index) => { map[p.id] = index + 1; });
+    Object.keys(agrupados).forEach(key => {
+       agrupados[key].sort((a, b) => (a.fechaCreacion || 0) - (b.fechaCreacion || 0));
+       agrupados[key].forEach((p, index) => { map[p.id] = index + 1; });
     });
 
     return map;
-  }, [pedidosRecepcionBase, fechaFiltro]);
+  }, [pedidosRecepcionBase]);
 
   const listado = useMemo(() => {
      let filtrados = pedidosRecepcionBase;
@@ -116,6 +116,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
         const [year, month, day] = fechaFiltro.split('-');
         filtrados = filtrados.filter(p => p.fechaDespacho === `${day}/${month}/${year}`);
      }
+     
      if (tipoFiltro !== 'Todos') filtrados = filtrados.filter(p => p.tipoDespacho === tipoFiltro);
      if (busqueda.trim()) {
         const b = busqueda.toLowerCase();
@@ -123,23 +124,6 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
      }
      return filtrados.sort((a, b) => (b.fechaCreacion || 0) - (a.fechaCreacion || 0));
   }, [pedidosRecepcionBase, vista, busqueda, fechaFiltro, tipoFiltro]);
-
-  const calcularMontoPedido = (p) => {
-     if (p.total && !isNaN(p.total) && Number(p.total) > 0) return Number(p.total);
-     if (p.montoTotal && !isNaN(p.montoTotal) && Number(p.montoTotal) > 0) return Number(p.montoTotal);
-     let listaProductos = Array.isArray(p.productos) ? p.productos : [];
-     if (typeof p.productos === 'string') {
-        try { const parsed = JSON.parse(p.productos); if (Array.isArray(parsed)) listaProductos = parsed; } catch (e) {
-           const regexMonto = /\$\s?(\d+(?:\.\d+)?)/g; let match, sumaExtraida = 0;
-           while ((match = regexMonto.exec(p.productos)) !== null) sumaExtraida += parseFloat(match[1]);
-           if (sumaExtraida > 0) return sumaExtraida;
-        }
-     }
-     if (listaProductos.length > 0) {
-        return listaProductos.reduce((sum, prod) => sum + (Number(prod.precio || prod.price || 0) * Number(prod.cantidad || prod.qty || prod.quantity || 1)), 0);
-     }
-     return 0;
-  };
 
   const imprimirEtiqueta = (p) => {
     const printWindow = window.open('', '_blank');
@@ -164,7 +148,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   };
 
   const marcarComoEntregado = async (pedido) => {
-    if (!pedido.linkFotoProductos) return dialogs.alert("Toma la foto del producto primero.", "Foto Requerida");
+    if (!pedido.linkFotoProductos) return dialogs.alert("Toma la foto del paquete primero.", "Foto Requerida");
     dialogs.confirm(`¿Confirmas que este paquete ha sido entregado?`, async () => {
        try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { status: 'Despachado', fechaEntregaFisica: Date.now() });
        loggear('PAQUETE_ENTREGADO', `Recepción procesó la entrega de: ${pedido.clienteNombre}`);
@@ -368,12 +352,8 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   };
 
   const renderTarjetaPedido = (p) => {
-    const montoProductos = calcularMontoPedido(p);
-    const montoDelivery = Number(p.montoDelivery || p.deliveryMonto || 0);
-    const montoTotalCliente = montoProductos + (p.tipoDespacho === 'Delivery' ? montoDelivery : 0);
-
     const urlValidacion = p.linkComprobante || p.fotoPago || p.comprobantePago || "";
-    const urlProducto = p.linkFotoProductos || "";
+    const urlProductoFinal = p.linkFotoProductos || ""; // La foto que toma recepción al entregar/preparar
     const urlExtracto = p.linkExtracto || p.extractoBancario || p.fotoExtracto || "";
 
     return (
@@ -381,6 +361,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
         <div className="absolute -top-3 -left-3 bg-purple-600 text-white w-9 h-9 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md text-lg">
           {numeracionDiaria[p.id] || '-'}
         </div>
+        
         <div className="flex justify-between items-start mb-3 pl-5">
            <div className="flex-grow pr-2">
              <div className="text-base font-black text-slate-800 dark:text-slate-100 leading-tight break-words">{p.clienteNombre}</div>
@@ -392,6 +373,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
               <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase flex-shrink-0"><Store size={12}/> Tienda</span>
            )}
         </div>
+
         {p.tipoDespacho === 'Delivery' ? (
            <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-2 text-xs">
              <span className="font-black text-fuchsia-600 dark:text-fuchsia-400">{p.deliveryFecha} a las {p.deliveryHora}</span>
@@ -402,22 +384,22 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
              <span className="font-bold text-slate-500">C.I: {p.retiroCedula}</span>
            </div>
         )}
-        <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-3 text-xs space-y-1">
-           <div className="flex justify-between"><strong>Monto Pedido:</strong> <span className="text-slate-700 dark:text-slate-300 font-bold">${montoProductos.toFixed(2)}</span></div>
-           {p.tipoDespacho === 'Delivery' && (
-              <div className="flex justify-between"><strong>Monto Delivery:</strong> <span className="text-fuchsia-600 dark:text-fuchsia-400 font-bold">${montoDelivery.toFixed(2)}</span></div>
-           )}
-           <div className="border-t border-slate-200 dark:border-slate-600 pt-1 flex justify-between">
-              <strong>Total a Cobrar:</strong> <span className="text-emerald-600 dark:text-emerald-400 font-black text-sm">${montoTotalCliente.toFixed(2)}</span>
+
+        <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 mb-3 text-xs space-y-2">
+           <div className="flex items-center gap-1.5 text-blue-700 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-900/30 p-2 rounded-lg">
+              <MessageSquare size={14} className="flex-shrink-0" /> Asesora: {p.asesora || p.vendedor || p.vendedora || p.creadoPor || 'No especificada'}
            </div>
-           <div className="pt-1 text-[11px] text-slate-600 dark:text-slate-400 break-words line-clamp-2"><strong>Dir:</strong> {p.direccion || 'Retiro en Tienda'}</div>
+           <div className="text-[11px] text-slate-600 dark:text-slate-400 break-words pt-1"><strong>Dir:</strong> {p.direccion || 'Retiro en Tienda'}</div>
         </div>
+
         <div className="text-[11px] bg-white dark:bg-slate-900 p-3 rounded-xl whitespace-pre-wrap font-medium text-slate-600 dark:text-slate-300 mb-3 border border-slate-200 dark:border-slate-700 max-h-32 overflow-y-auto min-h-[60px]">
            <div className="font-black mb-1 uppercase text-[9px] tracking-widest text-slate-400">Contenido:</div>
            {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
         </div>
+
+        {/* Galería de adjuntos que incluye la foto del paquete una vez tomada */}
         <div className="flex flex-wrap gap-2.5 mb-4 bg-white dark:bg-slate-950 p-2 rounded-xl border border-slate-100 dark:border-slate-800/60 justify-center">
-           {[ {url: urlValidacion, txt: 'Pago'}, {url: urlExtracto, txt: 'Extracto'}, {url: urlProducto, txt: 'Producto'} ].map(img => (
+           {[ {url: urlValidacion, txt: 'Pago'}, {url: urlExtracto, txt: 'Extracto'}, {url: urlProductoFinal, txt: 'Paquete'} ].map(img => (
               (typeof img.url === 'string' && img.url.startsWith('http')) && (
                  <div key={img.txt} className="flex flex-col items-center gap-0.5">
                     <span className="text-[8px] font-black text-slate-400 uppercase">{img.txt}</span>
@@ -428,6 +410,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
               )
            ))}
         </div>
+
         <div className="mt-auto pt-3 border-t border-slate-200 dark:border-slate-700 flex flex-col gap-2.5">
            {p.status === 'Despachado' ? (
               <div className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-black text-xs uppercase py-2.5 rounded-xl flex justify-center items-center gap-2 border border-emerald-200 dark:border-emerald-800/50"><CheckCircle size={15}/> Entregado</div>
@@ -634,8 +617,16 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
                   <input type="text" placeholder="Buscar cliente..." className="w-full pl-9 pr-3 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
                </div>
-               <input type="date" value={fechaFiltro} onChange={(e)=>setFechaFiltro(e.target.value)} className="w-full p-2.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold" />
-               <select value={tipoFiltro} onChange={(e)=>setTipoFiltro(e.target.value)} className="w-full p-2.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold cursor-pointer">
+               
+               {/* Controles de fecha rediseñados con opción de limpiar filtro */}
+               <div className="flex w-full relative">
+                  <input type="date" value={fechaFiltro} onChange={(e)=>setFechaFiltro(e.target.value)} className="w-full p-2.5 border border-slate-200 dark:border-slate-700 rounded-l-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500" title="Filtrar por fecha" />
+                  <button onClick={()=>setFechaFiltro('')} className={`px-4 border border-l-0 border-slate-200 dark:border-slate-700 rounded-r-xl font-bold text-xs transition-colors outline-none focus:border-purple-500 ${!fechaFiltro ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-400' : 'bg-slate-50 text-slate-500 hover:bg-red-50 hover:text-red-600 dark:bg-slate-800'}`} title="Ver todas las fechas">
+                     {fechaFiltro ? 'X' : 'Todas'}
+                  </button>
+               </div>
+
+               <select value={tipoFiltro} onChange={(e)=>setTipoFiltro(e.target.value)} className="w-full p-2.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold cursor-pointer outline-none focus:border-purple-500">
                   <option value="Todos">Todos</option>
                   <option value="Tienda">Tienda</option>
                   <option value="Delivery">Delivery</option>
