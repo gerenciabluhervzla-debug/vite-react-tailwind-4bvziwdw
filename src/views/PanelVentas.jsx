@@ -7,697 +7,715 @@ import { WORKER_GEMINI_URL, URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage, fileToBase64 } from '../utils/image';
 import { ROLES } from '../config/constants';
 
-export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, db, appId, loggear, dialogs, cambiarEstadoPedido }) {
+export default function PanelVentas({ 
+  perfil, pedidos, catalogo, stock, config, db, appId, loggear, dialogs, cambiarEstadoPedido,
+  clientePreCargado, setClientePreCargado // Props para recibir datos del CRM
+}) {
 
- const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION].includes(perfil?.role);
- const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial');
+  const puedeCrear = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION].includes(perfil?.role);
+  const [vista, setVista] = useState(puedeCrear ? 'nuevo' : 'historial');
 
- const getLocalToday = () => {
-   const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
- };
+  const getLocalToday = () => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
 
- const defaultForm = {
-   tipoDespacho: 'Nacional',
-   costoEnvio: '',
-   retiroNombre: '', retiroCedula: '', retiroTelefono: '',
-   deliveryFecha: getLocalToday(), deliveryHora: '',
-   clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', pagoEnvio: 'COD', origenPedido: '',
-   direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '',
-   montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false,
-   descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '', numeroControlML: '', notaVentas: '',
-   
-   carritoObsequiosObj: null,
-   montoObsequios: '0',
-   montoCreditoRegalo: ''
- };
+  const defaultForm = {
+    tipoDespacho: 'Nacional',
+    costoEnvio: '',
+    retiroNombre: '', retiroCedula: '', retiroTelefono: '',
+    deliveryFecha: getLocalToday(), deliveryHora: '',
+    clienteNombre: '', clienteCedula: '', clienteTelefono: '', courier: '', pagoEnvio: 'COD', origenPedido: '',
+    direccion: '', productos: '', carritoObj: null, asesora: perfil?.nombre || '', referencia: '', moneda: '',
+    montoPago: '0', tasa: config.tasaDia || '1', esMercadoLibre: false, linkGuiaML: '', esRegalo: false,
+    descuentoPorcentaje: '0', pagoAdicional: '', refAdicional: '', numeroControlML: '', notaVentas: '',
+    
+    carritoObsequiosObj: null,
+    montoObsequios: '0',
+    montoCreditoRegalo: ''
+  };
 
- const [formData, setFormData] = useState(defaultForm);
- const [modoCatalogo, setModoCatalogo] = useState('venta'); 
- const [editId, setEditId] = useState(null);
- const [pedidoDevuelto, setPedidoDevuelto] = useState(null);
- const [enviando, setEnviando] = useState(false);
- const [subiendoML, setSubiendoML] = useState(false);
- const [textoCrudo, setTextoCrudo] = useState('');
- const [analizando, setAnalizando] = useState(false);
- const [isCatalogOpen, setIsCatalogOpen] = useState(false);
+  const [formData, setFormData] = useState(defaultForm);
+  const [modoCatalogo, setModoCatalogo] = useState('venta'); 
+  const [editId, setEditId] = useState(null);
+  const [pedidoDevuelto, setPedidoDevuelto] = useState(null);
+  const [enviando, setEnviando] = useState(false);
+  const [subiendoML, setSubiendoML] = useState(false);
+  const [textoCrudo, setTextoCrudo] = useState('');
+  const [analizando, setAnalizando] = useState(false);
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
 
- const [busquedaCliente, setBusquedaCliente] = useState('');
- const [fechaHistorial, setFechaHistorial] = useState(getLocalToday());
- const [filtroStatus, setFiltroStatus] = useState('Todos');
- const [filtroTipoDespacho, setFiltroTipoDespacho] = useState('Todos');
- const [filtroAsesora, setFiltroAsesora] = useState('Todas');
+  const [busquedaCliente, setBusquedaCliente] = useState('');
+  const [fechaHistorial, setFechaHistorial] = useState(getLocalToday());
+  const [filtroStatus, setFiltroStatus] = useState('Todos');
+  const [filtroTipoDespacho, setFiltroTipoDespacho] = useState('Todos');
+  const [filtroAsesora, setFiltroAsesora] = useState('Todas');
 
- // NUEVO: Estado para mostrar sugerencias de clientes
- const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
+  const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
+  const [mismoClienteRetira, setMismoClienteRetira] = useState(false);
 
- const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
- const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
+  const pedidosWeb = pedidos.filter(p => p.esPublico && p.status === 'Por Pagar / Cotización');
+  const enEspera = pedidos.filter(p => p.status === 'En Espera (Sin Stock)');
 
- const fechaHoy = new Date().toLocaleDateString('es-VE');
- const tasaActualizadaHoy = config?.ultimaActualizacion === fechaHoy;
- const hoyTimestamp = new Date().getTime();
+  const fechaHoy = new Date().toLocaleDateString('es-VE');
+  const tasaActualizadaHoy = config?.ultimaActualizacion === fechaHoy;
+  const hoyTimestamp = new Date().getTime();
 
- const isGlobalDiscountActive = config?.descuentoGlobalActivo &&
-    config?.descuentoGlobalPorcentaje > 0 &&
-    config?.descuentoGlobalInicio && config?.descuentoGlobalFin &&
-    hoyTimestamp >= new Date(config.descuentoGlobalInicio + 'T00:00:00').getTime() &&
-    hoyTimestamp <= new Date(config.descuentoGlobalFin + 'T23:59:59').getTime();
+  const isGlobalDiscountActive = config?.descuentoGlobalActivo &&
+     config?.descuentoGlobalPorcentaje > 0 &&
+     config?.descuentoGlobalInicio && config?.descuentoGlobalFin &&
+     hoyTimestamp >= new Date(config.descuentoGlobalInicio + 'T00:00:00').getTime() &&
+     hoyTimestamp <= new Date(config.descuentoGlobalFin + 'T23:59:59').getTime();
 
- const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
+  const globalDiscountPercent = isGlobalDiscountActive ? parseFloat(config.descuentoGlobalPorcentaje) : 0;
 
- // NUEVO: Extraer clientes únicos para el autocompletado
- const clientesUnicos = useMemo(() => {
-    const map = new Map();
+  // Lógica de autocompletado si viene del Panel CRM
+  useEffect(() => {
+    if (clientePreCargado) {
+      setFormData(prev => ({
+         ...prev,
+         clienteNombre: clientePreCargado.nombre || '',
+         clienteCedula: clientePreCargado.cedula || '',
+         clienteTelefono: clientePreCargado.telefono || '',
+         tipoDespacho: 'Tienda'
+      }));
+      setMismoClienteRetira(false); // Reseteamos por si acaso
+      
+      if (setClientePreCargado) {
+         setClientePreCargado(null);
+      }
+    }
+  }, [clientePreCargado, setClientePreCargado]);
+
+  const clientesUnicos = useMemo(() => {
+     const map = new Map();
+     pedidos.forEach(p => {
+        if (p.clienteNombre && !map.has(p.clienteNombre.toLowerCase())) {
+           map.set(p.clienteNombre.toLowerCase(), {
+              nombre: p.clienteNombre,
+              cedula: p.clienteCedula || '',
+              telefono: p.clienteTelefono || ''
+           });
+        }
+     });
+     return Array.from(map.values());
+  }, [pedidos]);
+
+  const asesorasUnicas = useMemo(() => {
+     const names = pedidos.filter(p => p.asesora).map(p => p.asesora.trim());
+     return ['Todas', ...Array.from(new Set(names))].sort();
+  }, [pedidos]);
+
+  const numeracionDiaria = useMemo(() => {
+    const map = {};
+    const agrupados = {};
     pedidos.forEach(p => {
-       if (p.clienteNombre && !map.has(p.clienteNombre.toLowerCase())) {
-          map.set(p.clienteNombre.toLowerCase(), {
-             nombre: p.clienteNombre,
-             cedula: p.clienteCedula || '',
-             telefono: p.clienteTelefono || ''
-          });
-       }
+       const fecha = p.fechaDespacho || 'Sin Fecha';
+       const tipo = p.tipoDespacho || 'Nacional';
+       const key = `${fecha}_${tipo}`;
+       
+       if (!agrupados[key]) agrupados[key] = [];
+       agrupados[key].push(p);
     });
-    return Array.from(map.values());
- }, [pedidos]);
+    Object.keys(agrupados).forEach(key => {
+       agrupados[key].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+       agrupados[key].forEach((p, index) => { map[p.id] = index + 1; });
+    });
+    return map;
+  }, [pedidos]);
 
- const asesorasUnicas = useMemo(() => {
-    const names = pedidos.filter(p => p.asesora).map(p => p.asesora.trim());
-    return ['Todas', ...Array.from(new Set(names))].sort();
- }, [pedidos]);
-
- const numeracionDiaria = useMemo(() => {
-   const map = {};
-   const agrupados = {};
-   pedidos.forEach(p => {
-      const fecha = p.fechaDespacho || 'Sin Fecha';
-      const tipo = p.tipoDespacho || 'Nacional';
-      const key = `${fecha}_${tipo}`;
-      
-      if (!agrupados[key]) agrupados[key] = [];
-      agrupados[key].push(p);
-   });
-   Object.keys(agrupados).forEach(key => {
-      agrupados[key].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
-      agrupados[key].forEach((p, index) => { map[p.id] = index + 1; });
-   });
-   return map;
- }, [pedidos]);
-
- const pedidosHistorialOrganizados = useMemo(() => {
-   let lista = pedidos.filter(p => !p.esPublico);
-   
-   if (busquedaCliente.trim()) {
-     const b = busquedaCliente.toLowerCase();
-     lista = lista.filter(p => 
-       p.clienteNombre?.toLowerCase().includes(b) || 
-       p.clienteTelefono?.includes(b)
-     );
-   }
-   
-   if (fechaHistorial) {
-     const [year, month, day] = fechaHistorial.split('-');
-     const fechaFiltroStr = `${day}/${month}/${year}`;
-     lista = lista.filter(p => p.fechaDespacho === fechaFiltroStr);
-   }
-
-   if (filtroStatus !== 'Todos') {
-     if (filtroStatus === 'Validados') {
-       lista = lista.filter(p => p.status === 'Validado');
-     } else {
-       lista = lista.filter(p => p.status === filtroStatus);
-     }
-   }
-
-   if (filtroTipoDespacho !== 'Todos') {
-     lista = lista.filter(p => (p.tipoDespacho || 'Nacional') === filtroTipoDespacho);
-   }
-
-   if (filtroAsesora !== 'Todas') {
-     lista = lista.filter(p => p.asesora === filtroAsesora);
-   }
-
-   lista.sort((a, b) => b.fechaCreacion - a.fechaCreacion); 
-   return lista;
- }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus, filtroTipoDespacho, filtroAsesora]);
-
- useEffect(() => {
-   let subVentas = 0;
-   if (formData.carritoObj) {
-     Object.entries(formData.carritoObj).forEach(([key, qty]) => {
-       const [n, p] = key.split('|');
-       catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const i=prod.presentaciones.indexOf(p); if (i >= 0 && prod.precios) subVentas += (prod.precios[i]*qty); }}));
-     });
-   }
-
-   let subObsequios = 0;
-   if (formData.carritoObsequiosObj) {
-     Object.entries(formData.carritoObsequiosObj).forEach(([key, qty]) => {
-       const [n, p] = key.split('|');
-       catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const i=prod.presentaciones.indexOf(p); if (i >= 0 && prod.precios) subObsequios += (prod.precios[i]*qty); }}));
-     });
-   }
-  
-   const subConCampaña = subVentas * (1 - globalDiscountPercent / 100);
-   const dExtra = parseFloat(formData.descuentoPorcentaje) || 0;
-   const finalProducts = subConCampaña * (1 - dExtra / 100);
-
-   let costoEnvioFinal = 0;
-   if (formData.tipoDespacho === 'Delivery' || (formData.tipoDespacho === 'Nacional' && formData.pagoEnvio === 'PAGADO')) {
-       costoEnvioFinal = parseFloat(formData.costoEnvio) || 0;
-   }
-
-   const subTotalAntesDeCredito = finalProducts + costoEnvioFinal;
-   const credito = parseFloat(formData.montoCreditoRegalo) || 0;
-   
-   let finalPagar = subTotalAntesDeCredito - credito;
-   if (finalPagar < 0) finalPagar = 0; 
-
-   let totalReporteObsequios = subObsequios + credito;
-  
-   setFormData(prev => ({
-     ...prev,
-     montoPago: prev.esRegalo ? '0' : finalPagar.toFixed(2),
-     montoObsequios: prev.esRegalo ? (subTotalAntesDeCredito + subObsequios).toFixed(2) : totalReporteObsequios.toFixed(2),
-     moneda: prev.moneda === 'ZELLE' ? 'ZELLE' : 'USD',
-     tasa: prev.tasa || config?.tasaDia
-   }));
- }, [formData.carritoObj, formData.carritoObsequiosObj, formData.descuentoPorcentaje, formData.montoCreditoRegalo, formData.tipoDespacho, formData.pagoEnvio, formData.costoEnvio, config?.tasaDia, catalogo, globalDiscountPercent, formData.esRegalo]);
-
- const copiarLinkTienda = () => {
-   const linkTienda = `${window.location.origin}${window.location.pathname}#tienda`;
-   if (navigator.clipboard && window.isSecureContext) {
-     navigator.clipboard.writeText(linkTienda)
-       .then(() => dialogs.alert(`Enlace copiado al portapapeles:\n\n${linkTienda}`, "Enlace Copiado"))
-       .catch(() => dialogs.alert("Copia manual:\n" + linkTienda, "Enlace"));
-   } else {
-     dialogs.alert("Copia manual:\n" + linkTienda, "Enlace");
-   }
- };
-
- const analizarConGemini = async () => {
-   if (!textoCrudo.trim()) return dialogs.alert("Pega el mensaje de WhatsApp del cliente primero.", "Mensaje Vacío");
-   if (!WORKER_GEMINI_URL) return dialogs.alert("La URL del Worker de Gemini no está configurada.", "Error de Entorno");
-  
-   setAnalizando(true);
-   try {
-     const llavesCatalogo = catalogo.flatMap(c => c.productos.flatMap(p => p.presentaciones.map(pres => `${p.nombre}|${pres}`))).join(', ');
+  const pedidosHistorialOrganizados = useMemo(() => {
+    let lista = pedidos.filter(p => !p.esPublico);
     
-     const prompt = `Analiza este pedido de WhatsApp y extrae los datos en JSON.
-     REGLAS ESTRICTAS:
-     1. REFERENCIAS MÚLTIPLES: Si el texto tiene varios pagos/referencias (ej. T0275, T2389...), DEBES unirlos todos en el campo "referencia" separando cada uno y mostrando su monto.
-        Formato obligatorio: "T0275 (11.697,80Bs) | T2389 (7.573,65Bs) | T6662 (25.245,50Bs)". NUNCA borres referencias ni las unas en un solo número.
-     2. DIRECCIÓN: Si el cliente envía un código de agencia (Ej. "1307000 - MRW"), inclúyelo al principio del campo "direccion".
-     3. MONTO TOTAL: En "montoPago", coloca la suma total de la venta o el total global indicado.
-     4. MONEDA: Debe ser estrictamente "USD", "VES" o "ZELLE". Si habla de Zelle es "ZELLE", si es dólares en efectivo es "USD", si hay bolívares/Bs es "VES".
-     5. PAGO ENVÍO: "COD" (cobro en destino) o "PAGADO" (envío pagado). Por defecto usa "COD".
-     6. TIPO DE ENVÍO: Si dice "MercadoLibre", esMercadoLibre=true. 
-     7. TIPO DESPACHO: Si dice "delivery", tipoDespacho="Delivery". Si dice "retiro" o "tienda", tipoDespacho="Tienda". Si es por MRW, Zoom, Tealca, Domesa, es "Nacional".
-     8. ORIGEN: Extrae el origen si aparece (ej. "RECOMPRA").
-     9. ASESORA: Extrae el nombre de la asesora si aparece.
-     productosCrudos: texto exacto original de los productos.
-     carrito: mapea cantidades exactas a estas llaves válidas: [${llavesCatalogo}].
+    if (busquedaCliente.trim()) {
+      const b = busquedaCliente.toLowerCase();
+      lista = lista.filter(p => 
+        p.clienteNombre?.toLowerCase().includes(b) || 
+        p.clienteTelefono?.includes(b)
+      );
+    }
     
-     Texto del cliente:
-     ${textoCrudo}`;
-    
-     const res = await fetch(WORKER_GEMINI_URL, {
-       method: 'POST',
-       headers: { 'Content-Type': 'application/json' },
-       body: JSON.stringify({
-         contents: [{ parts: [{ text: prompt }] }],
-         generationConfig: {
-           responseMimeType: "application/json",
-           responseSchema: {
-             type: "OBJECT",
-             properties: {
-               clienteNombre: { type: "STRING" }, clienteCedula: { type: "STRING" }, clienteTelefono: { type: "STRING" },
-               courier: { type: "STRING" }, pagoEnvio: { type: "STRING" }, direccion: { type: "STRING" }, montoPago: { type: "STRING" }, moneda: { type: "STRING" }, referencia: { type: "STRING" }, asesora: { type: "STRING" }, productosCrudos: { type: "STRING" }, tasa: { type: "STRING" }, esMercadoLibre: { type: "BOOLEAN" }, tipoDespacho: { type: "STRING" },
-               carrito: { type: "ARRAY", items: { type: "OBJECT", properties: { llave: { type: "STRING" }, cantidad: { type: "INTEGER" } } } }
-             }
-           }
-         }
-       })
-     });
-     const resultData = await res.json();
-     if (resultData?.candidates?.[0]?.content?.parts?.[0]?.text) {
-        const result = JSON.parse(resultData.candidates[0].content.parts[0].text);
-        let nuevoCarritoObj = {}; let txtFormat = result.productosCrudos || '';
-        if (result.carrito && result.carrito.length > 0) {
-          const lineas = [];
-          result.carrito.forEach(item => {
-            if (item.llave && item.cantidad) { nuevoCarritoObj[item.llave] = item.cantidad; lineas.push(`- ${item.cantidad}x ${item.llave.replace('|', ' ')}`); }
-          });
-          if (lineas.length > 0) txtFormat = lineas.join('\n');
-        }
-        let monedaSanitizada = result.moneda;
-        if (typeof monedaSanitizada === 'string') {
-           const m = monedaSanitizada.toUpperCase();
-           if (m.includes('ZELLE')) monedaSanitizada = 'ZELLE';
-           else if (m.includes('BS') || m.includes('VES') || m.includes('BOL')) monedaSanitizada = 'VES';
-           else monedaSanitizada = 'USD';
-        } else {
-           monedaSanitizada = 'USD';
-        }
-        setFormData(prev => ({
-          ...prev,
-          ...result,
-          tasa: result.tasa || prev.tasa,
-          moneda: Object.keys(nuevoCarritoObj).length > 0 && monedaSanitizada !== 'ZELLE' ? 'USD' : monedaSanitizada,
-          esMercadoLibre: result.esMercadoLibre || false,
-          pagoEnvio: result.pagoEnvio || 'COD',
-          tipoDespacho: result.tipoDespacho && ['Nacional', 'Tienda', 'Delivery'].includes(result.tipoDespacho) ? result.tipoDespacho : prev.tipoDespacho,
-          productos: txtFormat || prev.productos,
-          carritoObj: Object.keys(nuevoCarritoObj).length > 0 ? nuevoCarritoObj : prev.carritoObj
-        }));
-     }
-   } catch(e) { console.error(e); dialogs.alert("Error comunicando con la IA. Ingresa manual.", "Error"); } finally { setAnalizando(false); }
- };
+    if (fechaHistorial) {
+      const [year, month, day] = fechaHistorial.split('-');
+      const fechaFiltroStr = `${day}/${month}/${year}`;
+      lista = lista.filter(p => p.fechaDespacho === fechaFiltroStr);
+    }
 
- const eliminarDelCarrito = (itemKey, esObsequio = false) => {
-   setFormData(prev => {
-     const targetObj = esObsequio ? { ...(prev.carritoObsequiosObj || {}) } : { ...(prev.carritoObj || {}) };
-     delete targetObj[itemKey];
-
-     let nuevoTexto = "";
-     
-     const currentVentas = esObsequio ? prev.carritoObj : targetObj;
-     if (currentVentas) {
-        Object.entries(currentVentas).forEach(([key, qty]) => nuevoTexto += `- ${qty}x ${key.replace('|', ' ')}\n`);
-     }
-     
-     const currentObsequios = esObsequio ? targetObj : prev.carritoObsequiosObj;
-     if (currentObsequios) {
-        Object.entries(currentObsequios).forEach(([key, qty]) => nuevoTexto += `- ${qty}x ${key.replace('|', ' ')} (OBSEQUIO)\n`);
-     }
-
-     return { 
-       ...prev, 
-       [esObsequio ? 'carritoObsequiosObj' : 'carritoObj']: targetObj, 
-       productos: nuevoTexto.trim() 
-     };
-   });
- };
-
- const cargarPedidoParaEditar = (pedido) => {
-   setFormData({
-     tipoDespacho: pedido.tipoDespacho || 'Nacional',
-     costoEnvio: pedido.costoEnvio?.toString() || '0',
-     retiroNombre: pedido.retiroNombre || '',
-     retiroCedula: pedido.retiroCedula || '',
-     retiroTelefono: pedido.retiroTelefono || '',
-     deliveryFecha: pedido.deliveryFecha || getLocalToday(),
-     deliveryHora: pedido.deliveryHora || '',
-     clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier || '', pagoEnvio: pedido.pagoEnvio || 'COD', origenPedido: pedido.origenPedido || '', direccion: pedido.direccion,
-     productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), 
-     carritoObj: pedido.carritoObj, 
-     carritoObsequiosObj: pedido.carritoObsequiosObj || null,
-     montoCreditoRegalo: pedido.montoCreditoRegaloUsd?.toString() || '',
-     asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD',
-     montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: '',
-     numeroControlML: pedido.numeroControlML || '', notaVentas: pedido.notaVentas || '' 
-   });
-   setEditId(pedido.id);
-   setPedidoDevuelto(pedido);
-   setVista('nuevo');
- };
-
- const cancelarEdicion = () => {
-   setFormData(defaultForm);
-   setEditId(null);
-   setPedidoDevuelto(null);
- };
-
- const anularPedidoVentas = (pedido) => {
-   dialogs.prompt(`Estás a punto de ANULAR y descartar el pedido de ${pedido.clienteNombre}.\n\nEscribe el motivo de la cancelación:`, async (motivo) => {
-     if (!motivo) return;
-     try {
-       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), {
-          status: 'Anulado',
-          motivoAnulacion: `Cancelado por Ventas: ${motivo}`,
-          anuladoPor: perfil.nombre,
-          fechaAnulacion: Date.now(),
-          montoUsd: 0, montoVes: 0,
-          notasAuditoria: [...(pedido.notasAuditoria || []), { fecha: Date.now(), texto: `ORDEN ANULADA POR VENTAS: ${motivo}`, autor: perfil.nombre }]
-       });
-       loggear('PEDIDO_ANULADO_VENTAS', `Ventas anuló el pedido de ${pedido.clienteNombre} por: ${motivo}`);
-       dialogs.alert("El pedido ha sido anulado y descartado exitosamente.", "Completado");
-     } catch (e) {
-       console.error(e);
-       dialogs.alert("Error al intentar anular el pedido.");
-     }
-   }, "Cancelar Pedido");
- };
-
- const handleFileUploadML = async (e) => {
-   const file = e.target.files[0];
-   if (!file) return;
-   if (!URL_GOOGLE_SCRIPT) return dialogs.alert("El sistema de subida no está configurado.");
-   setSubiendoML(true);
-   try {
-     let base64Data;
-     let mimeType = file.type;
-     if (mimeType === 'application/pdf') {
-       base64Data = await fileToBase64(file);
-     } else {
-       base64Data = await compressImage(file, 1000, 0.8);
-     }
-     const response = await fetch(URL_GOOGLE_SCRIPT, {
-       method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-       body: JSON.stringify({
-          tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN,
-          fileName: `GuiaML_${Date.now()}.${mimeType === 'application/pdf' ? 'pdf' : 'jpg'}`,
-          mimeType: mimeType,
-          data: base64Data
-       })
-     });
-     const result = await response.json();
-     if (result.url) setFormData({ ...formData, linkGuiaML: result.url });
-     setSubiendoML(false);
-   } catch (error) {
-     console.error(error);
-     dialogs.alert("Error subiendo el archivo. Revisa tu conexión.", "Fallo de Red");
-     setSubiendoML(false);
-   }
- };
-
- // NUEVO: Función para rellenar datos al seleccionar un cliente sugerido
- const handleSeleccionarCliente = (cliente) => {
-    setFormData(prev => ({
-        ...prev,
-        clienteNombre: cliente.nombre,
-        clienteCedula: cliente.cedula,
-        clienteTelefono: cliente.telefono
-    }));
-    setMostrarSugerencias(false);
- };
-
- const handleSubmit = async (e) => {
-   e.preventDefault();
-   if (!tasaActualizadaHoy && !editId) return dialogs.alert("NO puedes registrar ventas nuevas porque la Tasa del Día no ha sido actualizada hoy por Administración.", "Tasa Desactualizada");
-   
-   const hayVentas = formData.carritoObj && Object.keys(formData.carritoObj).length > 0;
-   const hayObsequios = formData.carritoObsequiosObj && Object.keys(formData.carritoObsequiosObj).length > 0;
-   
-   if (!hayVentas && !hayObsequios) return dialogs.alert("Debes seleccionar productos o obsequios del Catálogo.", "Carrito Vacío");
-   if (!formData.origenPedido) return dialogs.alert("Por favor selecciona de dónde viene el pedido.", "Falta Origen");
-  
-   if (formData.tipoDespacho === 'Nacional' && !formData.courier) return dialogs.alert("Por favor selecciona la Empresa de Envío.", "Falta Agencia");
-   if (formData.tipoDespacho === 'Tienda') {
-      if (!formData.retiroNombre || !formData.retiroCedula || !formData.retiroTelefono) return dialogs.alert("Debes completar los datos de la persona que retira en tienda.", "Datos Incompletos");
-   }
-   if (formData.tipoDespacho === 'Delivery') {
-      if (!formData.deliveryFecha || !formData.deliveryHora) return dialogs.alert("Debes completar la fecha y hora requerida para el Delivery.", "Datos Incompletos");
-   }
-
-   if (!formData.tasa || parseFloat(formData.tasa) <= 0) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
-   if (!formData.moneda) return dialogs.alert("Por favor selecciona la moneda de pago.", "Falta Moneda");
-  
-   if (formData.esMercadoLibre && !formData.linkGuiaML) return dialogs.alert("Si es un envío de MercadoLibre, debes adjuntar el PDF o Imagen de la guía antes de procesar.", "Falta Guía ML");
-  
-   const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
-   let sinStock = false;
-   let itemsFaltantes = [];
-   let extraConcentrados = 0;
-   
-   const tipoInventario = formData.tipoDespacho === 'Nacional' ? 'envios' : 'recepcion';
-   const nombreAlmacen = formData.tipoDespacho === 'Nacional' ? 'Envíos' : 'Recepción';
-
-   const carritoTotal = { ...(formData.carritoObj || {}) };
-   if (formData.carritoObsequiosObj) {
-      Object.entries(formData.carritoObsequiosObj).forEach(([key, qty]) => {
-         carritoTotal[key] = (carritoTotal[key] || 0) + qty;
-      });
-   }
-
-   Object.entries(carritoTotal).forEach(([key, qty]) => {
-     let maxDisp = typeof stock[key] === 'object' ? (stock[key][tipoInventario] || 0) : (stock[key]||0);
-     if (qty > maxDisp) {
-       sinStock = true;
-       itemsFaltantes.push(key.replace('|', ' '));
-     }
-     if (boosterKeys.includes(key)) {
-        extraConcentrados += qty;
-     }
-   });
-
-   if (extraConcentrados > 0) {
-      const qtyConcentradosActual = carritoTotal["Concentrado|Unidad"] || 0;
-      const totalConcentradosNecesarios = qtyConcentradosActual + extraConcentrados;
-      const dispConcentrado = typeof stock["Concentrado|Unidad"] === 'object' ? (stock["Concentrado|Unidad"][tipoInventario] || 0) : (stock["Concentrado|Unidad"]||0);
-      
-      if (totalConcentradosNecesarios > dispConcentrado) {
-         sinStock = true;
-         if (!itemsFaltantes.some(i => i.includes("Concentrado"))) {
-            itemsFaltantes.push(`Concentrado (Requiere ${totalConcentradosNecesarios} total por los Boosters)`);
-         }
-      }
-   }
-
-   if (sinStock) {
-     const confirmarFuerza = window.confirm(
-       `Falta stock en el almacén de ${nombreAlmacen} para:\n\n${itemsFaltantes.join('\n')}\n\n¿Deseas montar el pedido de todas formas (se enviará en NEGATIVO para validación)?\n\n• Pulsa ACEPTAR para enviarlo a Validación.\n• Pulsa CANCELAR para guardarlo en la Lista de Espera.`
-     );
-     
-     if (confirmarFuerza) {
-       procesarVenta('Pendiente');
-     } else {
-       procesarVenta('En Espera (Sin Stock)');
-     }
-     return;
-   }
-   procesarVenta('Pendiente');
- };
-
- const procesarVenta = async (finalStatus) => {
-   setEnviando(true);
-   let montoNum = parseFloat(formData.montoPago) || 0;
-   const tasa = parseFloat(formData.tasa) || 1;
-   let descuento = parseFloat(formData.descuentoPorcentaje) || 0;
-   let costoEnvioFinal = parseFloat(formData.costoEnvio) || 0;
-   let creditoRegalo = parseFloat(formData.montoCreditoRegalo) || 0;
-
-   let pagoExtUsd = 0;
-   if (editId && pedidoDevuelto?.faltanteUsd > 0 && formData.pagoAdicional) {
-     let extra = parseFloat(formData.pagoAdicional) || 0;
-     pagoExtUsd = formData.moneda === 'VES' ? extra / tasa : extra;
-     montoNum += extra;
-   }
-   let calculo = { usd: 0, ves: 0 };
-   if (formData.moneda === 'ZELLE') {
-       calculo.usd = montoNum;
-       calculo.ves = 0;
-   } else if (formData.moneda === 'USD') {
-       calculo.usd = montoNum;
-       calculo.ves = montoNum * tasa;
-   } else {
-       calculo.ves = montoNum;
-       calculo.usd = tasa > 0 ? montoNum / tasa : 0;
-   }
-
-   let finalCarrito = { ...formData.carritoObj };
-   let finalCarritoObsequios = { ...formData.carritoObsequiosObj };
-   let finalProductosText = formData.productos || '';
-   
-   let countBoosters = 0;
-   const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
-   
-   Object.entries(finalCarrito).forEach(([key, qty]) => { if (boosterKeys.includes(key)) countBoosters += qty; });
-   Object.entries(finalCarritoObsequios).forEach(([key, qty]) => { if (boosterKeys.includes(key)) countBoosters += qty; });
-
-   if (countBoosters > 0) {
-     finalCarrito["Concentrado|Unidad"] = (finalCarrito["Concentrado|Unidad"] || 0) + countBoosters;
-     if (!finalProductosText.includes("Concentrado (Unidad)")) finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Auto]`;
-   }
-   
-   const getVeneziaTime = () => {
-     const now = new Date();
-     return new Date(now.toLocaleString("en-US", {timeZone: "America/Caracas"}));
-   };
-   const targetDate = getVeneziaTime();
-   const hora = targetDate.getHours();
-   const minutos = targetDate.getMinutes();
-   const currentDay = targetDate.getDay(); 
-
-   let fechaDespachoObj = new Date(targetDate);
-   let outDeliveryFecha = formData.deliveryFecha;
-
-   if (formData.tipoDespacho === 'Nacional') {
-      const isPastCutoff = hora > 12 || (hora === 12 && minutos >= 30);
-      let daysToAdd = 0;
-      if (currentDay === 5 && isPastCutoff) daysToAdd = 3; 
-      else if (currentDay === 6) daysToAdd = 2; 
-      else if (currentDay === 0) daysToAdd = 1; 
-      else if (isPastCutoff) daysToAdd = 1; 
-      fechaDespachoObj.setDate(fechaDespachoObj.getDate() + daysToAdd);
-   } else {
-      let baseDate = formData.tipoDespacho === 'Delivery' && formData.deliveryFecha ? new Date(formData.deliveryFecha + "T12:00:00") : new Date(targetDate);
-      let moveToMonday = false;
-      
-      if (baseDate.getDay() === 6 || baseDate.getDay() === 0) moveToMonday = true;
-      if (hora >= 17) moveToMonday = true;
-
-      if (moveToMonday) {
-          let d = new Date(targetDate);
-          let day = d.getDay();
-          let daysToMonday = day === 0 ? 1 : 8 - day;
-          d.setDate(d.getDate() + daysToMonday);
-          fechaDespachoObj = d;
-          
-          if (formData.tipoDespacho === 'Delivery') {
-              const ndd = String(fechaDespachoObj.getDate()).padStart(2, '0');
-              const nmm = String(fechaDespachoObj.getMonth() + 1).padStart(2, '0');
-              const nyyyy = fechaDespachoObj.getFullYear();
-              outDeliveryFecha = `${nyyyy}-${nmm}-${ndd}`;
-          }
+    if (filtroStatus !== 'Todos') {
+      if (filtroStatus === 'Validados') {
+        lista = lista.filter(p => p.status === 'Validado');
       } else {
-          fechaDespachoObj = baseDate;
+        lista = lista.filter(p => p.status === filtroStatus);
       }
-   }
+    }
 
-   const dd = String(fechaDespachoObj.getDate()).padStart(2, '0');
-   const mm = String(fechaDespachoObj.getMonth() + 1).padStart(2, '0');
-   const yyyy = fechaDespachoObj.getFullYear();
-   const fechaDespachoStr = `${dd}/${mm}/${yyyy}`;
+    if (filtroTipoDespacho !== 'Todos') {
+      lista = lista.filter(p => (p.tipoDespacho || 'Nacional') === filtroTipoDespacho);
+    }
 
-   try {
-     let dataAEnviar = {
-        ...formData,
-        deliveryFecha: outDeliveryFecha,
-        costoEnvio: costoEnvioFinal,
-        productos: finalProductosText,
-        carritoObj: finalCarrito,
-        carritoObsequiosObj: finalCarritoObsequios,
-        montoObsequiosUsd: parseFloat(formData.montoObsequios) || 0,
-        montoCreditoRegaloUsd: creditoRegalo,
-        monto: montoNum,
-        montoUsd: calculo.usd,
-        montoVes: calculo.ves,
-        tasaAplicada: tasa,
-        status: finalStatus,
-        descuentoPorcentaje: descuento
-     };
+    if (filtroAsesora !== 'Todas') {
+      lista = lista.filter(p => p.asesora === filtroAsesora);
+    }
 
-     if (editId) {
-       dataAEnviar.motivoRechazo = '';
-       dataAEnviar.faltanteUsd = 0;
-       if (globalDiscountPercent > 0) dataAEnviar.descuentoGlobalAplicado = globalDiscountPercent;
-       if (formData.refAdicional) {
-          dataAEnviar.referencia = `${formData.referencia} | EXTRA: ${formData.refAdicional}`;
-          dataAEnviar.pagoAdicionalUsd = pagoExtUsd;
-       }
-       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', editId), dataAEnviar);
-       loggear('PEDIDO_CORREGIDO', `Corregido pedido de ${formData.clienteNombre}`);
-       dialogs.alert(`Actualizado con éxito.`, "Aviso");
-     } else {
-       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), {
-         ...dataAEnviar,
-         auditado: false,
-         fechaCreacion: Date.now(),
-         fechaDespacho: fechaDespachoStr,
-         esPublico: false,
-         descuentoGlobalAplicado: globalDiscountPercent
-       });
-       loggear('PEDIDO_CREADO', `Venta [${formData.tipoDespacho}]: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)})`);
-       dialogs.alert(finalStatus === 'Pendiente' ? `Venta registrada. Despacho/Entrega pautada: ${fechaDespachoStr}` : `Guardado en Lista de Espera.`, "Aviso");
-     }
+    lista.sort((a, b) => b.fechaCreacion - a.fechaCreacion); 
+    return lista;
+  }, [pedidos, busquedaCliente, fechaHistorial, filtroStatus, filtroTipoDespacho, filtroAsesora]);
+
+  useEffect(() => {
+    let subVentas = 0;
+    if (formData.carritoObj) {
+      Object.entries(formData.carritoObj).forEach(([key, qty]) => {
+        const [n, p] = key.split('|');
+        catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const i=prod.presentaciones.indexOf(p); if (i >= 0 && prod.precios) subVentas += (prod.precios[i]*qty); }}));
+      });
+    }
+
+    let subObsequios = 0;
+    if (formData.carritoObsequiosObj) {
+      Object.entries(formData.carritoObsequiosObj).forEach(([key, qty]) => {
+        const [n, p] = key.split('|');
+        catalogo.forEach(cat => cat.productos.forEach(prod => { if(prod.nombre===n){ const i=prod.presentaciones.indexOf(p); if (i >= 0 && prod.precios) subObsequios += (prod.precios[i]*qty); }}));
+      });
+    }
+   
+    const subConCampaña = subVentas * (1 - globalDiscountPercent / 100);
+    const dExtra = parseFloat(formData.descuentoPorcentaje) || 0;
+    const finalProducts = subConCampaña * (1 - dExtra / 100);
+
+    let costoEnvioFinal = 0;
+    if (formData.tipoDespacho === 'Delivery' || (formData.tipoDespacho === 'Nacional' && formData.pagoEnvio === 'PAGADO')) {
+        costoEnvioFinal = parseFloat(formData.costoEnvio) || 0;
+    }
+
+    const subTotalAntesDeCredito = finalProducts + costoEnvioFinal;
+    const credito = parseFloat(formData.montoCreditoRegalo) || 0;
     
-     cancelarEdicion();
-     setVista('historial');
-     setTextoCrudo('');
-   } catch (e) { console.error(e); dialogs.alert("Error de guardado.", "Error"); }
-   setEnviando(false);
- };
+    let finalPagar = subTotalAntesDeCredito - credito;
+    if (finalPagar < 0) finalPagar = 0; 
 
- const enviarWhatsApp = (pedido) => {
-   const mensaje = `Hola ${pedido.clienteNombre}, tu pedido Bluher ha sido enviado por *${pedido.courier}*.%0A%0A*Guía:* ${pedido.guia}%0A%0A${pedido.linkGuia ? `Recibo: ${pedido.linkGuia}%0A` : ''}%0A¡Gracias por tu compra!`;
-   let cleanPhone = String(pedido.clienteTelefono).replace(/\D/g, '');
-  
-   if (cleanPhone.startsWith('0')) {
-       cleanPhone = cleanPhone.substring(1);
-   }
-   if (!cleanPhone.startsWith('58')) {
-       cleanPhone = '58' + cleanPhone;
-   }
-   window.open(`https://wa.me/${cleanPhone}?text=${mensaje}`, '_blank');
- };
+    let totalReporteObsequios = subObsequios + credito;
+   
+    setFormData(prev => ({
+      ...prev,
+      montoPago: prev.esRegalo ? '0' : finalPagar.toFixed(2),
+      montoObsequios: prev.esRegalo ? (subTotalAntesDeCredito + subObsequios).toFixed(2) : totalReporteObsequios.toFixed(2),
+      moneda: prev.moneda === 'ZELLE' ? 'ZELLE' : 'USD',
+      tasa: prev.tasa || config?.tasaDia
+    }));
+  }, [formData.carritoObj, formData.carritoObsequiosObj, formData.descuentoPorcentaje, formData.montoCreditoRegalo, formData.tipoDespacho, formData.pagoEnvio, formData.costoEnvio, config?.tasaDia, catalogo, globalDiscountPercent, formData.esRegalo]);
 
- return (
-   <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-3xl border dark:border-slate-700 shadow-sm transition-colors">
-     <div className="flex flex-wrap gap-4 mb-8 border-b dark:border-slate-700 pb-2 overflow-x-auto">
-       {puedeCrear && <button onClick={() => { setVista('nuevo'); if(editId) cancelarEdicion(); }} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'nuevo' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ShoppingCart size={18} className="inline mr-1" /> {editId ? 'Corrigiendo' : 'Registrar'}</button>}
+  const copiarLinkTienda = () => {
+    const linkTienda = `${window.location.origin}${window.location.pathname}#tienda`;
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(linkTienda)
+        .then(() => dialogs.alert(`Enlace copiado al portapapeles:\n\n${linkTienda}`, "Enlace Copiado"))
+        .catch(() => dialogs.alert("Copia manual:\n" + linkTienda, "Enlace"));
+    } else {
+      dialogs.alert("Copia manual:\n" + linkTienda, "Enlace");
+    }
+  };
+
+  const analizarConGemini = async () => {
+    if (!textoCrudo.trim()) return dialogs.alert("Pega el mensaje de WhatsApp del cliente primero.", "Mensaje Vacío");
+    if (!WORKER_GEMINI_URL) return dialogs.alert("La URL del Worker de Gemini no está configurada.", "Error de Entorno");
+   
+    setAnalizando(true);
+    try {
+      const llavesCatalogo = catalogo.flatMap(c => c.productos.flatMap(p => p.presentaciones.map(pres => `${p.nombre}|${pres}`))).join(', ');
+     
+      const prompt = `Analiza este pedido de WhatsApp y extrae los datos en JSON.
+      REGLAS ESTRICTAS:
+      1. REFERENCIAS MÚLTIPLES: Si el texto tiene varios pagos/referencias (ej. T0275, T2389...), DEBES unirlos todos en el campo "referencia" separando cada uno y mostrando su monto.
+         Formato obligatorio: "T0275 (11.697,80Bs) | T2389 (7.573,65Bs) | T6662 (25.245,50Bs)". NUNCA borres referencias ni las unas en un solo número.
+      2. DIRECCIÓN: Si el cliente envía un código de agencia (Ej. "1307000 - MRW"), inclúyelo al principio del campo "direccion".
+      3. MONTO TOTAL: En "montoPago", coloca la suma total de la venta o el total global indicado.
+      4. MONEDA: Debe ser estrictamente "USD", "VES" o "ZELLE". Si habla de Zelle es "ZELLE", si es dólares en efectivo es "USD", si hay bolívares/Bs es "VES".
+      5. PAGO ENVÍO: "COD" (cobro en destino) o "PAGADO" (envío pagado). Por defecto usa "COD".
+      6. TIPO DE ENVÍO: Si dice "MercadoLibre", esMercadoLibre=true. 
+      7. TIPO DESPACHO: Si dice "delivery", tipoDespacho="Delivery". Si dice "retiro" o "tienda", tipoDespacho="Tienda". Si es por MRW, Zoom, Tealca, Domesa, es "Nacional".
+      8. ORIGEN: Extrae el origen si aparece (ej. "RECOMPRA").
+      9. ASESORA: Extrae el nombre de la asesora si aparece.
+      productosCrudos: texto exacto original de los productos.
+      carrito: mapea cantidades exactas a estas llaves válidas: [${llavesCatalogo}].
+     
+      Texto del cliente:
+      ${textoCrudo}`;
+     
+      const res = await fetch(WORKER_GEMINI_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                clienteNombre: { type: "STRING" }, clienteCedula: { type: "STRING" }, clienteTelefono: { type: "STRING" },
+                courier: { type: "STRING" }, pagoEnvio: { type: "STRING" }, direccion: { type: "STRING" }, montoPago: { type: "STRING" }, moneda: { type: "STRING" }, referencia: { type: "STRING" }, asesora: { type: "STRING" }, productosCrudos: { type: "STRING" }, tasa: { type: "STRING" }, esMercadoLibre: { type: "BOOLEAN" }, tipoDespacho: { type: "STRING" },
+                carrito: { type: "ARRAY", items: { type: "OBJECT", properties: { llave: { type: "STRING" }, cantidad: { type: "INTEGER" } } } }
+              }
+            }
+          }
+        })
+      });
+      const resultData = await res.json();
+      if (resultData?.candidates?.[0]?.content?.parts?.[0]?.text) {
+         const result = JSON.parse(resultData.candidates[0].content.parts[0].text);
+         let nuevoCarritoObj = {}; let txtFormat = result.productosCrudos || '';
+         if (result.carrito && result.carrito.length > 0) {
+           const lineas = [];
+           result.carrito.forEach(item => {
+             if (item.llave && item.cantidad) { nuevoCarritoObj[item.llave] = item.cantidad; lineas.push(`- ${item.cantidad}x ${item.llave.replace('|', ' ')}`); }
+           });
+           if (lineas.length > 0) txtFormat = lineas.join('\n');
+         }
+         let monedaSanitizada = result.moneda;
+         if (typeof monedaSanitizada === 'string') {
+            const m = monedaSanitizada.toUpperCase();
+            if (m.includes('ZELLE')) monedaSanitizada = 'ZELLE';
+            else if (m.includes('BS') || m.includes('VES') || m.includes('BOL')) monedaSanitizada = 'VES';
+            else monedaSanitizada = 'USD';
+         } else {
+            monedaSanitizada = 'USD';
+         }
+         setFormData(prev => ({
+           ...prev,
+           ...result,
+           tasa: result.tasa || prev.tasa,
+           moneda: Object.keys(nuevoCarritoObj).length > 0 && monedaSanitizada !== 'ZELLE' ? 'USD' : monedaSanitizada,
+           esMercadoLibre: result.esMercadoLibre || false,
+           pagoEnvio: result.pagoEnvio || 'COD',
+           tipoDespacho: result.tipoDespacho && ['Nacional', 'Tienda', 'Delivery'].includes(result.tipoDespacho) ? result.tipoDespacho : prev.tipoDespacho,
+           productos: txtFormat || prev.productos,
+           carritoObj: Object.keys(nuevoCarritoObj).length > 0 ? nuevoCarritoObj : prev.carritoObj
+         }));
+      }
+    } catch(e) { console.error(e); dialogs.alert("Error comunicando con la IA. Ingresa manual.", "Error"); } finally { setAnalizando(false); }
+  };
+
+  const eliminarDelCarrito = (itemKey, esObsequio = false) => {
+    setFormData(prev => {
+      const targetObj = esObsequio ? { ...(prev.carritoObsequiosObj || {}) } : { ...(prev.carritoObj || {}) };
+      delete targetObj[itemKey];
+
+      let nuevoTexto = "";
       
-       <button onClick={() => setVista('historial')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'historial' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ClipboardList size={18} className="inline mr-1" /> Historial</button>
+      const currentVentas = esObsequio ? prev.carritoObj : targetObj;
+      if (currentVentas) {
+         Object.entries(currentVentas).forEach(([key, qty]) => nuevoTexto += `- ${qty}x ${key.replace('|', ' ')}\n`);
+      }
       
-       {puedeCrear && <button onClick={() => setVista('espera')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'espera' ? 'text-amber-500 border-b-2 border-amber-500' : 'text-slate-400 hover:text-amber-500'}`}><Clock size={18} className="inline mr-1" /> Espera ({enEspera.length})</button>}
-       {puedeCrear && <button onClick={() => setVista('web')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'web' ? 'text-emerald-500 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-emerald-500'}`}><Store size={18} className="inline mr-1" /> Web ({pedidosWeb.length})</button>}
+      const currentObsequios = esObsequio ? targetObj : prev.carritoObsequiosObj;
+      if (currentObsequios) {
+         Object.entries(currentObsequios).forEach(([key, qty]) => nuevoTexto += `- ${qty}x ${key.replace('|', ' ')} (OBSEQUIO)\n`);
+      }
+
+      return { 
+        ...prev, 
+        [esObsequio ? 'carritoObsequiosObj' : 'carritoObj']: targetObj, 
+        productos: nuevoTexto.trim() 
+      };
+    });
+  };
+
+  const cargarPedidoParaEditar = (pedido) => {
+    setFormData({
+      tipoDespacho: pedido.tipoDespacho || 'Nacional',
+      costoEnvio: pedido.costoEnvio?.toString() || '0',
+      retiroNombre: pedido.retiroNombre || '',
+      retiroCedula: pedido.retiroCedula || '',
+      retiroTelefono: pedido.retiroTelefono || '',
+      deliveryFecha: pedido.deliveryFecha || getLocalToday(),
+      deliveryHora: pedido.deliveryHora || '',
+      clienteNombre: pedido.clienteNombre, clienteCedula: pedido.clienteCedula, clienteTelefono: pedido.clienteTelefono, courier: pedido.courier || '', pagoEnvio: pedido.pagoEnvio || 'COD', origenPedido: pedido.origenPedido || '', direccion: pedido.direccion,
+      productos: typeof pedido.productos === 'string' ? pedido.productos : JSON.stringify(pedido.productos), 
+      carritoObj: pedido.carritoObj, 
+      carritoObsequiosObj: pedido.carritoObsequiosObj || null,
+      montoCreditoRegalo: pedido.montoCreditoRegaloUsd?.toString() || '',
+      asesora: pedido.asesora, referencia: pedido.referencia, moneda: pedido.moneda || 'USD',
+      montoPago: pedido.monto?.toString() || '0', tasa: pedido.tasaAplicada?.toString() || config.tasaDia, esMercadoLibre: pedido.esMercadoLibre || false, linkGuiaML: pedido.linkGuiaML || '', esRegalo: pedido.esRegalo || false, descuentoPorcentaje: pedido.descuentoPorcentaje?.toString() || '0', pagoAdicional: '', refAdicional: '',
+      numeroControlML: pedido.numeroControlML || '', notaVentas: pedido.notaVentas || '' 
+    });
+    setEditId(pedido.id);
+    setPedidoDevuelto(pedido);
+    setVista('nuevo');
+  };
+
+  const cancelarEdicion = () => {
+    setFormData(defaultForm);
+    setEditId(null);
+    setPedidoDevuelto(null);
+  };
+
+  const anularPedidoVentas = (pedido) => {
+    dialogs.prompt(`Estás a punto de ANULAR y descartar el pedido de ${pedido.clienteNombre}.\n\nEscribe el motivo de la cancelación:`, async (motivo) => {
+      if (!motivo) return;
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), {
+           status: 'Anulado',
+           motivoAnulacion: `Cancelado por Ventas: ${motivo}`,
+           anuladoPor: perfil.nombre,
+           fechaAnulacion: Date.now(),
+           montoUsd: 0, montoVes: 0,
+           notasAuditoria: [...(pedido.notasAuditoria || []), { fecha: Date.now(), texto: `ORDEN ANULADA POR VENTAS: ${motivo}`, autor: perfil.nombre }]
+        });
+        loggear('PEDIDO_ANULADO_VENTAS', `Ventas anuló el pedido de ${pedido.clienteNombre} por: ${motivo}`);
+        dialogs.alert("El pedido ha sido anulado y descartado exitosamente.", "Completado");
+      } catch (e) {
+        console.error(e);
+        dialogs.alert("Error al intentar anular el pedido.");
+      }
+    }, "Cancelar Pedido");
+  };
+
+  const handleFileUploadML = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!URL_GOOGLE_SCRIPT) return dialogs.alert("El sistema de subida no está configurado.");
+    setSubiendoML(true);
+    try {
+      let base64Data;
+      let mimeType = file.type;
+      if (mimeType === 'application/pdf') {
+        base64Data = await fileToBase64(file);
+      } else {
+        base64Data = await compressImage(file, 1000, 0.8);
+      }
+      const response = await fetch(URL_GOOGLE_SCRIPT, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+           tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN,
+           fileName: `GuiaML_${Date.now()}.${mimeType === 'application/pdf' ? 'pdf' : 'jpg'}`,
+           mimeType: mimeType,
+           data: base64Data
+        })
+      });
+      const result = await response.json();
+      if (result.url) setFormData({ ...formData, linkGuiaML: result.url });
+      setSubiendoML(false);
+    } catch (error) {
+      console.error(error);
+      dialogs.alert("Error subiendo el archivo. Revisa tu conexión.", "Fallo de Red");
+      setSubiendoML(false);
+    }
+  };
+
+  const handleSeleccionarCliente = (cliente) => {
+     setFormData(prev => ({
+         ...prev,
+         clienteNombre: cliente.nombre,
+         clienteCedula: cliente.cedula,
+         clienteTelefono: cliente.telefono
+     }));
+     setMostrarSugerencias(false);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!tasaActualizadaHoy && !editId) return dialogs.alert("NO puedes registrar ventas nuevas porque la Tasa del Día no ha sido actualizada hoy por Administración.", "Tasa Desactualizada");
+    
+    const hayVentas = formData.carritoObj && Object.keys(formData.carritoObj).length > 0;
+    const hayObsequios = formData.carritoObsequiosObj && Object.keys(formData.carritoObsequiosObj).length > 0;
+    
+    if (!hayVentas && !hayObsequios) return dialogs.alert("Debes seleccionar productos o obsequios del Catálogo.", "Carrito Vacío");
+    if (!formData.origenPedido) return dialogs.alert("Por favor selecciona de dónde viene el pedido.", "Falta Origen");
+   
+    if (formData.tipoDespacho === 'Nacional' && !formData.courier) return dialogs.alert("Por favor selecciona la Empresa de Envío.", "Falta Agencia");
+    if (formData.tipoDespacho === 'Tienda') {
+       if (!formData.retiroNombre || !formData.retiroCedula || !formData.retiroTelefono) return dialogs.alert("Debes completar los datos de la persona que retira en tienda.", "Datos Incompletos");
+    }
+    if (formData.tipoDespacho === 'Delivery') {
+       if (!formData.deliveryFecha || !formData.deliveryHora) return dialogs.alert("Debes completar la fecha y hora requerida para el Delivery.", "Datos Incompletos");
+    }
+
+    if (!formData.tasa || parseFloat(formData.tasa) <= 0) return dialogs.alert("Por favor ingresa la tasa de cambio aplicada.", "Datos Faltantes");
+    if (!formData.moneda) return dialogs.alert("Por favor selecciona la moneda de pago.", "Falta Moneda");
+   
+    if (formData.esMercadoLibre && !formData.linkGuiaML) return dialogs.alert("Si es un envío de MercadoLibre, debes adjuntar el PDF o Imagen de la guía antes de procesar.", "Falta Guía ML");
+   
+    const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+    let sinStock = false;
+    let itemsFaltantes = [];
+    let extraConcentrados = 0;
+    
+    const tipoInventario = formData.tipoDespacho === 'Nacional' ? 'envios' : 'recepcion';
+    const nombreAlmacen = formData.tipoDespacho === 'Nacional' ? 'Envíos' : 'Recepción';
+
+    const carritoTotal = { ...(formData.carritoObj || {}) };
+    if (formData.carritoObsequiosObj) {
+       Object.entries(formData.carritoObsequiosObj).forEach(([key, qty]) => {
+          carritoTotal[key] = (carritoTotal[key] || 0) + qty;
+       });
+    }
+
+    Object.entries(carritoTotal).forEach(([key, qty]) => {
+      let maxDisp = typeof stock[key] === 'object' ? (stock[key][tipoInventario] || 0) : (stock[key]||0);
+      if (qty > maxDisp) {
+        sinStock = true;
+        itemsFaltantes.push(key.replace('|', ' '));
+      }
+      if (boosterKeys.includes(key)) {
+         extraConcentrados += qty;
+      }
+    });
+
+    if (extraConcentrados > 0) {
+       const qtyConcentradosActual = carritoTotal["Concentrado|Unidad"] || 0;
+       const totalConcentradosNecesarios = qtyConcentradosActual + extraConcentrados;
+       const dispConcentrado = typeof stock["Concentrado|Unidad"] === 'object' ? (stock["Concentrado|Unidad"][tipoInventario] || 0) : (stock["Concentrado|Unidad"]||0);
+       
+       if (totalConcentradosNecesarios > dispConcentrado) {
+          sinStock = true;
+          if (!itemsFaltantes.some(i => i.includes("Concentrado"))) {
+             itemsFaltantes.push(`Concentrado (Requiere ${totalConcentradosNecesarios} total por los Boosters)`);
+          }
+       }
+    }
+
+    if (sinStock) {
+      const confirmarFuerza = window.confirm(
+        `Falta stock en el almacén de ${nombreAlmacen} para:\n\n${itemsFaltantes.join('\n')}\n\n¿Deseas montar el pedido de todas formas (se enviará en NEGATIVO para validación)?\n\n• Pulsa ACEPTAR para enviarlo a Validación.\n• Pulsa CANCELAR para guardarlo en la Lista de Espera.`
+      );
       
-       <button onClick={copiarLinkTienda} className="pb-3 font-black text-xs uppercase tracking-widest transition-colors text-slate-400 hover:text-sky-600 ml-auto"><Link size={18} className="inline mr-1" /> Link Tienda</button>
-     </div>
-     {!tasaActualizadaHoy && vista === 'nuevo' && !editId && puedeCrear && (
-       <div className="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-xl shadow-sm font-bold flex items-center gap-3">
-          <AlertTriangle size={24} className="shrink-0"/>
-          <div>
-            ATENCIÓN: La tasa del día no ha sido actualizada.
-            <span className="block text-xs font-normal">Puedes preparar el pedido pero no podrás enviarlo hasta que Administración actualice la tasa.</span>
-          </div>
-       </div>
-     )}
-     {isGlobalDiscountActive && vista === 'nuevo' && puedeCrear && (
-       <div className="mb-6 bg-gradient-to-r from-emerald-500 to-teal-500 text-white p-4 rounded-xl shadow-md font-bold flex items-center justify-between gap-3 animate-pulse">
-          <div className="flex items-center gap-3">
-            <Percent size={24}/>
-            <div>
-              <div>Campaña del {globalDiscountPercent}% activada por Administración.</div>
-              <div className="text-xs opacity-90 font-medium">Los precios del sistema ya incluyen esta rebaja automáticamente.</div>
+      if (confirmarFuerza) {
+        procesarVenta('Pendiente');
+      } else {
+        procesarVenta('En Espera (Sin Stock)');
+      }
+      return;
+    }
+    procesarVenta('Pendiente');
+  };
+
+  const procesarVenta = async (finalStatus) => {
+    setEnviando(true);
+    let montoNum = parseFloat(formData.montoPago) || 0;
+    const tasa = parseFloat(formData.tasa) || 1;
+    let descuento = parseFloat(formData.descuentoPorcentaje) || 0;
+    let costoEnvioFinal = parseFloat(formData.costoEnvio) || 0;
+    let creditoRegalo = parseFloat(formData.montoCreditoRegalo) || 0;
+
+    let pagoExtUsd = 0;
+    if (editId && pedidoDevuelto?.faltanteUsd > 0 && formData.pagoAdicional) {
+      let extra = parseFloat(formData.pagoAdicional) || 0;
+      pagoExtUsd = formData.moneda === 'VES' ? extra / tasa : extra;
+      montoNum += extra;
+    }
+    let calculo = { usd: 0, ves: 0 };
+    if (formData.moneda === 'ZELLE') {
+        calculo.usd = montoNum;
+        calculo.ves = 0;
+    } else if (formData.moneda === 'USD') {
+        calculo.usd = montoNum;
+        calculo.ves = montoNum * tasa;
+    } else {
+        calculo.ves = montoNum;
+        calculo.usd = tasa > 0 ? montoNum / tasa : 0;
+    }
+
+    let finalCarrito = { ...formData.carritoObj };
+    let finalCarritoObsequios = { ...formData.carritoObsequiosObj };
+    let finalProductosText = formData.productos || '';
+    
+    let countBoosters = 0;
+    const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+    
+    Object.entries(finalCarrito).forEach(([key, qty]) => { if (boosterKeys.includes(key)) countBoosters += qty; });
+    Object.entries(finalCarritoObsequios).forEach(([key, qty]) => { if (boosterKeys.includes(key)) countBoosters += qty; });
+
+    if (countBoosters > 0) {
+      finalCarrito["Concentrado|Unidad"] = (finalCarrito["Concentrado|Unidad"] || 0) + countBoosters;
+      if (!finalProductosText.includes("Concentrado (Unidad)")) finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Auto]`;
+    }
+    
+    const getVeneziaTime = () => {
+      const now = new Date();
+      return new Date(now.toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    };
+    const targetDate = getVeneziaTime();
+    const hora = targetDate.getHours();
+    const minutos = targetDate.getMinutes();
+    const currentDay = targetDate.getDay(); 
+
+    let fechaDespachoObj = new Date(targetDate);
+    let outDeliveryFecha = formData.deliveryFecha;
+
+    if (formData.tipoDespacho === 'Nacional') {
+       const isPastCutoff = hora > 12 || (hora === 12 && minutos >= 30);
+       let daysToAdd = 0;
+       if (currentDay === 5 && isPastCutoff) daysToAdd = 3; 
+       else if (currentDay === 6) daysToAdd = 2; 
+       else if (currentDay === 0) daysToAdd = 1; 
+       else if (isPastCutoff) daysToAdd = 1; 
+       fechaDespachoObj.setDate(fechaDespachoObj.getDate() + daysToAdd);
+    } else {
+       let baseDate = formData.tipoDespacho === 'Delivery' && formData.deliveryFecha ? new Date(formData.deliveryFecha + "T12:00:00") : new Date(targetDate);
+       let moveToMonday = false;
+       
+       if (baseDate.getDay() === 6 || baseDate.getDay() === 0) moveToMonday = true;
+       if (hora >= 17) moveToMonday = true;
+
+       if (moveToMonday) {
+           let d = new Date(targetDate);
+           let day = d.getDay();
+           let daysToMonday = day === 0 ? 1 : 8 - day;
+           d.setDate(d.getDate() + daysToMonday);
+           fechaDespachoObj = d;
+           
+           if (formData.tipoDespacho === 'Delivery') {
+               const ndd = String(fechaDespachoObj.getDate()).padStart(2, '0');
+               const nmm = String(fechaDespachoObj.getMonth() + 1).padStart(2, '0');
+               const nyyyy = fechaDespachoObj.getFullYear();
+               outDeliveryFecha = `${nyyyy}-${nmm}-${ndd}`;
+           }
+       } else {
+           fechaDespachoObj = baseDate;
+       }
+    }
+
+    const dd = String(fechaDespachoObj.getDate()).padStart(2, '0');
+    const mm = String(fechaDespachoObj.getMonth() + 1).padStart(2, '0');
+    const yyyy = fechaDespachoObj.getFullYear();
+    const fechaDespachoStr = `${dd}/${mm}/${yyyy}`;
+
+    try {
+      let dataAEnviar = {
+         ...formData,
+         deliveryFecha: outDeliveryFecha,
+         costoEnvio: costoEnvioFinal,
+         productos: finalProductosText,
+         carritoObj: finalCarrito,
+         carritoObsequiosObj: finalCarritoObsequios,
+         montoObsequiosUsd: parseFloat(formData.montoObsequios) || 0,
+         montoCreditoRegaloUsd: creditoRegalo,
+         monto: montoNum,
+         montoUsd: calculo.usd,
+         montoVes: calculo.ves,
+         tasaAplicada: tasa,
+         status: finalStatus,
+         descuentoPorcentaje: descuento
+      };
+
+      if (editId) {
+        dataAEnviar.motivoRechazo = '';
+        dataAEnviar.faltanteUsd = 0;
+        if (globalDiscountPercent > 0) dataAEnviar.descuentoGlobalAplicado = globalDiscountPercent;
+        if (formData.refAdicional) {
+           dataAEnviar.referencia = `${formData.referencia} | EXTRA: ${formData.refAdicional}`;
+           dataAEnviar.pagoAdicionalUsd = pagoExtUsd;
+        }
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', editId), dataAEnviar);
+        loggear('PEDIDO_CORREGIDO', `Corregido pedido de ${formData.clienteNombre}`);
+        dialogs.alert(`Actualizado con éxito.`, "Aviso");
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), {
+          ...dataAEnviar,
+          auditado: false,
+          fechaCreacion: Date.now(),
+          fechaDespacho: fechaDespachoStr,
+          esPublico: false,
+          descuentoGlobalAplicado: globalDiscountPercent
+        });
+        loggear('PEDIDO_CREADO', `Venta [${formData.tipoDespacho}]: ${formData.clienteNombre} ($${calculo.usd.toFixed(2)})`);
+        dialogs.alert(finalStatus === 'Pendiente' ? `Venta registrada. Despacho/Entrega pautada: ${fechaDespachoStr}` : `Guardado en Lista de Espera.`, "Aviso");
+      }
+      
+      cancelarEdicion();
+      setVista('historial');
+      setTextoCrudo('');
+    } catch (e) { console.error(e); dialogs.alert("Error de guardado.", "Error"); }
+    setEnviando(false);
+  };
+
+  const enviarWhatsApp = (pedido) => {
+    const mensaje = `Hola ${pedido.clienteNombre}, tu pedido Bluher ha sido enviado por *${pedido.courier}*.%0A%0A*Guía:* ${pedido.guia}%0A%0A${pedido.linkGuia ? `Recibo: ${pedido.linkGuia}%0A` : ''}%0A¡Gracias por tu compra!`;
+    let cleanPhone = String(pedido.clienteTelefono).replace(/\D/g, '');
+   
+    if (cleanPhone.startsWith('0')) {
+        cleanPhone = cleanPhone.substring(1);
+    }
+    if (!cleanPhone.startsWith('58')) {
+        cleanPhone = '58' + cleanPhone;
+    }
+    window.open(`https://wa.me/${cleanPhone}?text=${mensaje}`, '_blank');
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-3xl border dark:border-slate-700 shadow-sm transition-colors">
+      <div className="flex flex-wrap gap-4 mb-8 border-b dark:border-slate-700 pb-2 overflow-x-auto">
+        {puedeCrear && <button onClick={() => { setVista('nuevo'); if(editId) cancelarEdicion(); }} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'nuevo' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ShoppingCart size={18} className="inline mr-1" /> {editId ? 'Corrigiendo' : 'Registrar'}</button>}
+       
+        <button onClick={() => setVista('historial')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'historial' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><ClipboardList size={18} className="inline mr-1" /> Historial</button>
+       
+        {puedeCrear && <button onClick={() => setVista('espera')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'espera' ? 'text-amber-500 border-b-2 border-amber-500' : 'text-slate-400 hover:text-amber-500'}`}><Clock size={18} className="inline mr-1" /> Espera ({enEspera.length})</button>}
+        {puedeCrear && <button onClick={() => setVista('web')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'web' ? 'text-emerald-500 border-b-2 border-emerald-500' : 'text-slate-400 hover:text-emerald-500'}`}><Store size={18} className="inline mr-1" /> Web ({pedidosWeb.length})</button>}
+       
+        <button onClick={copiarLinkTienda} className="pb-3 font-black text-xs uppercase tracking-widest transition-colors text-slate-400 hover:text-sky-600 ml-auto"><Link size={18} className="inline mr-1" /> Link Tienda</button>
+      </div>
+      {!tasaActualizadaHoy && vista === 'nuevo' && !editId && puedeCrear && (
+        <div className="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-xl shadow-sm font-bold flex items-center gap-3">
+           <AlertTriangle size={24} className="shrink-0"/>
+           <div>
+             ATENCIÓN: La tasa del día no ha sido actualizada.
+             <span className="block text-xs font-normal">Puedes preparar el pedido pero no podrás enviarlo hasta que Administración actualice la tasa.</span>
+           </div>
+        </div>
+      )}
+      {isGlobalDiscountActive && vista === 'nuevo' && puedeCrear && (
+        <div className="mb-6 bg-gradient-to-r from-emerald-500 to-teal-500 text-white p-4 rounded-xl shadow-md font-bold flex items-center justify-between gap-3 animate-pulse">
+           <div className="flex items-center gap-3">
+             <Percent size={24}/>
+             <div>
+               <div>Campaña del {globalDiscountPercent}% activada por Administración.</div>
+               <div className="text-xs opacity-90 font-medium">Los precios del sistema ya incluyen esta rebaja automáticamente.</div>
+             </div>
+           </div>
+        </div>
+      )}
+      {vista === 'nuevo' && puedeCrear && (
+        <div className="animate-in fade-in duration-300">
+          {editId && pedidoDevuelto?.status === 'Rechazado' && (
+            <div className="mb-8 bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-5 rounded-r-xl shadow-sm">
+              <div className="flex gap-4">
+                <div className="p-2 bg-red-100 dark:bg-red-900/50 rounded-full text-red-600 dark:text-red-400 shrink-0 h-max"><AlertTriangle size={20} /></div>
+                <div className="flex-1">
+                  <h3 className="text-red-800 dark:text-red-300 font-bold text-lg">Administración Devolvió la Orden</h3>
+                  <p className="text-red-700 dark:text-red-200 text-sm mt-1"><strong>Motivo:</strong> {pedidoDevuelto.motivoRechazo}</p>
+                 
+                  {pedidoDevuelto.faltanteUsd > 0 && (
+                    <div className="mt-4 bg-white dark:bg-slate-800 p-4 rounded-xl border border-red-200 dark:border-red-800">
+                      <div className="text-sm font-bold text-red-600 dark:text-red-400 mb-3">⚠️ Dinero Faltante Detectado: ${pedidoDevuelto.faltanteUsd.toFixed(2)} USD</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Input label="Monto adicional pagado" type="number" step="0.01" value={formData.pagoAdicional || ''} onChange={e=>setFormData({...formData, pagoAdicional: e.target.value})} placeholder="Ej: 5.50" />
+                        <Input label="Referencia del pago adicional" type="text" value={formData.refAdicional || ''} onChange={e=>setFormData({...formData, refAdicional: e.target.value})} placeholder="Ref: 4321..." />
+                      </div>
+                    </div>
+                  )}
+                  <button type="button" onClick={cancelarEdicion} className="text-xs font-bold text-red-600 dark:text-red-400 hover:text-red-800 mt-4 underline transition-colors">Cancelar corrección</button>
+                </div>
+              </div>
             </div>
-          </div>
-       </div>
-     )}
-     {vista === 'nuevo' && puedeCrear && (
-       <div className="animate-in fade-in duration-300">
-         {editId && pedidoDevuelto?.status === 'Rechazado' && (
-           <div className="mb-8 bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-5 rounded-r-xl shadow-sm">
-             <div className="flex gap-4">
-               <div className="p-2 bg-red-100 dark:bg-red-900/50 rounded-full text-red-600 dark:text-red-400 shrink-0 h-max"><AlertTriangle size={20} /></div>
-               <div className="flex-1">
-                 <h3 className="text-red-800 dark:text-red-300 font-bold text-lg">Administración Devolvió la Orden</h3>
-                 <p className="text-red-700 dark:text-red-200 text-sm mt-1"><strong>Motivo:</strong> {pedidoDevuelto.motivoRechazo}</p>
-                
-                 {pedidoDevuelto.faltanteUsd > 0 && (
-                   <div className="mt-4 bg-white dark:bg-slate-800 p-4 rounded-xl border border-red-200 dark:border-red-800">
-                     <div className="text-sm font-bold text-red-600 dark:text-red-400 mb-3">⚠️ Dinero Faltante Detectado: ${pedidoDevuelto.faltanteUsd.toFixed(2)} USD</div>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                       <Input label="Monto adicional pagado" type="number" step="0.01" value={formData.pagoAdicional || ''} onChange={e=>setFormData({...formData, pagoAdicional: e.target.value})} placeholder="Ej: 5.50" />
-                       <Input label="Referencia del pago adicional" type="text" value={formData.refAdicional || ''} onChange={e=>setFormData({...formData, refAdicional: e.target.value})} placeholder="Ref: 4321..." />
-                     </div>
-                   </div>
-                 )}
-                 <button type="button" onClick={cancelarEdicion} className="text-xs font-bold text-red-600 dark:text-red-400 hover:text-red-800 mt-4 underline transition-colors">Cancelar corrección</button>
-               </div>
-             </div>
-           </div>
-         )}
-         {!editId && (
-           <div className="mb-8 bg-gradient-to-r from-sky-50 to-blue-50 dark:from-sky-900/20 dark:to-blue-900/20 p-6 rounded-2xl border border-sky-100 dark:border-sky-800 shadow-sm">
-             <h3 className="text-sky-900 dark:text-sky-300 font-bold mb-3 flex items-center gap-2"><Sparkles size={20} className="text-sky-600 dark:text-sky-400" /> Asistente de IA Bluher</h3>
-             <div className="flex flex-col md:flex-row gap-4">
-               <textarea className="flex-1 p-4 border border-sky-200/60 dark:border-sky-700 rounded-xl text-sm resize-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-all shadow-inner bg-white/80 dark:bg-slate-800/80 dark:text-white" rows={2} placeholder="Pega aquí el mensaje del cliente (WhatsApp)..." value={textoCrudo} onChange={(e) => setTextoCrudo(e.target.value)}></textarea>
-              
-               <div className="flex gap-2">
-                 <button type="button" onClick={() => setTextoCrudo('')} disabled={analizando || !textoCrudo} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-3 px-4 rounded-xl shadow-sm disabled:opacity-50 transition-all flex items-center justify-center">
-                   Limpiar
-                 </button>
-                 <button type="button" onClick={analizarConGemini} disabled={analizando || !textoCrudo} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-6 rounded-xl shadow-md disabled:opacity-50 transition-all hover:shadow-lg flex items-center justify-center min-w-[140px]">
-                   {analizando ? <Loader2 className="animate-spin" size={20}/> : 'Autocompletar'}
-                 </button>
-               </div>
-             </div>
-           </div>
-         )}
-         <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          )}
+          {!editId && (
+            <div className="mb-8 bg-gradient-to-r from-sky-50 to-blue-50 dark:from-sky-900/20 dark:to-blue-900/20 p-6 rounded-2xl border border-sky-100 dark:border-sky-800 shadow-sm">
+              <h3 className="text-sky-900 dark:text-sky-300 font-bold mb-3 flex items-center gap-2"><Sparkles size={20} className="text-sky-600 dark:text-sky-400" /> Asistente de IA Bluher</h3>
+              <div className="flex flex-col md:flex-row gap-4">
+                <textarea className="flex-1 p-4 border border-sky-200/60 dark:border-sky-700 rounded-xl text-sm resize-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-all shadow-inner bg-white/80 dark:bg-slate-800/80 dark:text-white" rows={2} placeholder="Pega aquí el mensaje del cliente (WhatsApp)..." value={textoCrudo} onChange={(e) => setTextoCrudo(e.target.value)}></textarea>
+               
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setTextoCrudo('')} disabled={analizando || !textoCrudo} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-3 px-4 rounded-xl shadow-sm disabled:opacity-50 transition-all flex items-center justify-center">
+                    Limpiar
+                  </button>
+                  <button type="button" onClick={analizarConGemini} disabled={analizando || !textoCrudo} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-6 rounded-xl shadow-md disabled:opacity-50 transition-all hover:shadow-lg flex items-center justify-center min-w-[140px]">
+                    {analizando ? <Loader2 className="animate-spin" size={20}/> : 'Autocompletar'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
             
-            {/* NUEVO: Lógica de la asesora con trim y mayúscula inicial */}
             <Input 
               label="Nombre de Asesora" 
               name="asesora" 
@@ -760,10 +778,41 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
 
             {formData.tipoDespacho === 'Tienda' && (
               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-inner">
-                 <h4 className="md:col-span-3 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1"><StoreIcon size={14}/> Datos de quien retira</h4>
-                 <Input label="Nombre y Apellido" value={formData.retiroNombre} onChange={e=>setFormData({...formData, retiroNombre: e.target.value})} placeholder="Ej: Maria Perez" />
-                 <Input label="Cédula" value={formData.retiroCedula} onChange={e=>setFormData({...formData, retiroCedula: e.target.value})} placeholder="Ej: 12345678" />
-                 <Input label="Teléfono" value={formData.retiroTelefono} onChange={e=>setFormData({...formData, retiroTelefono: e.target.value})} placeholder="Ej: 04141234567" />
+                 
+                 <div className="md:col-span-3 flex justify-between items-center border-b border-slate-200 dark:border-slate-700 pb-2 mb-1">
+                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1"><StoreIcon size={14}/> Datos de quien retira</h4>
+                    <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm transition-colors hover:bg-sky-50 dark:hover:bg-sky-900/30">
+                       <input 
+                          type="checkbox" 
+                          checked={mismoClienteRetira}
+                          onChange={(e) => {
+                             const checked = e.target.checked;
+                             setMismoClienteRetira(checked);
+                             if (checked) {
+                                setFormData(prev => ({
+                                   ...prev,
+                                   retiroNombre: prev.clienteNombre,
+                                   retiroCedula: prev.clienteCedula,
+                                   retiroTelefono: prev.clienteTelefono
+                                }));
+                             } else {
+                                setFormData(prev => ({
+                                   ...prev,
+                                   retiroNombre: '',
+                                   retiroCedula: '',
+                                   retiroTelefono: ''
+                                }));
+                             }
+                          }}
+                          className="w-4 h-4 accent-sky-600 cursor-pointer rounded"
+                       />
+                       <span className="text-[10px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest">El mismo cliente retira</span>
+                    </label>
+                 </div>
+
+                 <Input label="Nombre y Apellido" value={formData.retiroNombre} onChange={e=>setFormData({...formData, retiroNombre: e.target.value})} placeholder="Ej: Maria Perez" disabled={mismoClienteRetira} />
+                 <Input label="Cédula" value={formData.retiroCedula} onChange={e=>setFormData({...formData, retiroCedula: e.target.value})} placeholder="Ej: 12345678" disabled={mismoClienteRetira} />
+                 <Input label="Teléfono" value={formData.retiroTelefono} onChange={e=>setFormData({...formData, retiroTelefono: e.target.value})} placeholder="Ej: 04141234567" disabled={mismoClienteRetira} />
               </div>
             )}
 
@@ -782,7 +831,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
               </div>
             )}
 
-            {/* NUEVO: Menú Autocompletado de Clientes */}
             <div className="flex flex-col relative md:col-span-1">
                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2 transition-colors">Nombre del Cliente</label>
                <input 
@@ -947,7 +995,6 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
      {vista === 'historial' && (
        <div className="animate-in fade-in space-y-6">
         
-         {/* NUEVO REDISEÑO: BARRA DE BÚSQUEDA Y FILTROS SEGÚN IMAGEN */}
          <div className="bg-slate-50 dark:bg-slate-900/40 p-5 lg:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 flex flex-col xl:flex-row gap-6 items-center justify-between shadow-sm">
            
            <div className="w-full xl:w-1/3">
@@ -964,7 +1011,7 @@ export default function PanelVentas({ perfil, pedidos, catalogo, stock, config, 
            </div>
 
            <div className="w-full xl:w-2/3 flex flex-wrap md:flex-nowrap gap-4 justify-end">
-              
+             
               <div className="flex flex-col flex-1 min-w-[120px]">
                 <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-2 mb-1.5 tracking-wider">Tipo Envío</label>
                 <select value={filtroTipoDespacho} onChange={e=>setFiltroTipoDespacho(e.target.value)} className="w-full p-3.5 border-2 border-slate-200 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-800 font-bold outline-none focus:border-sky-500 text-sm transition-all shadow-sm text-slate-700 dark:text-slate-200 cursor-pointer">
