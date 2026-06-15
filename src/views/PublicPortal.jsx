@@ -141,7 +141,7 @@ export default function PublicPortal({ catalogo, stock, config, db, appId, dialo
       const response = await fetch(URL_GOOGLE_SCRIPT, {
         method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ 
-           tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
+           tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN,
            fileName: `ComprobanteWeb_${Date.now()}.${ext}`, 
            mimeType: mimeType, 
            data: base64Data 

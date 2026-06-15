@@ -88,7 +88,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             await fetch(URL_GOOGLE_SCRIPT, {
                 method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({ 
-                   tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
+                   tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN,
                    fileName: `Backup_Bluher_${hoyStr.replace(/\//g,'-')}.json`, 
                    mimeType: 'application/json', data: base64data 
                 })

@@ -48,6 +48,9 @@ export default function App() {
   const [isPublicRoute, setIsPublicRoute] = useState(window.location.hash === '#tienda');
   
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  
+  // ESTADO PARA COMUNICAR CLIENTES AL PANEL DE VENTAS
+  const [clienteParaPedido, setClienteParaPedido] = useState(null);
 
   const [dialogConfig, setDialogConfig] = useState(null);
   const dialogs = useMemo(() => ({
@@ -240,6 +243,49 @@ export default function App() {
     setIsMobileMenuOpen(false);
   };
 
+  // =======================================================================
+  // FUNCIONES PARA EL CRM (PANEL CLIENTES)
+  // =======================================================================
+  const handleActualizarCliente = async (clienteModificado) => {
+    try {
+      const { keyOriginal, nombre, cedula, telefono, direccion } = clienteModificado;
+      
+      // Filtramos todos los pedidos que tienen la misma clave original (teléfono, cédula o nombre antiguo)
+      const pedidosActualizar = pedidos.filter(p => {
+         const tlf = p.clienteTelefono ? String(p.clienteTelefono).trim() : '';
+         const ci = p.clienteCedula ? String(p.clienteCedula).trim() : '';
+         const nom = p.clienteNombre ? String(p.clienteNombre).trim() : 'Sin Nombre';
+         const key = tlf || ci || nom;
+         return key === keyOriginal;
+      });
+
+      // Actualizamos los datos en lote en la colección de pedidos
+      const promesas = pedidosActualizar.map(p => 
+         updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', p.id), {
+            clienteNombre: nombre,
+            clienteCedula: cedula,
+            clienteTelefono: telefono,
+            direccion: direccion
+         })
+      );
+      
+      await Promise.all(promesas);
+
+      loggear('CLIENTE_ACTUALIZADO', `Se actualizaron los datos de ${nombre} en ${pedidosActualizar.length} pedidos.`);
+      dialogs.alert(`Datos de contacto de ${nombre} actualizados correctamente en su historial.`, "Éxito");
+    } catch (error) {
+      console.error("Error al actualizar cliente:", error);
+      dialogs.alert("Error de red al actualizar los datos del cliente.", "Error");
+    }
+  };
+
+  const handleTomarPedido = (cliente) => {
+    setClienteParaPedido(cliente);
+    setActiveTab('ventas');
+    setIsMobileMenuOpen(false); 
+  };
+
+
   let content;
 
   if (isPublicRoute) {
@@ -380,13 +426,17 @@ export default function App() {
           <main className="flex-1 p-4 md:p-10 overflow-y-auto print:p-0 print:m-0 print:bg-white print:block w-full">
             <div className="max-w-6xl mx-auto print:max-w-none print:mx-0">
               <div className="print:hidden">
-                {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} />}
+                
+                {/* PASAMOS CLIENTEPRECARGADO AL PANEL DE VENTAS (SI LO SOPORTA LUEGO) */}
+                {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} clientePreCargado={clienteParaPedido} setClientePreCargado={setClienteParaPedido} />}
+                
                 {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} config={configGral} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
                 {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} perfil={userProfile} />}
                 
-                {/* INYECCIÓN DE LOS NUEVOS PANELES */}
                 {activeTab === 'recepcion' && showRecepcion && <PanelRecepcion pedidos={pedidos} catalogo={catalogo} stock={stockInventario} perfil={userProfile} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
-                {activeTab === 'clientes' && showClientes && <PanelClientes pedidos={pedidos} />}
+                
+                {/* INYECCIÓN DE LOS HANDLERS AL PANEL CLIENTES */}
+                {activeTab === 'clientes' && showClientes && <PanelClientes pedidos={pedidos} perfil={userProfile} onActualizarCliente={handleActualizarCliente} onTomarPedido={handleTomarPedido} />}
 
                 {activeTab === 'reportes' && showReportes && <PanelReportes perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
                 {activeTab === 'inventario' && showInventario && <PanelInventario stock={stockInventario} notas={notasInventario} catalogo={catalogo} movimientos={movimientos} pedidos={pedidos} db={db} appId={appId} loggear={loggear} perfil={userProfile} dialogs={dialogs} />}

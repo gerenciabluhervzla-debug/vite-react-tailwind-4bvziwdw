@@ -87,6 +87,11 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     let totalTarjetaCreditoBs = 0;
     let totalVueltosDados = 0; 
     let totalVueltosBs = 0; 
+    
+    // NUEVAS MÉTRICAS: Punto/TDC en USD y Transferencia/Pago Móvil
+    let totalPuntosTDCUsd = 0;
+    let transfPagoMovilBs = 0;
+    let transfPagoMovilUsd = 0;
 
     pedidosFiltrados.forEach(p => {
       let valorVentaUsd = 0;
@@ -158,6 +163,33 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         // El descuento real (Campaña/Asesor) se aísla restando primero el crédito
         const diferenciaReal = (valorVentaUsd + costoEnvio) - (mUsd + creditoRegalo);
         if (diferenciaReal > 0) descuentosUSD += diferenciaReal;
+
+        // --- LÓGICA DE TRANSFERENCIAS Y EQUIVALENTES USD ---
+        const efeBs = p.montoEfectivoBs || 0;
+        const ptoBs = p.montoPuntoVentaBs || 0;
+        const tdcBs = p.montoTarjetaCreditoBs || 0;
+        const efeUsd = p.montoEfectivoUsd || 0;
+        const bsTotal = p.montoVes || 0;
+        const usdTotal = p.montoUsd || 0;
+        const tasa = parseFloat(p.tasa || p.tasaCambio || 0);
+
+        // Calcular equivalente en USD del punto de venta y tarjeta
+        if (tasa > 0) {
+            totalPuntosTDCUsd += (ptoBs + tdcBs) / tasa;
+        }
+
+        // Bs transferidos puramente (Excluye Efectivo Bs, Punto y TDC)
+        transfPagoMovilBs += (bsTotal - efeBs - ptoBs - tdcBs);
+
+        // USD digital equivalente excluyendo Efectivo, Punto, TDC y Zelle
+        let usdAExcluir = efeUsd;
+        if (p.moneda === 'ZELLE') {
+            usdAExcluir += usdTotal; // Zelle tiene su propio recuadro
+        }
+        if (tasa > 0) {
+            usdAExcluir += (efeBs + ptoBs + tdcBs) / tasa;
+        }
+        transfPagoMovilUsd += Math.max(0, usdTotal - usdAExcluir);
       }
     });
 
@@ -167,7 +199,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        ventasVES, ventasZelle, mlUSD, mlVES, regalosUSD, descuentosUSD, 
        totalBrutoGeneralUsd, totalCobroEnviosUsd, totalNetoProductosUsd,
        totalEfectivoTienda, totalEfectivoBs, totalPuntoTiendaBs, totalTarjetaCreditoBs, totalVueltosDados, totalVueltosBs,
-       ventasEnviosUsd, ventasDeliveryUsd, ventasTiendaUsd
+       ventasEnviosUsd, ventasDeliveryUsd, ventasTiendaUsd,
+       totalPuntosTDCUsd, transfPagoMovilBs, transfPagoMovilUsd
     };
   }, [pedidosFiltrados, catalogo]);
 
@@ -350,7 +383,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     // CÁLCULOS NETOS PARA CAJA FÍSICA PDF
     const cajaFisicaUsd = metricas.totalEfectivoTienda - metricas.totalVueltosDados;
     const cajaFisicaBs = metricas.totalEfectivoBs; 
-    const totalTransfPagoMovilNetoBs = metricas.ventasVES;
     const totalPuntosTDC = metricas.totalPuntoTiendaBs + metricas.totalTarjetaCreditoBs;
 
     let html = `
@@ -477,7 +509,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            <div class="card bg-light-indigo card-shadow">
               <div class="kpi-title" style="color: #3730a3;">Punto de Venta y TDC (Bs)</div>
               <div class="kpi-value">Bs. ${totalPuntosTDC.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
-              <div class="kpi-sub">Punto normal: Bs. ${metricas.totalPuntoTiendaBs.toLocaleString('es-VE')}<br/>Tarjeta (+15%): Bs. ${metricas.totalTarjetaCreditoBs.toLocaleString('es-VE')}</div>
+              <div class="kpi-sub">Punto normal: Bs. ${metricas.totalPuntoTiendaBs.toLocaleString('es-VE')}<br/>Tarjeta (+15%): Bs. ${metricas.totalTarjetaCreditoBs.toLocaleString('es-VE')}<br/><strong style="color:#312e81;">Equivalente USD: $${metricas.totalPuntosTDCUsd.toFixed(2)}</strong></div>
            </div>
         </div>
 
@@ -486,10 +518,15 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
               <div class="kpi-title" style="color: #e9d5ff;">Pagos ZELLE ($)</div>
               <div class="kpi-value">$${metricas.ventasZelle.toFixed(2)}</div>
            </div>
-           <div class="card bg-light-slate card-shadow grid-col-span-2">
-              <div class="kpi-title" style="color: #475569;">Transferencias y Pago Móvil Netos (Bs)</div>
+           <div class="card card-shadow" style="background: #eff6ff; color: #1e3a8a; border-bottom: 4px solid #bfdbfe;">
+              <div class="kpi-title" style="color: #1e40af;">Transferencia / Pago Móvil</div>
+              <div class="kpi-value">$${metricas.transfPagoMovilUsd.toFixed(2)}</div>
+              <div class="kpi-sub" style="color: #1d4ed8;">En Bs: Bs. ${metricas.transfPagoMovilBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}<br/>(Excluye Efectivo, Punto y TDC)</div>
+           </div>
+           <div class="card bg-light-slate card-shadow">
+              <div class="kpi-title" style="color: #475569;">Ingresos en Bs Netos</div>
               <div class="kpi-value">Bs. ${metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
-              <div class="kpi-sub" style="color: #64748b;">Bruto ingresado: Bs. ${metricas.ventasVES.toLocaleString('es-VE')}<br/>Salió en Vueltos (Pago Móvil): Bs. ${metricas.totalVueltosBs.toLocaleString('es-VE')}</div>
+              <div class="kpi-sub" style="color: #64748b;">Bruto: Bs. ${metricas.ventasVES.toLocaleString('es-VE')}<br/>Salió en Vueltos (Pago Móvil): Bs. ${metricas.totalVueltosBs.toLocaleString('es-VE')}</div>
            </div>
         </div>
 
@@ -746,6 +783,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                      <div className="text-[11px] font-bold mt-2 opacity-80">
                          Punto normal: Bs. {metricas.totalPuntoTiendaBs.toLocaleString('es-VE', {minimumFractionDigits: 2})} <br/> 
                          Tarjeta (+15%): Bs. {metricas.totalTarjetaCreditoBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}
+                         <span className="text-indigo-700 mt-1 block">Equivalente en USD: ${metricas.totalPuntosTDCUsd.toFixed(2)}</span>
                      </div>
                  </div>
               </>
@@ -761,7 +799,19 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                   <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
                </div>
                
-               <div className="bg-slate-100 text-slate-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-slate-300 relative overflow-hidden md:col-span-2">
+               <div className="bg-blue-50 text-blue-900 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-blue-300 relative overflow-hidden">
+                  <div className="relative z-10">
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Transferencia o Pago Móvil</div>
+                    <div className="text-xl lg:text-2xl font-black">${metricas.transfPagoMovilUsd.toFixed(2)}</div>
+                    <div className="text-[11px] font-bold mt-2 text-blue-700">
+                        En Bs: Bs. {metricas.transfPagoMovilBs.toLocaleString('es-VE', {minimumFractionDigits: 2})} <br/>
+                        (Excluye Efectivo y Punto/TDC)
+                    </div>
+                  </div>
+                  <Wallet size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+               </div>
+
+               <div className="bg-slate-100 text-slate-800 p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-slate-300 relative overflow-hidden">
                   <div className="relative z-10">
                     <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Ingresos en Bs Netos</div>
                     <div className="text-xl lg:text-2xl font-black">Bs. {metricas.ventasVES.toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
