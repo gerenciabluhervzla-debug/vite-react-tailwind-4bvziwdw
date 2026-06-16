@@ -166,7 +166,7 @@ export default function App() {
     if (!userProfile || !userProfile.isApproved) return;
     const unsubs = [];
 
-    const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(150));
+    const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(2000));
     unsubs.push(onSnapshot(qPedidos, (snapshot) => {
       setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }));
@@ -186,7 +186,7 @@ export default function App() {
         setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }));
       
-      const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(200));
+      const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(50));
       unsubs.push(onSnapshot(qLogs, (snapshot) => {
         setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }));
