@@ -4,6 +4,7 @@ import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const [rangoRango, setRangoRango] = useState('hoy');
+  const [asesoraFiltro, setAsesoraFiltro] = useState('todas'); // Estado para el filtro por asesora
   
   const getLocalToday = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -80,6 +81,10 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     // MÉTRICAS SEGMENTADAS DE VENTAS 
     let ventasEnviosUsd = 0; let ventasDeliveryUsd = 0; let ventasTiendaUsd = 0;
 
+    // DESGLOSE ESPECÍFICO DE RECAUDACIÓN DE ENVÍOS / DELIVERY
+    let totalDeliveryCobroUsd = 0;
+    let totalEnviosNacionalesCobroUsd = 0;
+
     // MÉTRICAS DE CAJAS FÍSICAS (Tienda y Delivery)
     let totalEfectivoTienda = 0; 
     let totalEfectivoBs = 0;
@@ -123,21 +128,21 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       const creditoRegalo = parseFloat(p.montoCreditoRegaloUsd) || 0;
 
       if (p.esRegalo) {
-        // Soporte a registros antiguos donde todo era regalo por un switch
         regalosUSD += valorVentaUsd + valorObsequiosUsd;
       } else {
         const mUsd = p.montoUsd || 0;
         const costoEnvio = parseFloat(p.costoEnvio) || 0;
         
-        // El total en obsequios es el valor de los productos regalados + el crédito concedido
         regalosUSD += valorObsequiosUsd + creditoRegalo;
         
         if (p.tipoDespacho === 'Delivery') {
           ventasDeliveryUsd += mUsd;
+          totalDeliveryCobroUsd += costoEnvio;
         } else if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda') {
           ventasTiendaUsd += mUsd;
         } else {
           ventasEnviosUsd += mUsd;
+          totalEnviosNacionalesCobroUsd += costoEnvio;
         }
 
         if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda' || p.tipoDespacho === 'Delivery') {
@@ -160,11 +165,9 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
         if (p.esMercadoLibre) { mlUSD += mUsd; mlVES += (p.montoVes || 0); }
 
-        // El descuento real (Campaña/Asesor) se aísla restando primero el crédito
         const diferenciaReal = (valorVentaUsd + costoEnvio) - (mUsd + creditoRegalo);
         if (diferenciaReal > 0) descuentosUSD += diferenciaReal;
 
-        // --- LÓGICA DE TRANSFERENCIAS Y EQUIVALENTES USD ---
         const efeBs = p.montoEfectivoBs || 0;
         const ptoBs = p.montoPuntoVentaBs || 0;
         const tdcBs = p.montoTarjetaCreditoBs || 0;
@@ -173,18 +176,15 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         const usdTotal = p.montoUsd || 0;
         const tasa = parseFloat(p.tasa || p.tasaCambio || 0);
 
-        // Calcular equivalente en USD del punto de venta y tarjeta
         if (tasa > 0) {
             totalPuntosTDCUsd += (ptoBs + tdcBs) / tasa;
         }
 
-        // Bs transferidos puramente (Excluye Efectivo Bs, Punto y TDC)
         transfPagoMovilBs += (bsTotal - efeBs - ptoBs - tdcBs);
 
-        // USD digital equivalente excluyendo Efectivo, Punto, TDC y Zelle
         let usdAExcluir = efeUsd;
         if (p.moneda === 'ZELLE') {
-            usdAExcluir += usdTotal; // Zelle tiene su propio recuadro
+            usdAExcluir += usdTotal;
         }
         if (tasa > 0) {
             usdAExcluir += (efeBs + ptoBs + tdcBs) / tasa;
@@ -200,7 +200,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        totalBrutoGeneralUsd, totalCobroEnviosUsd, totalNetoProductosUsd,
        totalEfectivoTienda, totalEfectivoBs, totalPuntoTiendaBs, totalTarjetaCreditoBs, totalVueltosDados, totalVueltosBs,
        ventasEnviosUsd, ventasDeliveryUsd, ventasTiendaUsd,
-       totalPuntosTDCUsd, transfPagoMovilBs, transfPagoMovilUsd
+       totalPuntosTDCUsd, transfPagoMovilBs, transfPagoMovilUsd,
+       totalDeliveryCobroUsd, totalEnviosNacionalesCobroUsd
     };
   }, [pedidosFiltrados, catalogo]);
 
@@ -209,13 +210,20 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       pedidosFiltrados.forEach(p => {
          if(p.esRegalo) return; 
          const as = p.asesora || 'Sin Asignar';
-         if (!map[as]) map[as] = { nombre: as, totalUsd: 0, totalVes: 0, totalZelle: 0, clientes: [] };
+         if (!map[as]) map[as] = { nombre: as, totalUsd: 0, totalVes: 0, totalZelle: 0, enviosUsd: 0, enviosVes: 0, clientes: [] };
          
+         const costoEnvio = parseFloat(p.costoEnvio) || 0;
+         const tasa = parseFloat(p.tasa || p.tasaCambio || 0);
+         const costoEnvioBs = p.montoUsd > 0 ? (costoEnvio * (p.montoVes / p.montoUsd)) : (tasa > 0 ? costoEnvio * tasa : 0);
+
          if (p.moneda === 'ZELLE') {
              map[as].totalZelle += (p.montoUsd || 0);
          } else {
              map[as].totalUsd += (p.montoUsd || 0);
              map[as].totalVes += (p.montoVes || 0);
+             // Acumulamos montos a restar de envíos/delivery para Bolívares / Efectivo y Bs.
+             map[as].enviosUsd += costoEnvio;
+             map[as].enviosVes += costoEnvioBs;
          }
          
          map[as].clientes.push({
@@ -225,13 +233,26 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              montoVes: p.montoVes || 0,
              moneda: p.moneda,
              origen: p.origenPedido || 'Sin Origen',
-             costoEnvio: parseFloat(p.costoEnvio) || 0,
+             costoEnvio: costoEnvio,
              tipoDespacho: p.tipoDespacho || 'Nacional',
-             creditoRegalo: parseFloat(p.montoCreditoRegaloUsd) || 0
+             creditoRegalo: parseFloat(p.montoCreditoRegaloUsd) || 0,
+             fechaPedido: p.fechaDespacho || 'Sin Fecha'
          });
       });
       return Object.values(map).sort((a,b) => (b.totalUsd + b.totalZelle) - (a.totalUsd + a.totalZelle));
   }, [pedidosFiltrados]);
+
+  // Lista única de asesoras para el filtro de visualización
+  const listadoAsesorasUnicas = useMemo(() => {
+    const names = pedidosFiltrados.map(p => p.asesora || 'Sin Asignar');
+    return ['todas', ...new Set(names)];
+  }, [pedidosFiltrados]);
+
+  // Filtrado visual de asesoras para la tabla
+  const ventasPorAsesoraFiltradas = useMemo(() => {
+    if (asesoraFiltro === 'todas') return ventasPorAsesora;
+    return ventasPorAsesora.filter(as => as.nombre === asesoraFiltro);
+  }, [ventasPorAsesora, asesoraFiltro]);
 
   // --- CÁLCULO INVENTARIO FÍSICO (Ventas + Obsequios) ---
   const totalValInventario = useMemo(() => {
@@ -380,7 +401,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     const pedidosEntregasTienda = pedidosFiltrados.filter(p => p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Entrega en tienda');
     const pedidosDelivery = pedidosFiltrados.filter(p => p.tipoDespacho === 'Delivery');
 
-    // CÁLCULOS NETOS PARA CAJA FÍSICA PDF
     const cajaFisicaUsd = metricas.totalEfectivoTienda - metricas.totalVueltosDados;
     const cajaFisicaBs = metricas.totalEfectivoBs; 
     const totalPuntosTDC = metricas.totalPuntoTiendaBs + metricas.totalTarjetaCreditoBs;
@@ -397,9 +417,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           .logo { height: 60px; object-fit: contain; }
           h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; text-transform: uppercase; }
           
-          /* Nuevos estilos adaptados al Dashboard UI */
           .dashboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px; }
-          .grid-col-span-2 { grid-column: span 2; }
           .card { border-radius: 16px; padding: 18px; box-sizing: border-box; position: relative; overflow: hidden; }
           .card-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
           .card-border { border: 1px solid #e2e8f0; background: #ffffff; }
@@ -458,6 +476,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            <div class="card bg-orange card-shadow">
               <div class="kpi-title" style="color: #fed7aa;">Recaudado por Envíos/Delivery ($)</div>
               <div class="kpi-value">$${metricas.totalCobroEnviosUsd.toFixed(2)}</div>
+              <div style="font-size: 10px; margin-top: 4px; opacity: 0.9;">Deliverys: $${metricas.totalDeliveryCobroUsd.toFixed(2)} | Envíos: $${metricas.totalEnviosNacionalesCobroUsd.toFixed(2)}</div>
            </div>
            <div class="card bg-emerald card-shadow">
               <div class="kpi-title" style="color: #a7f3d0;">Ventas Netas (Solo Productos) ($)</div>
@@ -539,8 +558,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
             <h3 style="margin: 0 0 10px 0; font-size: 14px;">${asesora.nombre.toUpperCase()}</h3>
             <p style="margin: 0; font-size: 12px; font-weight: bold; color: #475569;">
                Zelle: <span style="color:#6b21a8;">$${asesora.totalZelle.toFixed(2)}</span> | 
-               Bolívares / Efectivo: <span style="color:#059669;">$${asesora.totalUsd.toFixed(2)}</span> | 
-               Bolívares: <span style="color:#059669;">Bs. ${asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+               Bolívares / Efectivo: <span style="color:#059669;">$${asesora.totalUsd.toFixed(2)} (Neto sin envíos: $${(asesora.totalUsd - asesora.enviosUsd).toFixed(2)})</span> | 
+               Bolívares: <span style="color:#059669;">Bs. ${asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})} (Neto sin envíos: Bs. ${(asesora.totalVes - asesora.enviosVes).toLocaleString('es-VE', {minimumFractionDigits:2})})</span>
             </p>
          </div>
          <table>
@@ -701,10 +720,15 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
             </div>
 
+            {/* CUADRO NARANJA CON SEPARACIÓN EXPLICITADA */}
             <div className="bg-orange-600 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-orange-800 relative overflow-hidden">
                <div className="relative z-10">
                  <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-orange-200 mb-1">Recaudado por Envíos/Delivery ($)</div>
                  <div className="text-3xl lg:text-4xl font-black">${metricas.totalCobroEnviosUsd.toFixed(2)}</div>
+                 <div className="text-[11px] font-bold mt-2 pt-2 border-t border-orange-500/50 flex flex-col gap-0.5 opacity-90">
+                    <div>Deliverys: ${metricas.totalDeliveryCobroUsd.toFixed(2)}</div>
+                    <div>Envíos Pagos Nac: ${metricas.totalEnviosNacionalesCobroUsd.toFixed(2)}</div>
+                 </div>
                </div>
                <Truck size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
             </div>
@@ -719,7 +743,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
          </div>
       )}
 
-      {/* TRES NUEVOS CAMPOS: SEGMENTACIÓN DE VENTAS */}
+      {/* TRES CAMPOS: SEGMENTACIÓN DE VENTAS */}
       {verDinero && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
            <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 transition-colors">
@@ -754,10 +778,9 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
-      {/* MÉTRICAS SECUNDARIAS (CAJAS FÍSICAS Y AUDITORÍA) */}
+      {/* MÉTRICAS SECUNDARIAS */}
       {(verDinero || verTotalInventario) && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-           
            {verDinero && (
               <>
                  <div className="bg-emerald-50 text-emerald-900 p-5 rounded-2xl shadow-sm border-b-4 border-emerald-300 relative overflow-hidden">
@@ -825,7 +848,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              </>
            )}
 
-           {/* CAMPO DE INVENTARIO FÍSICO SOLO VISIBLE PARA ADMINISTRADORES */}
            {verTotalInventario && (
              <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-sm flex flex-col justify-center border-b-4 border-slate-950 relative overflow-hidden col-span-full">
                 <div className="relative z-10">
@@ -876,43 +898,78 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
-      {/* TABLA DE ASESORAS */}
+      {/* AREA DE CONTROL DE VENTAS POR ASESORAS MODIFICADA */}
       {verDinero && (
         <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
-           <div className="flex items-center gap-2 mb-6">
-             <Users className="text-sky-600"/>
-             <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">Control de Ventas por Asesoras</h3>
+           
+           {/* FILTRO AGREGADO (PUNTO 4) */}
+           <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
+              <div className="flex items-center gap-2">
+                <Users className="text-sky-600"/>
+                <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">Control de Ventas por Asesoras</h3>
+              </div>
+              <div className="w-full sm:w-64">
+                 <label className="text-[10px] font-black uppercase text-slate-500 mb-1 block ml-1">Visualizar Asesora</label>
+                 <select 
+                   value={asesoraFiltro} 
+                   onChange={(e) => setAsesoraFiltro(e.target.value)}
+                   className="w-full p-2.5 text-xs font-bold rounded-xl border-2 border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white outline-none focus:border-sky-500 transition-colors"
+                 >
+                   {listadoAsesorasUnicas.map(as => (
+                     <option key={as} value={as}>{as === 'todas' ? 'Todas las Asesoras' : as.toUpperCase()}</option>
+                   ))}
+                 </select>
+              </div>
            </div>
            
            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
              <table className="w-full text-left text-sm border-collapse min-w-[800px]">
                 <thead>
                   <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-b dark:border-slate-700">
+                    <th className="p-4 font-black tracking-wide text-center w-[60px]">N°</th>
+                    <th className="p-4 font-black tracking-wide w-[120px]">Fecha Pedido</th>
                     <th className="p-4 font-black tracking-wide">Cliente y Teléfono</th>
                     <th className="p-4 font-black tracking-wide">Origen del Pedido</th>
-                    <th className="p-4 font-black tracking-wide text-right">Monto Bs</th>
-                    <th className="p-4 font-black tracking-wide text-right">Monto Zelle / Restante</th>
+                    <th className="p-4 font-black tracking-wide text-right">Monto Facturado ($ / Bs.)</th>
                   </tr>
                 </thead>
                 <tbody>
-                   {ventasPorAsesora.length === 0 ? (
-                      <tr><td colSpan="4" className="p-8 text-center text-slate-400 font-bold italic">No hay ventas registradas en este periodo.</td></tr>
-                   ) : ventasPorAsesora.map((asesora) => (
+                   {ventasPorAsesoraFiltradas.length === 0 ? (
+                      <tr><td colSpan="5" className="p-8 text-center text-slate-400 font-bold italic">No hay ventas registradas para la selección actual.</td></tr>
+                   ) : ventasPorAsesoraFiltradas.map((asesora) => (
                       <React.Fragment key={asesora.nombre}>
                          <tr className="bg-sky-50 dark:bg-sky-900/30 border-y border-sky-100 dark:border-sky-800/50">
-                            <td colSpan="4" className="p-4">
-                               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                            <td colSpan="5" className="p-4">
+                               <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-3">
                                   <span className="font-black text-lg text-sky-800 dark:text-sky-300 uppercase tracking-tighter">{asesora.nombre}</span>
+                                  
+                                  {/* DETALLE NETO CON ENVÍOS RESTADOS (PUNTO 3) */}
                                   <div className="flex flex-wrap gap-4 text-xs font-bold text-slate-600 dark:text-slate-300">
-                                     <span className="bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-3 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800/50 shadow-sm">Zelle: ${asesora.totalZelle.toFixed(2)}</span>
-                                     <span className="bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border dark:border-slate-700 shadow-sm">Bolívares / Efectivo: <span className="text-slate-900 dark:text-white">${asesora.totalUsd.toFixed(2)}</span></span>
-                                     <span className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800/50 shadow-sm">Bs. {asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2})}</span>
+                                     <div className="bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-3 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800/50 shadow-sm flex flex-col justify-center">
+                                        <span>Zelle: ${asesora.totalZelle.toFixed(2)}</span>
+                                     </div>
+                                     <div className="bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border dark:border-slate-700 shadow-sm flex flex-col gap-0.5">
+                                        <div>Bolívares / Efectivo: <span className="text-slate-900 dark:text-white">${asesora.totalUsd.toFixed(2)}</span></div>
+                                        <div className="text-[10px] font-medium text-slate-500">Monto menos envíos: ${(asesora.totalUsd - asesora.enviosUsd).toFixed(2)}</div>
+                                     </div>
+                                     <div className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800/50 shadow-sm flex flex-col gap-0.5">
+                                        <div>Bs. {asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2})}</div>
+                                        <div className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Monto menos envíos: Bs. ${(asesora.totalVes - asesora.enviosVes).toLocaleString('es-VE', {minimumFractionDigits:2})}</div>
+                                     </div>
                                   </div>
                                </div>
                             </td>
                          </tr>
                          {asesora.clientes.map((c, i) => (
                             <tr key={i} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                               {/* NUMERACIÓN (PUNTO 1) */}
+                               <td className="p-4 text-center font-bold text-slate-400 dark:text-slate-500">
+                                  {i + 1}
+                               </td>
+                               {/* FECHA PEDIDO (PUNTO 1) */}
+                               <td className="p-4 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                                  {c.fechaPedido}
+                               </td>
                                <td className="p-4">
                                   <div className="font-bold text-slate-800 dark:text-slate-200">{c.nombre}</div>
                                   <div className="text-xs text-slate-500 font-medium">{c.telefono}</div>
@@ -922,23 +979,24 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                                      {c.origen}
                                   </span>
                                </td>
-                               <td className="p-4 text-right font-bold text-emerald-600 dark:text-emerald-400">
-                                  {c.moneda === 'ZELLE' ? '-' : `Bs. ${c.montoVes.toLocaleString('es-VE', {minimumFractionDigits:2})}`}
-                               </td>
-                               <td className="p-4 text-right flex flex-col items-end gap-1">
+                               {/* COLUMNA UNIFICADA MONTO $ SOBRE BS (PUNTO 2) */}
+                               <td className="p-4 text-right flex flex-col items-end gap-0.5 justify-center">
                                   <div>
                                      <span className={`font-black text-base ${c.moneda==='ZELLE' ? 'text-purple-600 dark:text-purple-400' : 'text-slate-800 dark:text-slate-200'}`}>
                                         ${c.montoUsd.toFixed(2)}
                                      </span>
                                      {c.moneda === 'ZELLE' && <span className="ml-2 text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/50 px-1.5 py-0.5 rounded font-black border border-purple-200 dark:border-purple-800">ZELLE</span>}
                                   </div>
+                                  <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                                     {c.moneda === 'ZELLE' ? '-' : `Bs. ${c.montoVes.toLocaleString('es-VE', {minimumFractionDigits:2})}`}
+                                  </div>
                                   {c.costoEnvio > 0 && (
-                                     <div className="text-[9px] font-bold text-orange-600 dark:text-orange-400 uppercase tracking-widest bg-orange-50 dark:bg-orange-900/30 px-2 py-0.5 rounded border border-orange-200 dark:border-orange-800/50 w-max">
+                                     <div className="text-[9px] font-bold text-orange-600 dark:text-orange-400 uppercase tracking-widest bg-orange-50 dark:bg-orange-900/30 px-2 py-0.5 rounded border border-orange-200 dark:border-orange-800/50 w-max mt-1">
                                         Incluye Envío: ${c.costoEnvio.toFixed(2)}
                                      </div>
                                   )}
                                   {c.creditoRegalo > 0 && (
-                                     <div className="text-[9px] font-bold text-pink-600 dark:text-pink-400 uppercase tracking-widest bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800/50 w-max">
+                                     <div className="text-[9px] font-bold text-pink-600 dark:text-pink-400 uppercase tracking-widest bg-pink-50 dark:bg-pink-900/30 px-2 py-0.5 rounded border border-pink-200 dark:border-pink-800/50 w-max mt-0.5">
                                         Crédito: -${c.creditoRegalo.toFixed(2)}
                                      </div>
                                   )}
