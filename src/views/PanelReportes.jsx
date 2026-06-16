@@ -4,7 +4,7 @@ import { ROLES, BRAND_LOGO } from '../config/constants';
 
 export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const [rangoRango, setRangoRango] = useState('hoy');
-  const [asesoraFiltro, setAsesoraFiltro] = useState('todas'); // Estado para el filtro por asesora
+  const [asesoraFiltro, setAsesoraFiltro] = useState('todas');
   
   const getLocalToday = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -78,14 +78,11 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     let ventasVES = 0; let ventasZelle = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
     let totalBrutoGeneralUsd = 0; let totalCobroEnviosUsd = 0;
     
-    // MÉTRICAS SEGMENTADAS DE VENTAS 
     let ventasEnviosUsd = 0; let ventasDeliveryUsd = 0; let ventasTiendaUsd = 0;
 
-    // DESGLOSE ESPECÍFICO DE RECAUDACIÓN DE ENVÍOS / DELIVERY
     let totalDeliveryCobroUsd = 0;
     let totalEnviosNacionalesCobroUsd = 0;
 
-    // MÉTRICAS DE CAJAS FÍSICAS (Tienda y Delivery)
     let totalEfectivoTienda = 0; 
     let totalEfectivoBs = 0;
     let totalPuntoTiendaBs = 0; 
@@ -93,7 +90,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     let totalVueltosDados = 0; 
     let totalVueltosBs = 0; 
     
-    // NUEVAS MÉTRICAS: Punto/TDC en USD y Transferencia/Pago Móvil
     let totalPuntosTDCUsd = 0;
     let transfPagoMovilBs = 0;
     let transfPagoMovilUsd = 0;
@@ -221,7 +217,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
          } else {
              map[as].totalUsd += (p.montoUsd || 0);
              map[as].totalVes += (p.montoVes || 0);
-             // Acumulamos montos a restar de envíos/delivery para Bolívares / Efectivo y Bs.
              map[as].enviosUsd += costoEnvio;
              map[as].enviosVes += costoEnvioBs;
          }
@@ -239,16 +234,20 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              fechaPedido: p.fechaDespacho || 'Sin Fecha'
          });
       });
-      return Object.values(map).sort((a,b) => (b.totalUsd + b.totalZelle) - (a.totalUsd + a.totalZelle));
+
+      const ordenado = Object.values(map).sort((a,b) => (b.totalUsd + b.totalZelle) - (a.totalUsd + a.totalZelle));
+      
+      // ORDEN ASCENDENTE (PUNTO 2): Se invierte para listar desde el más antiguo al más nuevo de registro
+      ordenado.forEach(as => as.clientes.reverse());
+      
+      return ordenado;
   }, [pedidosFiltrados]);
 
-  // Lista única de asesoras para el filtro de visualización
   const listadoAsesorasUnicas = useMemo(() => {
     const names = pedidosFiltrados.map(p => p.asesora || 'Sin Asignar');
     return ['todas', ...new Set(names)];
   }, [pedidosFiltrados]);
 
-  // Filtrado visual de asesoras para la tabla
   const ventasPorAsesoraFiltradas = useMemo(() => {
     if (asesoraFiltro === 'todas') return ventasPorAsesora;
     return ventasPorAsesora.filter(as => as.nombre === asesoraFiltro);
@@ -540,7 +539,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            <div class="card card-shadow" style="background: #eff6ff; color: #1e3a8a; border-bottom: 4px solid #bfdbfe;">
               <div class="kpi-title" style="color: #1e40af;">Transferencia / Pago Móvil</div>
               <div class="kpi-value">$${metricas.transfPagoMovilUsd.toFixed(2)}</div>
-              <div class="kpi-sub" style="color: #1d4ed8;">En Bs: Bs. ${metricas.transfPagoMovilBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}<br/>(Excluye Efectivo, Punto y TDC)</div>
+              <div class="kpi-sub" style="color: #1d4ed8;">Bs. ${metricas.transfPagoMovilBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}<br/>(Excluye Efectivo, Punto y TDC)</div>
            </div>
            <div class="card bg-light-slate card-shadow">
               <div class="kpi-title" style="color: #475569;">Ingresos en Bs Netos</div>
@@ -720,7 +719,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                <DollarSign size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
             </div>
 
-            {/* CUADRO NARANJA CON SEPARACIÓN EXPLICITADA */}
             <div className="bg-orange-600 text-white p-6 rounded-[2rem] shadow-xl flex flex-col justify-center transition-transform hover:scale-105 border-b-4 border-orange-800 relative overflow-hidden">
                <div className="relative z-10">
                  <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-orange-200 mb-1">Recaudado por Envíos/Delivery ($)</div>
@@ -806,7 +804,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                      <div className="text-[11px] font-bold mt-2 opacity-80">
                          Punto normal: Bs. {metricas.totalPuntoTiendaBs.toLocaleString('es-VE', {minimumFractionDigits: 2})} <br/> 
                          Tarjeta (+15%): Bs. {metricas.totalTarjetaCreditoBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}
-                         <span className="text-indigo-700 mt-1 block">Equivalente en USD: ${metricas.totalPuntosTDCUsd.toFixed(2)}</span>
+                         <span className="text-indigo-700 mt-1 block">En USD: ${metricas.totalPuntosTDCUsd.toFixed(2)}</span>
                      </div>
                  </div>
               </>
@@ -902,7 +900,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       {verDinero && (
         <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
            
-           {/* FILTRO AGREGADO (PUNTO 4) */}
            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
               <div className="flex items-center gap-2">
                 <Users className="text-sky-600"/>
@@ -925,36 +922,36 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
              <table className="w-full text-left text-sm border-collapse min-w-[800px]">
                 <thead>
+                  {/* COLUMNA ELIMINADA DE FORMA OPTIMIZADA */}
                   <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-b dark:border-slate-700">
                     <th className="p-4 font-black tracking-wide text-center w-[60px]">N°</th>
-                    <th className="p-4 font-black tracking-wide w-[120px]">Fecha Pedido</th>
+                    <th className="p-4 font-black tracking-wide w-[140px]">Fecha / Origen</th>
                     <th className="p-4 font-black tracking-wide">Cliente y Teléfono</th>
-                    <th className="p-4 font-black tracking-wide">Origen del Pedido</th>
                     <th className="p-4 font-black tracking-wide text-right">Monto Facturado ($ / Bs.)</th>
                   </tr>
                 </thead>
                 <tbody>
                    {ventasPorAsesoraFiltradas.length === 0 ? (
-                      <tr><td colSpan="5" className="p-8 text-center text-slate-400 font-bold italic">No hay ventas registradas para la selección actual.</td></tr>
+                      <tr><td colSpan="4" className="p-8 text-center text-slate-400 font-bold italic">No hay ventas registradas para la selección actual.</td></tr>
                    ) : ventasPorAsesoraFiltradas.map((asesora) => (
                       <React.Fragment key={asesora.nombre}>
+                         {/* AJUSTADO EL COLSPAN A 4 */}
                          <tr className="bg-sky-50 dark:bg-sky-900/30 border-y border-sky-100 dark:border-sky-800/50">
-                            <td colSpan="5" className="p-4">
+                            <td colSpan="4" className="p-4">
                                <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-3">
                                   <span className="font-black text-lg text-sky-800 dark:text-sky-300 uppercase tracking-tighter">{asesora.nombre}</span>
                                   
-                                  {/* DETALLE NETO CON ENVÍOS RESTADOS (PUNTO 3) */}
                                   <div className="flex flex-wrap gap-4 text-xs font-bold text-slate-600 dark:text-slate-300">
                                      <div className="bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-3 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800/50 shadow-sm flex flex-col justify-center">
                                         <span>Zelle: ${asesora.totalZelle.toFixed(2)}</span>
                                      </div>
                                      <div className="bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg border dark:border-slate-700 shadow-sm flex flex-col gap-0.5">
                                         <div>Bolívares / Efectivo: <span className="text-slate-900 dark:text-white">${asesora.totalUsd.toFixed(2)}</span></div>
-                                        <div className="text-[10px] font-medium text-slate-500">Monto menos envíos: ${(asesora.totalUsd - asesora.enviosUsd).toFixed(2)}</div>
+                                        <div className="text-[10px] font-medium text-slate-500">Sin envíos: ${(asesora.totalUsd - asesora.enviosUsd).toFixed(2)}</div>
                                      </div>
                                      <div className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800/50 shadow-sm flex flex-col gap-0.5">
                                         <div>Bs. {asesora.totalVes.toLocaleString('es-VE', {minimumFractionDigits:2})}</div>
-                                        <div className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Monto menos envíos: Bs. ${(asesora.totalVes - asesora.enviosVes).toLocaleString('es-VE', {minimumFractionDigits:2})}</div>
+                                        <div className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Sin envíos: Bs. ${(asesora.totalVes - asesora.enviosVes).toLocaleString('es-VE', {minimumFractionDigits:2})}</div>
                                      </div>
                                   </div>
                                </div>
@@ -962,24 +959,22 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                          </tr>
                          {asesora.clientes.map((c, i) => (
                             <tr key={i} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                               {/* NUMERACIÓN (PUNTO 1) */}
                                <td className="p-4 text-center font-bold text-slate-400 dark:text-slate-500">
                                   {i + 1}
                                </td>
-                               {/* FECHA PEDIDO (PUNTO 1) */}
+                               {/* COLUMNA INTEGRADA: FECHA + ORIGEN ABAJO (PUNTO 1) */}
                                <td className="p-4 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                                  {c.fechaPedido}
+                                  <div className="font-bold text-slate-700 dark:text-slate-200">{c.fechaPedido}</div>
+                                  <div className="mt-1">
+                                     <span className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border border-indigo-100 dark:border-indigo-800/40 block w-max">
+                                        {c.origen}
+                                     </span>
+                                  </div>
                                </td>
                                <td className="p-4">
                                   <div className="font-bold text-slate-800 dark:text-slate-200">{c.nombre}</div>
                                   <div className="text-xs text-slate-500 font-medium">{c.telefono}</div>
                                </td>
-                               <td className="p-4">
-                                  <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest border border-indigo-200 dark:border-indigo-800">
-                                     {c.origen}
-                                  </span>
-                               </td>
-                               {/* COLUMNA UNIFICADA MONTO $ SOBRE BS (PUNTO 2) */}
                                <td className="p-4 text-right flex flex-col items-end gap-0.5 justify-center">
                                   <div>
                                      <span className={`font-black text-base ${c.moneda==='ZELLE' ? 'text-purple-600 dark:text-purple-400' : 'text-slate-800 dark:text-slate-200'}`}>
