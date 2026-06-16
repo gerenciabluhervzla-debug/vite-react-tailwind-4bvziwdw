@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users, Truck, Wallet, ArrowDownCircle, ShoppingBag, Briefcase } from 'lucide-react';
+import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users, Truck, Wallet, ArrowDownCircle, ShoppingBag, Briefcase, Activity } from 'lucide-react';
 import { ROLES, BRAND_LOGO } from '../config/constants';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db, appId } from '../config/firebase';
@@ -111,6 +111,32 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       return true;
     });
   }, [validados, rangoRango, fechaInicio, fechaFin]);
+
+  // --- CÁLCULO DE DÍAS TRANSCURRIDOS PARA LOS PROMEDIOS ---
+  const diasSeleccionados = useMemo(() => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    if (rangoRango === 'hoy') return 1;
+    if (rangoRango === 'mes') return d.getDate(); // Días transcurridos del mes actual
+    if (rangoRango === 'año') {
+      const start = new Date(d.getFullYear(), 0, 1);
+      return Math.max(1, Math.ceil((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+    }
+    if (rangoRango === 'custom') {
+      if (!fechaInicio || !fechaFin) return 1;
+      const start = new Date(fechaInicio + 'T00:00:00').getTime();
+      const end = new Date(fechaFin + 'T23:59:59').getTime();
+      return Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1);
+    }
+    if (rangoRango === 'todo') {
+      let minTime = d.getTime();
+      validados.forEach(p => {
+        const pt = parseDateVzla(p.fechaDespacho);
+        if (pt > 0 && pt < minTime) minTime = pt;
+      });
+      return Math.max(1, Math.ceil((d.getTime() - minTime) / (1000 * 60 * 60 * 24)) + 1);
+    }
+    return 1;
+  }, [rangoRango, fechaInicio, fechaFin, validados]);
 
   const metricas = useMemo(() => {
     let ventasVES = 0; let ventasZelle = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
@@ -330,7 +356,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     return Math.max(0, valorInicialStock - valorDescontarPorDespachos);
   }, [stock, catalogo, pedidosFiltrados]);
 
-  const topProductos = useMemo(() => {
+  // --- NUEVA LÓGICA: PRODUCTOS Y PROMEDIO DIARIO ---
+  const dataProductos = useMemo(() => {
     const map = {};
     pedidosFiltrados.forEach(p => {
       const contabilizar = (carrito) => {
@@ -352,8 +379,20 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       contabilizar(p.carritoObj);
       contabilizar(p.carritoObsequiosObj);
     });
-    return Object.entries(map).map(([key, data]) => ({ key, ...data })).sort((a, b) => b.cantidad - a.cantidad).slice(0, 10);
-  }, [pedidosFiltrados, catalogo]);
+    
+    return Object.entries(map).map(([key, data]) => {
+      const promedio = data.cantidad / diasSeleccionados;
+      return { 
+          key, 
+          cantidad: data.cantidad, 
+          valor: data.valor,
+          promedioDiario: promedio.toFixed(2)
+      };
+    }).sort((a, b) => b.cantidad - a.cantidad);
+  }, [pedidosFiltrados, catalogo, diasSeleccionados]);
+
+  // El Top 10 se extrae de la nueva data
+  const topProductos = dataProductos.slice(0, 10);
 
   const imprimirPDFVentas = () => {
     const printWindow = window.open('', '_blank');
@@ -1053,6 +1092,40 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            </div>
         </div>
       )}
+
+      {/* NUEVO: PROMEDIO DE VENTAS (VELOCIDAD) */}
+      <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
+         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
+           <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
+             <Activity className="text-sky-600"/> Promedio de Ventas (Velocidad)
+           </h3>
+           <div className="text-xs font-bold bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 px-3 py-1.5 rounded-lg border border-sky-200 dark:border-sky-800">
+              Calculado sobre {diasSeleccionados} {diasSeleccionados === 1 ? 'día' : 'días'}
+           </div>
+         </div>
+         
+         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {dataProductos.length === 0 ? (
+               <div className="col-span-full p-4 text-center text-slate-400 italic font-bold">No hay datos suficientes en este rango.</div>
+            ) : dataProductos.slice(0, 10).map((prod) => (
+               <div key={`avg-${prod.key}`} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col justify-between items-center text-center hover:border-sky-300 transition-colors shadow-sm relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-sky-500"></div>
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-black uppercase mb-3 line-clamp-2 h-8 flex items-center justify-center w-full leading-tight">
+                    {prod.key.replace('|', ' - ')}
+                  </div>
+                  <div className="text-3xl font-black text-sky-600 dark:text-sky-400">
+                    {prod.promedioDiario}
+                  </div>
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                    Uds / Día
+                  </div>
+                  <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300 mt-3 bg-white dark:bg-slate-800 w-full rounded-lg py-1.5 border border-slate-100 dark:border-slate-700">
+                     Total: {prod.cantidad}
+                  </div>
+               </div>
+            ))}
+         </div>
+      </div>
 
       {/* TOP 10 PRODUCTOS */}
       <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
