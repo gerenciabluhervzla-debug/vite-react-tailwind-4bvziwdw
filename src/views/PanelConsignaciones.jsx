@@ -1,444 +1,533 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  signInWithPopup, signOut, onAuthStateChanged, signInAnonymously 
-} from 'firebase/auth';
-import { 
-  collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit
-} from 'firebase/firestore';
-import { 
-  ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users, 
-  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X, Inbox, UserSquare, Briefcase 
-} from 'lucide-react';
+import { Briefcase, ClipboardList, Package, Search, XCircle, CheckCircle, Loader2, Archive, Wallet, StoreIcon, Truck, Bike, FileType, FileText, Image as ImageIcon, ShieldCheck, Ban } from 'lucide-react';
+import { Input, InputDark, StatusBadge } from '../components/ui';
+import ModalCatalogo from '../components/modals/ModalCatalogo';
+import { collection, onSnapshot, addDoc, doc, runTransaction, updateDoc } from 'firebase/firestore';
+import { URL_GOOGLE_SCRIPT } from '../config/firebase';
+import { compressImage } from '../utils/image';
+import { ROLES } from '../config/constants';
 
-import { auth, db, googleProvider, appId } from './config/firebase';
-import { BRAND_LOGO, ROLES, DEFAULT_CATALOGO } from './config/constants';
-import { TabButton } from './components/ui';
-
-import GlobalDialog from './components/modals/GlobalDialog';
-import VistaImpresion from './components/print/VistaImpresion';
-import PublicPortal from './views/PublicPortal'; 
-import PanelVentas from './views/PanelVentas';
-import PanelAdmin from './views/PanelAdmin';
-import PanelDespacho from './views/PanelDespacho';
-import PanelReportes from './views/PanelReportes';
-import PanelInventario from './views/inventario/PanelInventario';
-import PanelUsuarios from './views/PanelUsuarios';
-import PanelLogs from './views/PanelLogs';
-
-// NUEVOS MÓDULOS
-import PanelRecepcion from './views/PanelRecepcion';
-import PanelClientes from './views/PanelClientes';
-import PanelConsignaciones from './views/PanelConsignaciones';
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [userProfile, setUserProfile] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+export default function PanelConsignaciones({ perfil, catalogo, stock, db, appId, loggear, dialogs }) {
+  const esAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA].includes(perfil?.role);
   
-  const [pedidos, setPedidos] = useState([]);
-  const [catalogo, setCatalogo] = useState(DEFAULT_CATALOGO);
-  const [stockInventario, setStockInventario] = useState({});
-  const [notasInventario, setNotasInventario] = useState({});
-  const [movimientos, setMovimientos] = useState([]);
-  const [usuarios, setUsuarios] = useState([]);
-  const [configGral, setConfigGral] = useState({ tasaDia: 1 });
-  const [logs, setLogs] = useState([]);
+  const [vista, setVista] = useState('nuevo');
+  const [consignaciones, setConsignaciones] = useState([]);
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [modalAbonoData, setModalAbonoData] = useState(null);
+  const [subiendoArchivo, setSubiendoArchivo] = useState({ foto: false, comprobante: false });
 
-  const [activeTab, setActiveTab] = useState('ventas');
-  const [darkMode, setDarkMode] = useState(false);
-  const [isPublicRoute, setIsPublicRoute] = useState(window.location.hash === '#tienda');
-  
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  
-  const [clienteParaPedido, setClienteParaPedido] = useState(null);
+  const getLocalToday = () => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
 
-  const [dialogConfig, setDialogConfig] = useState(null);
-  const dialogs = useMemo(() => ({
-    alert: (msg, title) => setDialogConfig({ type: 'alert', message: msg, title: title || "Bluher" }),
-    confirm: (msg, onConfirm, title) => setDialogConfig({ type: 'confirm', message: msg, title: title || "Confirmación", onConfirm }),
-    prompt: (msg, onConfirm, title) => setDialogConfig({ type: 'prompt', message: msg, title: title || "Entrada de Datos", onConfirm })
-  }), []);
+  const defaultForm = {
+    clienteNombre: '', clienteCedula: '', clienteTelefono: '', direccion: '',
+    asesora: perfil?.nombre || '',
+    afectaInventario: true, almacenOrigen: 'envios',
+    tipoDespacho: 'Nacional', courier: '', pagoEnvio: 'COD', costoEnvio: '',
+    deliveryFecha: getLocalToday(), deliveryHora: '',
+    retiroNombre: '', retiroCedula: '', retiroTelefono: '',
+    linkFotoProductos: '', linkComprobante: '', abonoInicial: '',
+    carritoObj: {}, totalMercancia: '0.00'
+  };
 
+  const [formData, setFormData] = useState(defaultForm);
+  const [mismoClienteRetira, setMismoClienteRetira] = useState(false);
+
+  // Escuchar consignaciones
   useEffect(() => {
-    if (darkMode) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
-  }, [darkMode]);
-
-  useEffect(() => {
-    const handleHashChange = () => setIsPublicRoute(window.location.hash === '#tienda');
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
-
-  useEffect(() => {
-    let timeoutId;
-
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        clearTimeout(timeoutId);
-        setUser(currentUser);
-      } else {
-        setUser(null);
-        setUserProfile(null);
-        setAuthLoading(false);
-
-        timeoutId = setTimeout(async () => {
-          if (!auth.currentUser) {
-            try {
-              await signInAnonymously(auth);
-            } catch (error) {
-              console.warn("No se pudo crear anónimo:", error.message);
-            }
-          }
-        }, 1500);
-      }
+    const ref = collection(db, 'artifacts', appId, 'public', 'data', 'consignaciones');
+    const unsub = onSnapshot(ref, (snap) => {
+        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        data.sort((a, b) => b.fechaEmision - a.fechaEmision);
+        setConsignaciones(data);
     });
+    return () => unsub();
+  }, [db, appId]);
 
-    return () => {
-      clearTimeout(timeoutId);
-      unsubscribe();
-    };
-  }, []);
-
+  // Calcular totales
   useEffect(() => {
-    if (!user || user.isAnonymous) return; 
+    let subTotal = 0;
+    if (formData.carritoObj) {
+      Object.entries(formData.carritoObj).forEach(([key, qty]) => {
+        const [n, p] = key.split('|');
+        catalogo.forEach(cat => cat.productos.forEach(prod => {
+          if (prod.nombre === n) {
+            const i = prod.presentaciones.indexOf(p);
+            if (i >= 0 && prod.precios) subTotal += (prod.precios[i] * qty);
+          }
+        }));
+      });
+    }
+    setFormData(prev => ({ ...prev, totalMercancia: subTotal.toFixed(2) }));
+  }, [formData.carritoObj, catalogo]);
 
-    let isFirstLoad = true;
-    const unsubs = [];
+  const eliminarDelCarrito = (itemKey) => {
+    setFormData(prev => {
+      const nuevoCarrito = { ...prev.carritoObj };
+      delete nuevoCarrito[itemKey];
+      return { ...prev, carritoObj: nuevoCarrito };
+    });
+  };
+
+  // Subida de imágenes
+  const handleFileUpload = async (e, field) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!URL_GOOGLE_SCRIPT) return dialogs.alert("El sistema de subida no está configurado.");
     
-    const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
-    unsubs.push(onSnapshot(userRef, async (snap) => {
-      if (snap.exists()) {
-        const profile = snap.data();
-        setUserProfile(profile);
-        if (isFirstLoad) {
-           isFirstLoad = false;
-           if (!profile.isOnline) {
-              updateDoc(userRef, { isOnline: true });
-              addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
-                 accion: 'INICIO_SESION', detalle: 'El usuario inició sesión en el sistema.', usuarioEmail: profile.email, usuarioNombre: profile.nombre, usuarioRol: profile.role, fecha: Date.now()
-              }).catch(()=>{});
-           }
+    setSubiendoArchivo(prev => ({ ...prev, [field]: true }));
+    try {
+      const base64Data = await compressImage(file, 1000, 0.8);
+      const response = await fetch(URL_GOOGLE_SCRIPT, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN,
+          fileName: `Consignacion_${field}_${Date.now()}.jpg`,
+          mimeType: 'image/jpeg', data: base64Data
+        })
+      });
+      const result = await response.json();
+      if (result.url) setFormData(prev => ({ ...prev, [field]: result.url }));
+    } catch (error) {
+      dialogs.alert("Error subiendo el archivo. Revisa tu conexión.");
+    }
+    setSubiendoArchivo(prev => ({ ...prev, [field]: false }));
+  };
+
+  // =========================================================================
+  // PASO 1: CREACIÓN (Queda PENDIENTE)
+  // =========================================================================
+  const procesarCreacion = async (e) => {
+    e.preventDefault();
+    if (!formData.carritoObj || Object.keys(formData.carritoObj).length === 0) return dialogs.alert("El carrito está vacío.");
+    
+    if (formData.tipoDespacho === 'Nacional' && !formData.courier) return dialogs.alert("Selecciona la Empresa de Envío.");
+    if (formData.tipoDespacho === 'Tienda' && (!formData.retiroNombre || !formData.retiroCedula)) return dialogs.alert("Completa quién retira en tienda.");
+    
+    setEnviando(true);
+    try {
+      let textoProductos = "";
+      Object.entries(formData.carritoObj).forEach(([key, qty]) => { textoProductos += `- ${qty}x ${key.replace('|', ' ')}\n`; });
+
+      const costoEnvioNum = parseFloat(formData.costoEnvio) || 0;
+      const mercanciaNum = parseFloat(formData.totalMercancia) || 0;
+      const totalDeudaReal = mercanciaNum + ((formData.tipoDespacho === 'Delivery' || formData.pagoEnvio === 'PAGADO') ? costoEnvioNum : 0);
+      const abonoInicialNum = parseFloat(formData.abonoInicial) || 0;
+
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'consignaciones'), {
+          ...formData,
+          productosTexto: textoProductos.trim(),
+          costoEnvio: costoEnvioNum,
+          totalEntregado: totalDeudaReal,
+          totalAbonado: 0, 
+          abonoInicialPendiente: abonoInicialNum, 
+          saldoPendiente: totalDeudaReal, 
+          estado: 'Pendiente',
+          fechaEmision: Date.now(),
+          creadoPor: perfil.nombre
+      });
+
+      loggear('CONSIGNACION_REGISTRADA', `Consignación PENDIENTE para ${formData.clienteNombre}`);
+      dialogs.alert("Consignación registrada y enviada a Validación de Administración.", "Éxito");
+      setFormData(defaultForm);
+      setVista('historial');
+    } catch (e) {
+      dialogs.alert("Error al procesar: " + e.message);
+    }
+    setEnviando(false);
+  };
+
+  // =========================================================================
+  // PASO 2: VALIDACIÓN ADMIN (Descuenta Stock y Activa)
+  // =========================================================================
+  const handleValidar = async (c) => {
+    dialogs.confirm(`¿Estás seguro de APROBAR la consignación de ${c.clienteNombre}? ${c.afectaInventario ? '\n\nEsto DESCONTARÁ el stock del inventario.' : ''}`, async () => {
+        setEnviando(true);
+        try {
+            const consRef = doc(db, 'artifacts', appId, 'public', 'data', 'consignaciones', c.id);
+            let nuevoSaldo = c.totalEntregado;
+            let totalAbonado = 0;
+
+            await runTransaction(db, async (t) => {
+                // 1. Descontar Inventario si aplica
+                if (c.afectaInventario) {
+                    const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
+                    const stockSnap = await t.get(stockRef);
+                    if (!stockSnap.exists()) throw new Error("Inventario no encontrado.");
+                    let nuevoStock = { ...stockSnap.data() };
+                    
+                    for (const [key, qty] of Object.entries(c.carritoObj)) {
+                        let actual = typeof nuevoStock[key] === 'object' ? (nuevoStock[key][c.almacenOrigen] || 0) : (nuevoStock[key] || 0);
+                        if (actual < qty) throw new Error(`Stock insuficiente para ${key}`);
+                        if (typeof nuevoStock[key] === 'object') nuevoStock[key][c.almacenOrigen] -= qty;
+                        else nuevoStock[key] -= qty;
+                    }
+                    t.update(stockRef, nuevoStock);
+
+                    // Registrar Movimiento
+                    const movRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'));
+                    t.set(movRef, {
+                        tipo: 'SALIDA', motivo: 'Consignación Aprobada', referencia: `Despacho a ${c.clienteNombre}`,
+                        items: c.carritoObj, fechaCreacion: Date.now(), autor: perfil.nombre, status: 'APROBADO'
+                    });
+                }
+
+                // 2. Procesar Abono Inicial si lo hubo
+                if (c.abonoInicialPendiente > 0) {
+                    totalAbonado = c.abonoInicialPendiente;
+                    nuevoSaldo -= totalAbonado;
+                    
+                    const cajaRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'ingresos_caja'));
+                    t.set(cajaRef, {
+                        monto: totalAbonado, metodo: 'Abono Inicial',
+                        concepto: `Abono Inicial Consignación - ${c.clienteNombre}`,
+                        asesora: c.asesora, 
+                        fecha: Date.now(), tipo: 'Ingreso', registradoPor: perfil.nombre
+                    });
+                }
+
+                // 3. Activar Consignación
+                t.update(consRef, {
+                    estado: nuevoSaldo <= 0 ? 'Liquidada' : (totalAbonado > 0 ? 'Parcialmente Pagada' : 'Abierta'),
+                    saldoPendiente: nuevoSaldo,
+                    totalAbonado: totalAbonado,
+                    fechaValidacion: Date.now(),
+                    validadoPor: perfil.nombre
+                });
+            });
+
+            loggear("CONSIGNACION_VALIDADA", `Admin aprobó consignación de ${c.clienteNombre}`);
+            dialogs.alert("Consignación Aprobada y Activa.", "Éxito");
+        } catch (e) {
+            dialogs.alert(e.message, "Fallo en Validación");
         }
-      } else {
-        const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
-        await setDoc(userRef, newProfile);
-        setUserProfile(newProfile);
-      }
-      setAuthLoading(false);
-    }, () => setAuthLoading(false)));
-
-    return () => unsubs.forEach(u => u());
-  }, [user]);
-
-  useEffect(() => {
-    const unsubs = [];
-    const onError = (e) => console.warn("Firestore Listener Error Público:", e.message);
-
-    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'catalogo'), (docSnap) => {
-      setCatalogo(docSnap.exists() && docSnap.data().categorias ? docSnap.data().categorias : DEFAULT_CATALOGO);
-    }, onError));
-
-    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock'), (docSnap) => {
-      setStockInventario(docSnap.exists() ? docSnap.data() : {});
-    }, onError));
-
-    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), (docSnap) => {
-      if(docSnap.exists()) setConfigGral(docSnap.data());
-    }, onError));
-
-    return () => unsubs.forEach(unsub => unsub());
-  }, []);
-
-  useEffect(() => {
-    if (!userProfile || !userProfile.isApproved) return;
-    const unsubs = [];
-
-    const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(2000));
-    unsubs.push(onSnapshot(qPedidos, (snapshot) => {
-      setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }));
-
-    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => {
-      setNotasInventario(docSnap.exists() ? docSnap.data() : {});
-    }));
-
-    const qMovimientos = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), orderBy('fechaCreacion', 'desc'), limit(50));
-    unsubs.push(onSnapshot(qMovimientos, (snapshot) => {
-      setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }));
-
-    const esAdminOAuditor = [ROLES.ADMIN, ROLES.AUDITORIA].includes(userProfile.role);
-    if (esAdminOAuditor) {
-      unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
-        setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }));
-      
-      const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(50));
-      unsubs.push(onSnapshot(qLogs, (snapshot) => {
-        setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }));
-    }
-
-    return () => unsubs.forEach(unsub => unsub());
-  }, [userProfile?.isApproved]);
-
-  const registrarLogSistem = async (perfilActivo, accion, detalle) => {
-    if (!perfilActivo) return;
-    try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
-        accion, detalle, usuarioEmail: perfilActivo.email, usuarioNombre: perfilActivo.nombre, usuarioRol: perfilActivo.role, fecha: Date.now()
-      });
-    } catch (e) { console.error(e); }
-  };
-  const loggear = (accion, detalle) => registrarLogSistem(userProfile, accion, detalle);
-
-  const signInGoogle = async () => {
-    try { 
-      setAuthLoading(true); 
-      await signInWithPopup(auth, googleProvider); 
-    } 
-    catch (error) { 
-      console.error(error); 
-      dialogs.alert("Error de conexión al iniciar sesión."); 
-      setAuthLoading(false); 
-    }
-  };
-  
-  const cerrarSesion = async () => {
-    if (userProfile && user) {
-       try {
-         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { isOnline: false });
-         await registrarLogSistem(userProfile, 'CIERRE_SESION', `Cerró sesión.`);
-       } catch(e) {}
-    }
-    await signOut(auth);
-    window.location.hash = ''; 
-    window.location.reload(); 
+        setEnviando(false);
+    });
   };
 
-  const cambiarEstadoPedido = async (id, nuevoEstado) => {
-    try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', id), { status: nuevoEstado });
-      loggear('ESTADO_PEDIDO_ACTUALIZADO', `Se cambió a ${nuevoEstado}.`);
-    } catch (error) {
-      dialogs.alert("Error de red al intentar cambiar el estado.", "Fallo de conexión");
-    }
+  const handleRechazar = async (c) => {
+    dialogs.prompt("Motivo del rechazo de esta consignación:", async (motivo) => {
+        if(!motivo) return;
+        try {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'consignaciones', c.id), {
+                estado: 'Rechazada', motivoRechazo: motivo, fechaRechazo: Date.now(), rechazadoPor: perfil.nombre
+            });
+            loggear("CONSIGNACION_RECHAZADA", `Rechazada: ${c.clienteNombre}`);
+        } catch(e) { dialogs.alert("Error al rechazar."); }
+    });
   };
 
-  const handleTabClick = (tab) => {
-    setActiveTab(tab);
-    setIsMobileMenuOpen(false);
-  };
+  // =========================================================================
+  // PASO 3: MODAL ABONOS (Pagos Periódicos)
+  // =========================================================================
+  const ModalAbonos = () => {
+    const [monto, setMonto] = useState('');
+    const [metodo, setMetodo] = useState('Efectivo USD');
+    const [cargandoAbono, setCargandoAbono] = useState(false);
 
-  const handleActualizarCliente = async (clienteModificado) => {
-    try {
-      const { keyOriginal, nombre, cedula, telefono, direccion } = clienteModificado;
-      
-      const pedidosActualizar = pedidos.filter(p => {
-         const tlf = p.clienteTelefono ? String(p.clienteTelefono).trim() : '';
-         const ci = p.clienteCedula ? String(p.clienteCedula).trim() : '';
-         const nom = p.clienteNombre ? String(p.clienteNombre).trim() : 'Sin Nombre';
-         const key = tlf || ci || nom;
-         return key === keyOriginal;
-      });
+    if (!modalAbonoData) return null;
 
-      const promesas = pedidosActualizar.map(p => 
-         updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', p.id), {
-            clienteNombre: nombre,
-            clienteCedula: cedula,
-            clienteTelefono: telefono,
-            direccion: direccion
-         })
-      );
-      
-      await Promise.all(promesas);
+    const handleAbonar = async (e) => {
+        e.preventDefault();
+        const montoNum = parseFloat(monto);
+        if (montoNum <= 0) return dialogs.alert("El monto debe ser mayor a cero.");
+        if (montoNum > modalAbonoData.saldoPendiente) return dialogs.alert("El abono supera la deuda.", "Aviso");
 
-      loggear('CLIENTE_ACTUALIZADO', `Se actualizaron los datos de ${nombre} en ${pedidosActualizar.length} pedidos.`);
-      dialogs.alert(`Datos de contacto de ${nombre} actualizados correctamente en su historial.`, "Éxito");
-    } catch (error) {
-      console.error("Error al actualizar cliente:", error);
-      dialogs.alert("Error de red al actualizar los datos del cliente.", "Error");
-    }
-  };
+        setCargandoAbono(true);
+        try {
+            await runTransaction(db, async (t) => {
+                const consRef = doc(db, 'artifacts', appId, 'public', 'data', 'consignaciones', modalAbonoData.id);
+                const cajaRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'ingresos_caja'));
+                
+                const nuevoSaldo = modalAbonoData.saldoPendiente - montoNum;
+                const nuevoAbonado = modalAbonoData.totalAbonado + montoNum;
+                const nuevoEstado = nuevoSaldo <= 0 ? 'Liquidada' : 'Parcialmente Pagada';
 
-  const handleTomarPedido = (cliente) => {
-    setClienteParaPedido(cliente);
-    setActiveTab('ventas');
-    setIsMobileMenuOpen(false); 
-  };
+                t.update(consRef, { saldoPendiente: nuevoSaldo, totalAbonado: nuevoAbonado, estado: nuevoEstado });
 
-  let content;
+                t.set(cajaRef, {
+                    monto: montoNum, metodo: metodo,
+                    concepto: `Abono Consignación - ${modalAbonoData.clienteNombre}`,
+                    asesora: modalAbonoData.asesora,
+                    fecha: Date.now(), tipo: 'Ingreso', registradoPor: perfil.nombre
+                });
+            });
 
-  if (isPublicRoute) {
-    content = <PublicPortal catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} dialogs={dialogs} onBack={() => window.location.hash = ''} darkMode={darkMode} setDarkMode={setDarkMode} />;
-  } else if (authLoading || (user && !userProfile && !user.isAnonymous)) {
-    content = (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
-        <img src={BRAND_LOGO} alt="Logo Bluher" className="h-20 mb-8 mix-blend-multiply dark:invert animate-pulse" />
-        <Loader2 className="animate-spin text-sky-600 dark:text-sky-400 mb-4" size={48} />
-        <div className="font-bold text-xl tracking-tight">Verificando seguridad...</div>
-      </div>
-    );
-  } else if (!user || user.isAnonymous) {
-    content = (
-      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-[#f0f4f8] to-[#d8e4f0] dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
-        <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-md text-sky-600 dark:text-sky-400 hover:text-sky-800 transition-colors">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
-        
-        <div className="bg-white dark:bg-slate-800 p-10 rounded-[2rem] shadow-2xl max-w-sm w-full text-center border-t-[6px] border-sky-600 relative overflow-hidden transition-colors">
-          <div className="absolute top-0 left-0 w-full h-32 bg-sky-50/50 dark:bg-slate-700/30 -z-10 rounded-t-[2rem]"></div>
-          <img src={BRAND_LOGO} alt="Logo Bluher" className="h-24 mx-auto object-contain mb-8 z-10 drop-shadow-sm mix-blend-multiply dark:invert" />
-          <h1 className="text-3xl font-black tracking-tight mb-2">Ingreso</h1>
-          <p className="text-slate-500 dark:text-slate-400 mb-8 text-sm">Sistema de Gestión Logística Bluher.</p>
-          <button onClick={signInGoogle} className="w-full bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300 shadow-lg hover:-translate-y-0.5 mb-4">Acceso Empleados</button>
-          <button onClick={() => window.location.hash = '#tienda'} className="w-full bg-[#f0f4f8] dark:bg-slate-700 hover:bg-[#e2ebf3] dark:hover:bg-slate-600 text-sky-900 dark:text-slate-200 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300 border border-sky-100 dark:border-slate-600"><Store size={18}/> Comprar Online (Clientes)</button>
-        </div>
-      </div>
-    );
-  } else if (userProfile && !userProfile.isApproved) {
-    content = (
-      <div className="min-h-screen flex items-center justify-center p-4 text-center bg-[#f0f4f8] dark:bg-slate-900 transition-colors text-slate-800 dark:text-slate-100">
-        <div className="bg-white dark:bg-slate-800 p-10 rounded-3xl shadow-xl max-w-md w-full border-t-[6px] border-amber-500 transition-colors">
-          <ShieldCheck size={56} className="mx-auto text-amber-500 mb-4" />
-          <h2 className="text-2xl font-bold">Cuenta en Revisión</h2>
-          <p className="text-slate-600 dark:text-slate-400 mt-2 mb-8 leading-relaxed">Tu correo <b>{user.email}</b> espera aprobación.</p>
-          <button onClick={cerrarSesion} className="text-sky-700 dark:text-sky-400 font-semibold hover:underline transition-colors">Cerrar sesión</button>
-        </div>
-      </div>
-    );
-  } else {
-    const r = userProfile?.role;
-    const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
-    const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA].includes(r);
-    
-    const showDespacho = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.DESPACHO, ROLES.AUDITORIA].includes(r);
-    const showRecepcion = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
-    
-    const showClientes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA].includes(r);
-    const showConsignaciones = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA].includes(r);
+            dialogs.alert("Abono registrado en caja exitosamente.", "Abono Confirmado");
+            setModalAbonoData(null);
+        } catch (error) {
+            dialogs.alert("Error registrando el abono.");
+        }
+        setCargandoAbono(false);
+    };
 
-    const showReportes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r);
-    const showInventario = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r); 
-    const showUsuarios = [ROLES.ADMIN].includes(r);
-    const showLogs = [ROLES.ADMIN, ROLES.AUDITORIA].includes(r);
-
-    content = (
-      <div className="flex flex-col min-h-screen bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors selection:bg-sky-200 dark:selection:bg-sky-900">
-        
-        <div className="md:hidden flex items-center justify-between bg-[#003366] dark:bg-slate-950 p-4 text-white sticky top-0 z-40 shadow-md">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setIsMobileMenuOpen(true)} className="p-1 rounded-md hover:bg-white/10 transition-colors">
-              <Menu size={28} />
-            </button>
-            <img src={BRAND_LOGO} alt="Logo" className="h-8 brightness-200" />
-          </div>
-          <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
-            {darkMode ? <Sun size={18}/> : <Moon size={18}/>}
-          </button>
-        </div>
-
-        <div className="flex flex-1 relative">
-          {isMobileMenuOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 md:hidden transition-opacity" onClick={() => setIsMobileMenuOpen(false)}></div>
-          )}
-
-          <aside id="recepcion" className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-[#003366] dark:bg-slate-950 text-slate-200 flex flex-col h-full transform transition-transform duration-300 ease-in-out md:sticky md:top-0 md:h-screen md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
-            <div className="p-8 pb-4 flex flex-col items-center border-b border-sky-800/50 dark:border-slate-800/50 relative">
-              <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden absolute top-4 right-4 p-1.5 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
-                <X size={20}/>
-              </button>
-              <button onClick={() => setDarkMode(!darkMode)} className="hidden md:block absolute top-4 right-4 p-1.5 bg-sky-800/50 dark:bg-slate-800 rounded-full text-sky-200 dark:text-slate-400 hover:text-white transition-colors">
-                {darkMode ? <Sun size={14}/> : <Moon size={14}/>}
-              </button>
-              
-              <div className="w-full flex justify-center mb-6 mt-4 md:mt-0">
-                 <img src={BRAND_LOGO} alt="Logo Bluher" className="h-12 w-auto object-contain drop-shadow-md mix-blend-screen dark:mix-blend-normal invert dark:invert-0 brightness-200 dark:brightness-100" />
-              </div>
-              
-              <div className="w-full bg-sky-900/40 dark:bg-slate-800/50 rounded-xl p-4 border border-sky-700/50 dark:border-slate-700/50 text-center">
-                 <div className="text-xs font-medium text-sky-300 dark:text-slate-400 mb-1">Usuario Activo</div>
-                 <div className="text-sm font-bold text-white truncate px-2" title={user.email}>{user.displayName}</div>
-                 <div className="mt-2 inline-flex items-center justify-center px-3 py-1 rounded-full bg-sky-800/80 dark:bg-sky-900/50 text-sky-100 dark:text-sky-300 text-[10px] font-bold uppercase tracking-widest border border-sky-700/50 dark:border-sky-800/50">
-                   {userProfile?.role}
-                 </div>
-              </div>
+    return (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+            <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl w-full max-w-md shadow-2xl border border-slate-200 dark:border-slate-700 animate-in zoom-in-95">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 flex items-center gap-2"><Wallet className="text-sky-600"/> Registrar Abono</h3>
+                    <button onClick={() => setModalAbonoData(null)} className="text-slate-400 hover:text-red-500"><XCircle size={24}/></button>
+                </div>
+                <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700 mb-6">
+                    <div className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Cliente / Asesora</div>
+                    <div className="font-black text-lg text-slate-800 dark:text-slate-100">{modalAbonoData.clienteNombre}</div>
+                    <div className="text-xs text-slate-500 mb-3">{modalAbonoData.asesora}</div>
+                    <div className="flex justify-between items-center pt-3 border-t border-slate-200 dark:border-slate-700">
+                        <span className="text-sm font-bold text-slate-600 dark:text-slate-400">Saldo por cobrar:</span>
+                        <span className="font-black text-red-500 text-lg">${modalAbonoData.saldoPendiente.toFixed(2)}</span>
+                    </div>
+                </div>
+                <form onSubmit={handleAbonar} className="space-y-5">
+                    <Input label="Monto a abonar (USD/$)" type="number" step="0.01" max={modalAbonoData.saldoPendiente} value={monto} onChange={(e) => setMonto(e.target.value)} required placeholder="Ej: 50.00" />
+                    <div className="flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2">Método de Pago</label>
+                        <select value={metodo} onChange={(e)=>setMetodo(e.target.value)} className="p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 font-bold text-slate-700 dark:text-slate-200 shadow-sm cursor-pointer">
+                            <option value="Efectivo USD">Efectivo Dólares</option>
+                            <option value="ZELLE">Zelle</option>
+                            <option value="Pago Movil / Transferencia">Pago Móvil / Transf. (Equiv Bs)</option>
+                        </select>
+                    </div>
+                    <button type="submit" disabled={cargandoAbono} className="w-full bg-sky-600 hover:bg-sky-700 text-white font-black py-4 rounded-2xl shadow-lg flex justify-center items-center gap-2 uppercase tracking-widest transition-all disabled:opacity-50">
+                        {cargandoAbono ? <Loader2 className="animate-spin" /> : 'Confirmar Ingreso a Caja'}
+                    </button>
+                </form>
             </div>
-            
-            <nav className="mt-6 flex flex-col gap-1.5 px-4 overflow-y-auto flex-1 pb-4">
-              <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Área Operativa</div>
-              {showVentas && <TabButton active={activeTab === 'ventas'} onClick={() => handleTabClick('ventas')} icon={<ShoppingCart size={18} />} label="Ventas y Web" badge={pedidos.filter(p=>p.status==='Rechazado' || p.esPublico).length} badgeColor="bg-red-500 dark:bg-sky-500" />}
-              
-              {showConsignaciones && <TabButton active={activeTab === 'consignaciones'} onClick={() => handleTabClick('consignaciones')} icon={<Briefcase size={18} />} label="Consignaciones" />}
-              
-              {showAdmin && <TabButton active={activeTab === 'admin'} onClick={() => handleTabClick('admin')} icon={<CheckSquare size={18} />} label={r === ROLES.AUDITORIA ? 'Auditoría Pagos' : 'Admin y Pagos'} badge={pedidos.filter(p=>p.status==='Pendiente').length} />}
-              
-              {showDespacho && <TabButton active={activeTab === 'despacho'} onClick={() => handleTabClick('despacho')} icon={<Truck size={18} />} label={`Despacho Nacional`} badge={pedidos.filter(p=>p.status==='Validado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')).length} />}
-              {showRecepcion && <TabButton active={activeTab === 'recepcion'} onClick={() => handleTabClick('recepcion')} icon={<Inbox size={18} />} label={`Recepción (Tienda)`} badge={pedidos.filter(p=>['Tienda', 'Delivery'].includes(p.tipoDespacho) && p.status==='Validado').length} />}
-              
-              {(showReportes || showClientes || showInventario || showUsuarios || showLogs) && <div className="my-4 border-t border-sky-800/50 dark:border-slate-800 mx-2"></div>}
-              {(showReportes || showClientes || showInventario || showUsuarios || showLogs) && <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Gestión y Reportes</div>}
-
-              {showClientes && <TabButton active={activeTab === 'clientes'} onClick={() => handleTabClick('clientes')} icon={<UserSquare size={18} />} label="CRM Clientes" />}
-              {showReportes && <TabButton active={activeTab === 'reportes'} onClick={() => handleTabClick('reportes')} icon={<FileSpreadsheet size={18} />} label="Reportes Financieros" />}
-              {showInventario && <TabButton active={activeTab === 'inventario'} onClick={() => handleTabClick('inventario')} icon={<Archive size={18} />} label="Inventario Dual" badge={movimientos.filter(m=>m.status==='PENDIENTE').length} />}
-              {showUsuarios && <TabButton active={activeTab === 'usuarios'} onClick={() => handleTabClick('usuarios')} icon={<Users size={18} />} label="Usuarios" badge={usuarios.filter(u=>!u.isApproved).length} />}
-              {showLogs && <TabButton active={activeTab === 'logs'} onClick={() => handleTabClick('logs')} icon={<FileText size={18} />} label="Auditoría" />}
-            </nav>
-
-            <div className="p-6 border-t border-sky-800/50 dark:border-slate-800/50">
-              <button onClick={cerrarSesion} className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl text-sky-200 dark:text-slate-400 hover:text-white hover:bg-sky-800 dark:hover:bg-slate-800 transition-colors font-medium text-sm">
-                <LogOut size={16} /> Cerrar Sesión
-              </button>
-            </div>
-          </aside>
-
-          <main className="flex-1 p-4 md:p-10 overflow-y-auto print:p-0 print:m-0 print:bg-white print:block w-full">
-            <div className="max-w-6xl mx-auto print:max-w-none print:mx-0">
-              <div className="print:hidden">
-                
-                {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} clientePreCargado={clienteParaPedido} setClientePreCargado={setClienteParaPedido} />}
-                
-                {activeTab === 'consignaciones' && showConsignaciones && <PanelConsignaciones perfil={userProfile} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
-
-                {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} config={configGral} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
-                {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} perfil={userProfile} />}
-                
-                {activeTab === 'recepcion' && showRecepcion && <PanelRecepcion pedidos={pedidos} catalogo={catalogo} stock={stockInventario} perfil={userProfile} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
-                
-                {activeTab === 'clientes' && showClientes && <PanelClientes pedidos={pedidos} perfil={userProfile} onActualizarCliente={handleActualizarCliente} onTomarPedido={handleTomarPedido} />}
-
-                {activeTab === 'reportes' && showReportes && <PanelReportes perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
-                {activeTab === 'inventario' && showInventario && <PanelInventario stock={stockInventario} notas={notasInventario} catalogo={catalogo} movimientos={movimientos} pedidos={pedidos} db={db} appId={appId} loggear={loggear} perfil={userProfile} dialogs={dialogs} />}
-                {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
-                {activeTab === 'logs' && showLogs && <PanelLogs logs={logs} />}
-              </div>
-
-              <VistaImpresion pedidos={pedidos.filter(p => {
-                  if (p.status !== 'Validado') return false;
-                  if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Delivery') return false; 
-
-                  if (!p.fechaDespacho || p.fechaDespacho === 'Sin Fecha') return false;
-                  const parts = p.fechaDespacho.split('/');
-                  if (parts.length !== 3) return false;
-                  const timeDespacho = new Date(parts[2], parts[1] - 1, parts[0]).getTime();
-                  
-                  const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-                  const tDateApp = getVeneziaTimeApp();
-                  const timeHoy = new Date(tDateApp.getFullYear(), tDateApp.getMonth(), tDateApp.getDate()).getTime();
-                  
-                  return timeDespacho <= timeHoy;
-              })} />
-            </div>
-          </main>
         </div>
-      </div>
     );
-  }
+  };
 
   return (
-    <div className={darkMode ? 'dark' : ''}>
-      {content}
-      <GlobalDialog config={dialogConfig} setConfig={setDialogConfig} />
+    <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-3xl border dark:border-slate-700 shadow-sm transition-colors">
+      
+      <div className="flex flex-wrap gap-4 mb-8 border-b dark:border-slate-700 pb-2">
+        <button onClick={() => setVista('nuevo')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'nuevo' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+            <Briefcase size={18} className="inline mr-1" /> Solicitar Consignación
+        </button>
+        <button onClick={() => setVista('historial')} className={`pb-3 font-black text-xs uppercase tracking-widest transition-colors ${vista === 'historial' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+            <ClipboardList size={18} className="inline mr-1" /> Control y Cuentas por Cobrar
+        </button>
+      </div>
+
+      {vista === 'nuevo' && (
+        <form onSubmit={procesarCreacion} className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
+          
+          <div className="md:col-span-2 flex flex-col md:flex-row gap-4 p-5 rounded-2xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/50">
+            <div className="flex-1">
+              <h4 className="font-bold text-amber-800 dark:text-amber-500 flex items-center gap-2"><Archive size={18}/> ¿Afectar Inventario Actual?</h4>
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                Desactiva esta opción SOLO si estás registrando una consignación antigua que <b>ya fue entregada previamente</b>.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+               <label className="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" className="sr-only peer" checked={formData.afectaInventario} onChange={(e) => setFormData({...formData, afectaInventario: e.target.checked})} />
+                  <div className="w-14 h-7 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-emerald-500"></div>
+               </label>
+               <span className="font-bold text-sm text-slate-700 dark:text-slate-300">{formData.afectaInventario ? 'Sí, descontar al Validar' : 'No descontar'}</span>
+            </div>
+          </div>
+
+          <Input label="Asesora Responsable" value={formData.asesora} onChange={(e) => setFormData({...formData, asesora: e.target.value})} required />
+          <div className="hidden md:block"></div> {/* Espaciador */}
+
+          <Input label="Nombre del Cliente / Salón" value={formData.clienteNombre} onChange={(e) => setFormData({...formData, clienteNombre: e.target.value})} required />
+          <Input label="Cédula/RIF" value={formData.clienteCedula} onChange={(e) => setFormData({...formData, clienteCedula: e.target.value})} required />
+          <Input label="Teléfono (Sin el 0)" value={formData.clienteTelefono} onChange={(e) => setFormData({...formData, clienteTelefono: e.target.value})} required placeholder="Ej: 4141234567" />
+          
+          <div className="flex flex-col md:col-span-2 pt-4 border-t border-slate-100 dark:border-slate-700">
+            <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-2 ml-2">Tipo de Despacho</label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {['Nacional', 'Tienda', 'Delivery'].map(t => (
+                <button type="button" key={t} onClick={() => setFormData({...formData, tipoDespacho: t})}
+                  className={`p-4 rounded-xl font-black uppercase tracking-wider text-sm border-2 transition-all flex items-center justify-center gap-2 ${formData.tipoDespacho === t ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300' : 'border-slate-200 text-slate-400 dark:border-slate-700 hover:border-sky-200'}`}>
+                  {t === 'Nacional' ? <Truck size={18}/> : t === 'Tienda' ? <StoreIcon size={18}/> : <Bike size={18}/>}
+                  {t === 'Nacional' ? 'Envío Nacional' : t === 'Tienda' ? 'Entrega Tienda' : 'Delivery'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {formData.tipoDespacho === 'Nacional' && (
+            <>
+              <div className="flex flex-col">
+                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2">Empresa de Envío</label>
+                <select value={formData.courier} onChange={(e)=>setFormData({...formData, courier: e.target.value})} className="p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 outline-none font-bold text-slate-700 dark:text-slate-200">
+                  <option value="" disabled>Seleccionar...</option><option value="ZOOM">ZOOM</option><option value="MRW">MRW</option><option value="Tealca">Tealca</option><option value="Domesa">Domesa</option>
+                </select>
+              </div>
+              <div className="flex flex-col">
+                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2">Modalidad de Envío</label>
+                <select value={formData.pagoEnvio} onChange={(e)=>setFormData({...formData, pagoEnvio: e.target.value})} className="p-3.5 border-2 rounded-2xl bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 outline-none font-bold text-slate-700 dark:text-slate-200">
+                  <option value="COD">Cobro en Destino</option><option value="PAGADO">Envío Pagado</option>
+                </select>
+              </div>
+            </>
+          )}
+
+          {formData.tipoDespacho === 'Tienda' && (
+             <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
+                <div className="md:col-span-3 flex justify-between items-center mb-2">
+                   <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Datos Retiro</h4>
+                   <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-sky-600">
+                      <input type="checkbox" checked={mismoClienteRetira} onChange={(e) => {
+                         const chk = e.target.checked; setMismoClienteRetira(chk);
+                         if (chk) setFormData(p => ({...p, retiroNombre: p.clienteNombre, retiroCedula: p.clienteCedula, retiroTelefono: p.clienteTelefono}));
+                         else setFormData(p => ({...p, retiroNombre: '', retiroCedula: '', retiroTelefono: ''}));
+                      }} className="w-4 h-4 accent-sky-600"/> Mismo Cliente
+                   </label>
+                </div>
+                <Input label="Nombre Retira" value={formData.retiroNombre} onChange={e=>setFormData({...formData, retiroNombre: e.target.value})} disabled={mismoClienteRetira} />
+                <Input label="Cédula Retira" value={formData.retiroCedula} onChange={e=>setFormData({...formData, retiroCedula: e.target.value})} disabled={mismoClienteRetira} />
+                <Input label="Teléfono Retira" value={formData.retiroTelefono} onChange={e=>setFormData({...formData, retiroTelefono: e.target.value})} disabled={mismoClienteRetira} />
+             </div>
+          )}
+
+          {formData.tipoDespacho === 'Delivery' && (
+             <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700">
+                <Input label="Fecha Delivery" type="date" value={formData.deliveryFecha} onChange={e=>setFormData({...formData, deliveryFecha: e.target.value})} />
+                <Input label="Hora" type="time" value={formData.deliveryHora} onChange={e=>setFormData({...formData, deliveryHora: e.target.value})} />
+             </div>
+          )}
+
+          {((formData.tipoDespacho === 'Nacional' && formData.pagoEnvio === 'PAGADO') || formData.tipoDespacho === 'Delivery') && (
+            <div className="md:col-span-2 bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-xl border border-emerald-200 dark:border-emerald-800">
+               <Input label="Costo del Despacho / Delivery ($)" type="number" step="0.01" value={formData.costoEnvio} onChange={e=>setFormData({...formData, costoEnvio: e.target.value})} placeholder="Se sumará a la deuda total" />
+            </div>
+          )}
+
+          <div className="md:col-span-2">
+            <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5 ml-2">Dirección Completa</label>
+            <textarea value={formData.direccion} onChange={(e)=>setFormData({...formData, direccion: e.target.value})} required rows={2} className="w-full p-3.5 border-2 border-slate-100 dark:border-slate-700 rounded-2xl bg-slate-50 dark:bg-slate-900 outline-none focus:border-sky-500 font-bold text-slate-700 dark:text-slate-200"></textarea>
+          </div>
+
+          <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+             <label className={`flex flex-col items-center justify-center p-4 border-2 border-dashed rounded-xl cursor-pointer font-bold text-xs transition-colors ${formData.linkFotoProductos ? 'border-emerald-500 text-emerald-600 bg-emerald-50' : 'border-sky-300 text-sky-600 hover:bg-sky-50'}`}>
+                {subiendoArchivo.foto ? <Loader2 className="animate-spin"/> : (formData.linkFotoProductos ? <CheckCircle/> : <ImageIcon/>)}
+                <span className="mt-2">{formData.linkFotoProductos ? 'Foto de Productos Cargada' : 'Subir Foto de los Productos (Opcional)'}</span>
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'linkFotoProductos')} disabled={subiendoArchivo.foto}/>
+             </label>
+
+             <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 p-4 rounded-xl">
+                <Input label="¿Dio algún Abono Inicial Hoy? ($)" type="number" step="0.01" value={formData.abonoInicial} onChange={e=>setFormData({...formData, abonoInicial: e.target.value})} placeholder="Ej: 20.00" />
+                <label className={`flex flex-col items-center justify-center p-3 mt-3 border-2 border-dashed rounded-xl cursor-pointer font-bold text-[10px] transition-colors ${formData.linkComprobante ? 'border-emerald-500 text-emerald-600 bg-emerald-50' : 'border-purple-300 text-purple-600 hover:bg-purple-50'}`}>
+                   {subiendoArchivo.comprobante ? <Loader2 size={16} className="animate-spin"/> : (formData.linkComprobante ? <CheckCircle size={16}/> : <FileType size={16}/>)}
+                   <span className="mt-1">{formData.linkComprobante ? 'Comprobante Cargado' : 'Subir Comprobante (Requerido si hay abono)'}</span>
+                   <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => handleFileUpload(e, 'linkComprobante')} disabled={subiendoArchivo.comprobante}/>
+                </label>
+             </div>
+          </div>
+
+          <div className="md:col-span-2 bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl border-2 border-slate-100 dark:border-slate-700 mt-2">
+            <div className="flex justify-between items-center mb-4">
+               <label className="font-black text-slate-800 dark:text-white flex items-center gap-2 text-sm"><Package className="text-sky-600"/> Mercancía</label>
+               <button type="button" onClick={() => setIsCatalogOpen(true)} className="text-xs font-black bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-xl flex items-center gap-1 shadow-md"><Search size={14}/> Añadir Producto</button>
+            </div>
+            <div className="space-y-2">
+               {formData.carritoObj && Object.entries(formData.carritoObj).map(([key, qty]) => (
+                 <div key={key} className="flex justify-between items-center bg-white dark:bg-slate-800 p-3 rounded-xl border shadow-sm">
+                    <div className="text-sm font-bold dark:text-slate-200"><span className="text-sky-600 mr-2">{qty}x</span> {key.replace('|', ' ')}</div>
+                    <button type="button" onClick={() => eliminarDelCarrito(key)} className="text-red-400 hover:text-red-600"><XCircle size={18}/></button>
+                 </div>
+               ))}
+            </div>
+          </div>
+
+          <div className="md:col-span-2 p-8 rounded-3xl shadow-inner bg-[#003366] dark:bg-slate-950 text-white grid grid-cols-1 gap-2 mt-2">
+             <div className="flex justify-between items-end border-b border-slate-700 pb-2">
+                <span className="text-sm text-sky-200 font-medium">Subtotal Mercancía:</span>
+                <span className="text-lg font-bold">${formData.totalMercancia}</span>
+             </div>
+             {((formData.tipoDespacho === 'Nacional' && formData.pagoEnvio === 'PAGADO') || formData.tipoDespacho === 'Delivery') && (
+                 <div className="flex justify-between items-end border-b border-slate-700 pb-2">
+                    <span className="text-sm text-sky-200 font-medium">Costo de Envío:</span>
+                    <span className="text-lg font-bold">+ ${(parseFloat(formData.costoEnvio)||0).toFixed(2)}</span>
+                 </div>
+             )}
+             <div className="flex justify-between items-end mt-2">
+                <span className="text-base text-white font-black uppercase">Deuda Total de Consignación:</span>
+                <span className="text-3xl font-black text-emerald-400">
+                    ${(parseFloat(formData.totalMercancia) + ((formData.tipoDespacho === 'Delivery' || formData.pagoEnvio === 'PAGADO') ? (parseFloat(formData.costoEnvio)||0) : 0)).toFixed(2)}
+                </span>
+             </div>
+          </div>
+
+          <div className="md:col-span-2 mt-4">
+             <button type="submit" disabled={enviando} className="w-full text-white font-black py-5 rounded-3xl shadow-2xl flex justify-center items-center gap-3 text-lg transition-all tracking-widest uppercase bg-sky-600 hover:bg-sky-700 disabled:opacity-50">
+               {enviando ? <Loader2 className="animate-spin" /> : <><CheckCircle size={24} /> Solicitar Aprobación</>}
+             </button>
+          </div>
+        </form>
+      )}
+
+      {vista === 'historial' && (
+        <div className="animate-in fade-in space-y-6">
+           <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-700 overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                   <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 font-black tracking-widest uppercase text-xs border-b border-slate-200 dark:border-slate-700">
+                     <tr>
+                       <th className="p-4">Cliente / Info</th>
+                       <th className="p-4">Deuda Original</th>
+                       <th className="p-4 text-emerald-600 dark:text-emerald-500">Abonado</th>
+                       <th className="p-4 text-red-500 dark:text-red-400">Restante</th>
+                       <th className="p-4 text-center">Estado</th>
+                       <th className="p-4 text-center">Acciones</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                     {consignaciones.length === 0 ? (
+                       <tr><td colSpan="6" className="p-10 text-center text-slate-400 font-bold italic">No hay consignaciones.</td></tr>
+                     ) : consignaciones.map(c => (
+                       <tr key={c.id} className={`hover:bg-white dark:hover:bg-slate-800 transition-colors ${c.estado === 'Rechazada' ? 'opacity-50' : ''}`}>
+                         <td className="p-4">
+                            <div className="font-bold text-slate-800 dark:text-slate-100 text-base">{c.clienteNombre}</div>
+                            <div className="text-[10px] text-slate-400 mt-1">Asesora: <span className="font-bold">{c.asesora}</span></div>
+                            <div className="text-[10px] text-sky-600 font-bold mt-0.5">{c.tipoDespacho} {c.courier && `(${c.courier})`}</div>
+                            <div className="flex gap-2 mt-2">
+                                {c.linkFotoProductos && <a href={c.linkFotoProductos} target="_blank" rel="noreferrer" className="text-[9px] bg-sky-100 text-sky-700 px-2 py-0.5 rounded border border-sky-200">Foto</a>}
+                                {c.linkComprobante && <a href={c.linkComprobante} target="_blank" rel="noreferrer" className="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded border border-emerald-200">Recibo</a>}
+                            </div>
+                         </td>
+                         <td className="p-4 font-bold text-slate-700 dark:text-slate-300">
+                            ${c.totalEntregado.toFixed(2)}
+                            {c.abonoInicialPendiente > 0 && <div className="text-[9px] text-emerald-600 mt-1 uppercase">Abono Inicial: ${c.abonoInicialPendiente}</div>}
+                         </td>
+                         <td className="p-4 font-black text-emerald-600 dark:text-emerald-500">${c.totalAbonado.toFixed(2)}</td>
+                         <td className="p-4 font-black text-red-500 dark:text-red-400 text-lg">${c.saldoPendiente.toFixed(2)}</td>
+                         <td className="p-4 text-center">
+                            <StatusBadge status={c.estado === 'Pendiente' ? 'Pendiente' : c.estado === 'Abierta' ? 'En Proceso' : c.estado} />
+                            {c.estado === 'Rechazada' && <div className="text-[9px] text-red-500 mt-1 max-w-[120px] whitespace-normal">Motivo: {c.motivoRechazo}</div>}
+                         </td>
+                         <td className="p-4">
+                            <div className="flex flex-col gap-2 justify-center items-center">
+                               {c.estado === 'Pendiente' ? (
+                                   esAdmin ? (
+                                     <>
+                                        <button onClick={() => handleValidar(c)} disabled={enviando} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase w-full flex items-center justify-center gap-1 shadow"><ShieldCheck size={12}/> Validar</button>
+                                        <button onClick={() => handleRechazar(c)} className="bg-red-50 text-red-600 border border-red-200 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase w-full flex items-center justify-center gap-1"><Ban size={12}/> Rechazar</button>
+                                     </>
+                                   ) : (
+                                     <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded">Esperando Admin</span>
+                                   )
+                               ) : (
+                                   <button disabled={c.saldoPendiente <= 0 || c.estado === 'Rechazada'} onClick={() => setModalAbonoData(c)} className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow uppercase w-full ${c.saldoPendiente > 0 && c.estado !== 'Rechazada' ? 'bg-sky-600 hover:bg-sky-700' : 'bg-slate-300 dark:bg-slate-700 opacity-50 cursor-not-allowed'}`}>Abonar</button>
+                               )}
+                            </div>
+                         </td>
+                       </tr>
+                     ))}
+                   </tbody>
+                </table>
+              </div>
+           </div>
+        </div>
+      )}
+
+      <ModalCatalogo catalogo={catalogo} stock={stock} isOpen={isCatalogOpen} onClose={()=>setIsCatalogOpen(false)} dialogs={dialogs} onConfirm={(txt, obj)=>{ setFormData(prev => ({...prev, carritoObj: {...prev.carritoObj, ...obj}})); setIsCatalogOpen(false); }} />
+      <ModalAbonos />
     </div>
   );
 }
