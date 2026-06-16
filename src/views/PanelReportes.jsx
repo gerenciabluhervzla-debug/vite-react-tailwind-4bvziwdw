@@ -1,10 +1,13 @@
-import React, { useState, useMemo } from 'react';
-import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users, Truck, Wallet, ArrowDownCircle, ShoppingBag } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users, Truck, Wallet, ArrowDownCircle, ShoppingBag, Briefcase } from 'lucide-react';
 import { ROLES, BRAND_LOGO } from '../config/constants';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db, appId } from '../config/firebase';
 
 export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const [rangoRango, setRangoRango] = useState('hoy');
   const [asesoraFiltro, setAsesoraFiltro] = useState('todas');
+  const [abonosCaja, setAbonosCaja] = useState([]);
   
   const getLocalToday = () => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -17,6 +20,54 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const rol = perfil?.role;
   const verTotalInventario = rol === ROLES.ADMIN;
   const verDinero = true; 
+
+  // --- LECTURA DE INGRESOS DE CAJA (CONSIGNACIONES) ---
+  useEffect(() => {
+    const ref = collection(db, 'artifacts', appId, 'public', 'data', 'ingresos_caja');
+    const unsub = onSnapshot(ref, (snap) => {
+        setAbonosCaja(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (e) => console.warn("Error cargando abonos:", e));
+    return () => unsub();
+  }, []);
+
+  const abonosFiltrados = useMemo(() => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    
+    return abonosCaja.filter(a => {
+      let aTime = 0;
+      if (a.fecha) {
+         if (a.fecha.seconds) aTime = a.fecha.seconds * 1000;
+         else if (typeof a.fecha === 'number') aTime = a.fecha;
+         else aTime = new Date(a.fecha).getTime();
+      }
+      
+      if (!aTime) return false;
+      const aDate = new Date(aTime);
+      
+      if (rangoRango === 'hoy') {
+         return aDate.getDate() === d.getDate() && aDate.getMonth() === d.getMonth() && aDate.getFullYear() === d.getFullYear();
+      }
+      if (rangoRango === 'mes') {
+         return aDate.getMonth() === d.getMonth() && aDate.getFullYear() === d.getFullYear();
+      }
+      if (rangoRango === 'año') {
+         return aDate.getFullYear() === d.getFullYear();
+      }
+      if (rangoRango === 'todo') return true;
+      if (rangoRango === 'custom') {
+        const start = fechaInicio ? new Date(fechaInicio + 'T00:00:00').getTime() : 0;
+        const end = fechaFin ? new Date(fechaFin + 'T23:59:59').getTime() : Infinity;
+        return aTime >= start && aTime <= end;
+      }
+      return true;
+    });
+  }, [abonosCaja, rangoRango, fechaInicio, fechaFin]);
+
+  const totalIngresosConsignacionesUsd = useMemo(() => {
+    return abonosFiltrados
+      .filter(a => a.concepto && a.concepto.includes('Consignación'))
+      .reduce((acc, curr) => acc + (parseFloat(curr.monto) || 0), 0);
+  }, [abonosFiltrados]);
 
   const validados = useMemo(() => {
     return pedidos.filter(p => 
@@ -60,19 +111,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       return true;
     });
   }, [validados, rangoRango, fechaInicio, fechaFin]);
-
-  const ventasMesUsdPDF = useMemo(() => {
-    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    const currentMonth = String(d.getMonth() + 1).padStart(2, '0');
-    const currentYear = String(d.getFullYear());
-    
-    return validados
-      .filter(p => {
-         const [, dMes, dAno] = (p.fechaDespacho || '').split('/');
-         return dMes === currentMonth && dAno === currentYear;
-      })
-      .reduce((sum, p) => sum + (p.montoUsd || 0), 0);
-  }, [validados]);
 
   const metricas = useMemo(() => {
     let ventasVES = 0; let ventasZelle = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
@@ -236,8 +274,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       });
 
       const ordenado = Object.values(map).sort((a,b) => (b.totalUsd + b.totalZelle) - (a.totalUsd + a.totalZelle));
-      
-      // ORDEN ASCENDENTE (PUNTO 2): Se invierte para listar desde el más antiguo al más nuevo de registro
       ordenado.forEach(as => as.clientes.reverse());
       
       return ordenado;
@@ -253,7 +289,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     return ventasPorAsesora.filter(as => as.nombre === asesoraFiltro);
   }, [ventasPorAsesora, asesoraFiltro]);
 
-  // --- CÁLCULO INVENTARIO FÍSICO (Ventas + Obsequios) ---
   const totalValInventario = useMemo(() => {
     let valorInicialStock = 0;
     Object.entries(stock).forEach(([key, val]) => {
@@ -288,7 +323,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
             }));
           });
       };
-      
       sumarAlDescuento(p.carritoObj);
       sumarAlDescuento(p.carritoObsequiosObj);
     });
@@ -296,7 +330,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     return Math.max(0, valorInicialStock - valorDescontarPorDespachos);
   }, [stock, catalogo, pedidosFiltrados]);
 
-  // --- TOP 10 PRODUCTOS (Ventas + Obsequios) ---
   const topProductos = useMemo(() => {
     const map = {};
     pedidosFiltrados.forEach(p => {
@@ -316,7 +349,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
             map[key].valor += (qty * precioUnitario);
           });
       };
-      
       contabilizar(p.carritoObj);
       contabilizar(p.carritoObsequiosObj);
     });
@@ -416,7 +448,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           .logo { height: 60px; object-fit: contain; }
           h1 { color: #0f172a; font-weight: 900; margin: 0; font-size: 24px; text-transform: uppercase; }
           
-          .dashboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px; }
+          .dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 15px; }
+          .dashboard-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px; }
           .card { border-radius: 16px; padding: 18px; box-sizing: border-box; position: relative; overflow: hidden; }
           .card-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
           .card-border { border: 1px solid #e2e8f0; background: #ffffff; }
@@ -424,6 +457,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           .bg-dark { background: #0f172a; color: white; border-bottom: 4px solid #020617; }
           .bg-orange { background: #ea580c; color: white; border-bottom: 4px solid #9a3412; }
           .bg-emerald { background: #059669; color: white; border-bottom: 4px solid #065f46; }
+          .bg-blue-consign { background: #0284c7; color: white; border-bottom: 4px solid #0369a1; }
           
           .bg-light-green { background: #ecfdf5; color: #064e3b; border-bottom: 4px solid #6ee7b7; }
           .bg-light-cyan { background: #f0fdfa; color: #134e4a; border-bottom: 4px solid #5eead4; }
@@ -433,7 +467,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           .bg-light-slate { background: #f8fafc; color: #0f172a; border-bottom: 4px solid #cbd5e1; }
           
           .kpi-title { font-size: 10px; text-transform: uppercase; font-weight: 900; letter-spacing: 0.5px; margin-bottom: 6px; }
-          .kpi-value { font-size: 26px; font-weight: 900; margin: 0; }
+          .kpi-value { font-size: 24px; font-weight: 900; margin: 0; }
           .kpi-sub { font-size: 10px; font-weight: 700; margin-top: 8px; opacity: 0.8; line-height: 1.4; }
           
           .flex-row { display: flex; align-items: center; gap: 12px; }
@@ -473,17 +507,22 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
               <div class="kpi-value">$${metricas.totalBrutoGeneralUsd.toFixed(2)}</div>
            </div>
            <div class="card bg-orange card-shadow">
-              <div class="kpi-title" style="color: #fed7aa;">Recaudado por Envíos/Delivery ($)</div>
+              <div class="kpi-title" style="color: #fed7aa;">Recaudado Envíos/Delivery ($)</div>
               <div class="kpi-value">$${metricas.totalCobroEnviosUsd.toFixed(2)}</div>
-              <div style="font-size: 10px; margin-top: 4px; opacity: 0.9;">Deliverys: $${metricas.totalDeliveryCobroUsd.toFixed(2)} | Envíos: $${metricas.totalEnviosNacionalesCobroUsd.toFixed(2)}</div>
+              <div style="font-size: 10px; margin-top: 4px; opacity: 0.9;">Deliv: $${metricas.totalDeliveryCobroUsd.toFixed(2)} | Nac: $${metricas.totalEnviosNacionalesCobroUsd.toFixed(2)}</div>
            </div>
            <div class="card bg-emerald card-shadow">
-              <div class="kpi-title" style="color: #a7f3d0;">Ventas Netas (Solo Productos) ($)</div>
+              <div class="kpi-title" style="color: #a7f3d0;">Ventas Netas (Prod.) ($)</div>
               <div class="kpi-value">$${metricas.totalNetoProductosUsd.toFixed(2)}</div>
+           </div>
+           <div class="card bg-blue-consign card-shadow">
+              <div class="kpi-title" style="color: #bae6fd;">Ingresos Consignaciones ($)</div>
+              <div class="kpi-value">$${totalIngresosConsignacionesUsd.toFixed(2)}</div>
+              <div style="font-size: 10px; margin-top: 4px; opacity: 0.9;">Abonos recibidos en el periodo</div>
            </div>
         </div>
 
-        <div class="dashboard-grid">
+        <div class="dashboard-grid-3">
            <div class="card card-border flex-row">
               <div class="icon-box icon-orange">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11"/><path d="M14 9h4l4 4v5c0 .6-.4 1-1 1h-2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
@@ -513,7 +552,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            </div>
         </div>
 
-        <div class="dashboard-grid">
+        <div class="dashboard-grid-3">
            <div class="card bg-light-green card-shadow">
               <div class="kpi-title" style="color: #065f46;">Caja Física Dólares ($)</div>
               <div class="kpi-value">$${cajaFisicaUsd.toFixed(2)}</div>
@@ -531,7 +570,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            </div>
         </div>
 
-        <div class="dashboard-grid">
+        <div class="dashboard-grid-3">
            <div class="card bg-purple card-shadow">
               <div class="kpi-title" style="color: #e9d5ff;">Pagos ZELLE ($)</div>
               <div class="kpi-value">$${metricas.ventasZelle.toFixed(2)}</div>
@@ -843,6 +882,18 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                   </div>
                   <TrendingUp size={80} className="absolute -right-4 -bottom-4 opacity-5"/>
                </div>
+               
+               {/* CUADRO NUEVO: CONSIGNACIONES */}
+               <div className="bg-sky-600 text-white p-6 rounded-[2rem] shadow-md flex flex-col justify-center border-b-4 border-sky-800 relative overflow-hidden md:col-span-3">
+                  <div className="relative z-10">
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-sky-200 mb-1">Pagos de Consignaciones ($)</div>
+                    <div className="text-2xl lg:text-3xl font-black">${totalIngresosConsignacionesUsd.toFixed(2)}</div>
+                    <div className="text-[11px] font-bold mt-2 text-sky-100">
+                        Abonos recaudados en la fecha seleccionada
+                    </div>
+                  </div>
+                  <Briefcase size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
+               </div>
              </>
            )}
 
@@ -922,7 +973,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
              <table className="w-full text-left text-sm border-collapse min-w-[800px]">
                 <thead>
-                  {/* COLUMNA ELIMINADA DE FORMA OPTIMIZADA */}
                   <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-b dark:border-slate-700">
                     <th className="p-4 font-black tracking-wide text-center w-[60px]">N°</th>
                     <th className="p-4 font-black tracking-wide w-[140px]">Fecha / Origen</th>
@@ -935,7 +985,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                       <tr><td colSpan="4" className="p-8 text-center text-slate-400 font-bold italic">No hay ventas registradas para la selección actual.</td></tr>
                    ) : ventasPorAsesoraFiltradas.map((asesora) => (
                       <React.Fragment key={asesora.nombre}>
-                         {/* AJUSTADO EL COLSPAN A 4 */}
                          <tr className="bg-sky-50 dark:bg-sky-900/30 border-y border-sky-100 dark:border-sky-800/50">
                             <td colSpan="4" className="p-4">
                                <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-3">
@@ -962,7 +1011,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                                <td className="p-4 text-center font-bold text-slate-400 dark:text-slate-500">
                                   {i + 1}
                                </td>
-                               {/* COLUMNA INTEGRADA: FECHA + ORIGEN ABAJO (PUNTO 1) */}
                                <td className="p-4 font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
                                   <div className="font-bold text-slate-700 dark:text-slate-200">{c.fechaPedido}</div>
                                   <div className="mt-1">

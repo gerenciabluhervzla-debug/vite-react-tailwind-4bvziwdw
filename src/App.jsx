@@ -7,7 +7,7 @@ import {
 } from 'firebase/firestore';
 import { 
   ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users, 
-  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X, Inbox, UserSquare 
+  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X, Inbox, UserSquare, Briefcase 
 } from 'lucide-react';
 
 import { auth, db, googleProvider, appId } from './config/firebase';
@@ -28,6 +28,7 @@ import PanelLogs from './views/PanelLogs';
 // NUEVOS MÓDULOS
 import PanelRecepcion from './views/PanelRecepcion';
 import PanelClientes from './views/PanelClientes';
+import PanelConsignaciones from './views/PanelConsignaciones'; 
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -339,6 +340,9 @@ export default function App() {
     // NUEVO: CRM de Clientes
     const showClientes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA].includes(r);
 
+    // NUEVO: Consignaciones
+    const showConsignaciones = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA].includes(r);
+
     const showReportes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r);
     const showInventario = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r); 
     const showUsuarios = [ROLES.ADMIN].includes(r);
@@ -398,6 +402,10 @@ export default function App() {
             <nav className="mt-6 flex flex-col gap-1.5 px-4 overflow-y-auto flex-1 pb-4">
               <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Área Operativa</div>
               {showVentas && <TabButton active={activeTab === 'ventas'} onClick={() => handleTabClick('ventas')} icon={<ShoppingCart size={18} />} label="Ventas y Web" badge={pedidos.filter(p=>p.status==='Rechazado' || p.esPublico).length} badgeColor="bg-red-500 dark:bg-sky-500" />}
+              
+              {/* BOTON CONSIGNACIONES */}
+              {showConsignaciones && <TabButton active={activeTab === 'consignaciones'} onClick={() => handleTabClick('consignaciones')} icon={<Briefcase size={18} />} label="Consignaciones" />}
+              
               {showAdmin && <TabButton active={activeTab === 'admin'} onClick={() => handleTabClick('admin')} icon={<CheckSquare size={18} />} label={r === ROLES.AUDITORIA ? 'Auditoría Pagos' : 'Admin y Pagos'} badge={pedidos.filter(p=>p.status==='Pendiente').length} />}
               
               {/* LÓGICA DE BADGES DIVIDIDA POR TIPO DE DESPACHO */}
@@ -430,6 +438,9 @@ export default function App() {
                 {/* PASAMOS CLIENTEPRECARGADO AL PANEL DE VENTAS (SI LO SOPORTA LUEGO) */}
                 {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} clientePreCargado={clienteParaPedido} setClientePreCargado={setClienteParaPedido} />}
                 
+                {/* RENDERIZADO DEL NUEVO PANEL DE CONSIGNACIONES */}
+                {activeTab === 'consignaciones' && showConsignaciones && <PanelConsignaciones perfil={userProfile} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
+
                 {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} config={configGral} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
                 {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} perfil={userProfile} />}
                 
