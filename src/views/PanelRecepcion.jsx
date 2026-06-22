@@ -46,14 +46,21 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
     const todayStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
     const startOfDay = new Date(tDate.getFullYear(), tDate.getMonth(), tDate.getDate()).getTime();
 
-    // 1. Sumar Ventas (Pedidos Tienda o Delivery del día)
+    // 1. Sumar Ventas y Obsequios (Pedidos Tienda o Delivery del día)
     pedidos.forEach(p => {
         if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr && ['Tienda', 'Delivery'].includes(p.tipoDespacho)) {
-            if (p.carritoObj) {
-                Object.entries(p.carritoObj).forEach(([k, qty]) => {
-                    if (aggr[k]) aggr[k].ventas += qty;
+            
+            // CORRECCIÓN: Unimos carrito principal y carrito de obsequios
+            const carritoTotal = { ...(p.carritoObj || {}) };
+            if (p.carritoObsequiosObj) {
+                Object.entries(p.carritoObsequiosObj).forEach(([k, qty]) => {
+                    carritoTotal[k] = (carritoTotal[k] || 0) + qty;
                 });
             }
+
+            Object.entries(carritoTotal).forEach(([k, qty]) => {
+                if (aggr[k]) aggr[k].ventas += qty;
+            });
         }
     });
 

@@ -41,7 +41,15 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
        if (p.status !== 'Anulado' && p.status !== 'Rechazado' && esParaHoy) {
           const isRecepcion = p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Delivery';
           
-          Object.entries(p.carritoObj || {}).forEach(([key, qty]) => {
+          // UNIMOS CARRITO Y OBSEQUIOS ANTES DE RECORRERLOS
+          const carritoTotal = { ...(p.carritoObj || {}) };
+          if (p.carritoObsequiosObj) {
+              Object.entries(p.carritoObsequiosObj).forEach(([key, qty]) => {
+                  carritoTotal[key] = (carritoTotal[key] || 0) + qty;
+              });
+          }
+          
+          Object.entries(carritoTotal).forEach(([key, qty]) => {
              if (map[key]) {
                  if (isRecepcion) map[key].recepcion.ventas += qty;
                  else map[key].envios.ventas += qty;
