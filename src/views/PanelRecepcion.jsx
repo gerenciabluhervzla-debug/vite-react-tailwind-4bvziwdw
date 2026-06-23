@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Store, Bike, Package, Printer, Camera, CheckCircle, Search, Loader2, ClipboardCheck, ShieldCheck, CheckSquare, Save, FileSpreadsheet, Download, FileOutput, AlertTriangle, MessageSquare } from 'lucide-react';
-import { updateDoc, doc, addDoc, collection, getDocs, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { Store, Bike, Package, Printer, Camera, CheckCircle, Search, Loader2, ClipboardCheck, ShieldCheck, CheckSquare, Save, FileSpreadsheet, Download, FileOutput, AlertTriangle, MessageSquare, Eye, X } from 'lucide-react';
+import { updateDoc, doc, addDoc, collection, getDocs, query, orderBy, onSnapshot, setDoc } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
 import { compressImage } from '../utils/image';
 import { BRAND_LOGO, ROLES } from '../config/constants';
@@ -18,6 +18,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   const [tipoFiltro, setTipoFiltro] = useState('Todos');
   const [subiendoFotoId, setSubiendoFotoId] = useState(null);
   const [vista, setVista] = useState('pendientes'); 
+  const [previewImage, setPreviewImage] = useState(null);
   
   // Estados para Auditoría y Conteo Físico
   const [cierresGuardados, setCierresGuardados] = useState([]);
@@ -26,31 +27,50 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   const [conteoFisico, setConteoFisico] = useState({});
   const [notasConteo, setNotasConteo] = useState({});
   const [movimientos, setMovimientos] = useState([]);
+  
+  // Selector de fecha para el cierre de inventario retroactivo
+  const [fechaCierreElegida, setFechaCierreElegida] = useState(getHoyISO());
 
-  // Cargar movimientos en tiempo real para el cálculo de Ingresos/Salidas
+  // FUNCIÓN PARA GENERAR URL DIRECTA DE IMAGEN DESDE DRIVE
+  const getDirectUrl = (url) => {
+    if (!url) return null;
+    let id = null;
+    if (url.includes('/d/')) {
+      const match = url.match(/\/d\/(.+?)\//);
+      if (match && match[1]) id = match[1];
+    } else if (url.includes('id=')) {
+      const match = url.match(/[?&]id=([^&]+)/);
+      if (match && match[1]) id = match[1];
+    }
+    if (id) {
+      return `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
+    }
+    return url;
+  };
+
+  // Cargar movimientos en tiempo real para el cálculo de Inventario
   useEffect(() => {
     const qMovs = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'));
     const unsubMovs = onSnapshot(qMovs, (snap) => setMovimientos(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     return () => unsubMovs();
   }, [db, appId]);
 
-  // Lógica del Kardex Diario de Recepción
+  // Lógica del Kardex Diario de Recepción parametrizado por fecha elegida
   const hoyKardex = useMemo(() => {
     const aggr = {};
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
         aggr[`${p.nombre}|${pres}`] = { ventas: 0, ingresos: 0, salidas: 0 };
     })));
 
-    const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    const tDate = getVeneziaTime();
+    const [year, month, day] = fechaCierreElegida.split('-');
+    const tDate = new Date(year, month - 1, day);
     const todayStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
-    const startOfDay = new Date(tDate.getFullYear(), tDate.getMonth(), tDate.getDate()).getTime();
+    const startOfDay = tDate.getTime();
+    const endOfDay = startOfDay + 86400000;
 
-    // 1. Sumar Ventas y Obsequios (Pedidos Tienda o Delivery del día)
+    // 1. Sumar Ventas y Obsequios (Pedidos Tienda o Delivery del día seleccionado)
     pedidos.forEach(p => {
         if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr && ['Tienda', 'Delivery'].includes(p.tipoDespacho)) {
-            
-            // CORRECCIÓN: Unimos carrito principal y carrito de obsequios
             const carritoTotal = { ...(p.carritoObj || {}) };
             if (p.carritoObsequiosObj) {
                 Object.entries(p.carritoObsequiosObj).forEach(([k, qty]) => {
@@ -64,9 +84,9 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
         }
     });
 
-    // 2. Sumar Movimientos (Transferencias desde Envíos, Ingresos y Salidas manuales)
+    // 2. Sumar Movimientos filtrando por la ventana de tiempo del día elegido
     movimientos.forEach(m => {
-        if (m.fechaCreacion >= startOfDay) {
+        if (m.fechaCreacion >= startOfDay && m.fechaCreacion < endOfDay) {
             if (m.tipo === 'TRANSFERENCIA') {
                 Object.entries(m.items || {}).forEach(([k, qty]) => {
                     if (aggr[k]) aggr[k].ingresos += qty;
@@ -84,7 +104,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
     });
     
     return aggr;
-  }, [pedidos, movimientos, catalogo]);
+  }, [pedidos, movimientos, catalogo, fechaCierreElegida]);
 
   const pedidosRecepcionBase = useMemo(() => {
      return pedidos.filter(p => 
@@ -96,7 +116,6 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
     const map = {};
     const agrupados = {};
 
-    // Agrupamos por tipo y por fecha para mantener la numeración estable sin importar el filtro activo
     pedidosRecepcionBase.forEach(p => {
        const tipo = p.tipoDespacho || 'Tienda'; 
        const fecha = p.fechaDespacho || 'SinFecha';
@@ -197,6 +216,8 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
     dialogs.confirm("¿Estás seguro de registrar el cierre físico de Recepción?", async () => {
       const productosCierre = [];
       let totalDiferencias = 0;
+      const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
+      const updates = {};
       
       catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
         const key = `${p.nombre}|${pres}`;
@@ -222,10 +243,17 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
            diferencia, 
            nota: notasConteo[key] || '' 
         });
+
+        if (diferencia !== 0) {
+           updates[key] = { recepcion: fisico };
+        }
       })));
 
+      const [year, month, day] = fechaCierreElegida.split('-');
+      const fechaCierreFormat = `${day}/${month}/${year}`;
+
       const nuevoCierre = { 
-         fecha: new Date().toLocaleDateString('es-VE'), 
+         fecha: fechaCierreFormat, 
          timestamp: Date.now(), 
          creadoPor: perfil?.nombre || 'Recepcionista', 
          totalItemsAuditados: productosCierre.length, 
@@ -236,7 +264,10 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
 
       try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_recepcion'), nuevoCierre);
-        loggear('CIERRE_RECEPCION_FISICO', `Cierre de inventario en Recepción registrado con ${totalDiferencias} diferencias.`);
+        if (Object.keys(updates).length > 0) { 
+           await setDoc(stockRef, updates, { merge: true }); 
+        }
+        loggear('CIERRE_RECEPCION_FISICO', `Cierre registrado con ${totalDiferencias} diferencias para la fecha ${fechaCierreFormat}.`);
         setConteoActivo(false);
         setVista('auditoria');
         dialogs.confirm("Cierre guardado con éxito. ¿Deseas descargar el reporte en PDF ahora?", () => { imprimirPDF(nuevoCierre); }, "Reporte Listo");
@@ -358,9 +389,22 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
     setTimeout(() => { printWindow.print(); }, 1000);
   };
 
+  const dejarComentarioAuditoria = async (cierre) => {
+    dialogs.prompt("Escribe un comentario o nota de auditoría para este cierre:", async (nota) => {
+       if(!nota) return;
+       try {
+          const notasExistentes = cierre.notasAuditoria || [];
+          const nuevasNotas = [...notasExistentes, { fecha: Date.now(), texto: nota, autor: perfil?.nombre || 'Auditor' }];
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_recepcion', cierre.id), { notasAuditoria: nuevasNotas });
+          loggear('AUDITORIA_CIERRE_REC', `Se añadió comentario en cierre de ${cierre.fecha}`);
+          cargarCierres();
+       } catch(e) { console.error(e); }
+    }, "Añadir Nota a Cierre");
+  };
+
   const renderTarjetaPedido = (p) => {
     const urlValidacion = p.linkComprobante || p.fotoPago || p.comprobantePago || "";
-    const urlProductoFinal = p.linkFotoProductos || ""; // La foto que toma recepción al entregar/preparar
+    const urlProductoFinal = p.linkFotoProductos || ""; 
     const urlExtracto = p.linkExtracto || p.extractoBancario || p.fotoExtracto || "";
 
     return (
@@ -404,15 +448,15 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
            {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
         </div>
 
-        {/* Galería de adjuntos que incluye la foto del paquete una vez tomada */}
+        {/* CORRECCIÓN DE FOTOS: Se envuelven las URLs en getDirectUrl para habilitar la visualización */}
         <div className="flex flex-wrap gap-2.5 mb-4 bg-white dark:bg-slate-950 p-2 rounded-xl border border-slate-100 dark:border-slate-800/60 justify-center">
            {[ {url: urlValidacion, txt: 'Pago'}, {url: urlExtracto, txt: 'Extracto'}, {url: urlProductoFinal, txt: 'Paquete'} ].map(img => (
               (typeof img.url === 'string' && img.url.startsWith('http')) && (
                  <div key={img.txt} className="flex flex-col items-center gap-0.5">
                     <span className="text-[8px] font-black text-slate-400 uppercase">{img.txt}</span>
-                    <a href={img.url} target="_blank" rel="noreferrer" className="block w-11 h-11 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 hover:scale-105 transition-all shadow-sm">
-                       <img src={img.url} alt={img.txt} className="w-full h-full object-cover" onError={(e)=>{e.target.parentNode.style.display='none'}}/>
-                    </a>
+                    <div onClick={() => setPreviewImage(img.url)} className="block w-11 h-11 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700 hover:scale-105 transition-all shadow-sm cursor-pointer">
+                       <img src={getDirectUrl(img.url)} alt={img.txt} className="w-full h-full object-cover" onError={(e)=>{e.target.parentNode.style.display='none'}}/>
+                    </div>
                  </div>
               )
            ))}
@@ -472,7 +516,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
              <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700">
                 <CheckSquare size={64} className="mx-auto text-purple-300 dark:text-purple-800 mb-6" />
                 <h3 className="text-2xl font-black text-slate-700 dark:text-slate-200 mb-2">Auditoría Diaria de Recepción</h3>
-                <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara el inventario físico en la tienda contra el registrado en Bluher Sys evaluando el Kárdex de hoy.</p>
+                <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara el inventario físico en la tienda contra el registrado en Bluher Sys evaluando el Kárdex.</p>
                 <button onClick={iniciarConteo} className="bg-purple-600 hover:bg-purple-700 text-white font-black py-4 px-8 rounded-xl shadow-lg transition-all hover:-translate-y-1">
                   Iniciar Conteo del Día
                 </button>
@@ -482,9 +526,20 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-purple-50 dark:bg-purple-900/20 p-6 rounded-2xl border border-purple-100 dark:border-purple-800">
                   <div>
                     <h3 className="font-black text-purple-900 dark:text-purple-300 text-lg">Hoja de Trabajo Activa</h3>
-                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Las casillas ya tienen la cantidad final del sistema calculada en base a los movimientos de hoy. Modifica solo donde haya diferencias.</p>
+                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Las casillas ya tienen la cantidad final del sistema calculada en base a los movimientos. Modifica solo donde haya diferencias.</p>
                   </div>
-                  <div className="flex gap-3 w-full md:w-auto">
+                  <div className="flex flex-wrap gap-3 w-full md:w-auto items-center">
+                     {/* NUEVO CALENDARIO PARA CAMBIAR DÍA DEL CIERRE */}
+                     <div className="flex items-center gap-2 mr-2 border-r pr-4 border-purple-200 dark:border-purple-800">
+                        <label className="text-xs font-bold text-purple-700 dark:text-purple-400 uppercase tracking-widest">Fecha a cerrar:</label>
+                        <input 
+                           type="date" 
+                           value={fechaCierreElegida} 
+                           onChange={(e) => setFechaCierreElegida(e.target.value)}
+                           className="bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-700 rounded-lg px-2 py-2 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-purple-500"
+                        />
+                     </div>
+
                     <button onClick={()=>setConteoActivo(false)} className="flex-1 md:flex-none px-6 py-3 font-bold text-slate-600 bg-white dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Cancelar</button>
                     <button onClick={guardarCierre} className="flex-1 md:flex-none px-6 py-3 font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 shadow-md flex items-center justify-center gap-2 transition-transform hover:-translate-y-0.5"><Save size={18}/> Finalizar y Guardar</button>
                   </div>
@@ -599,15 +654,38 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                            }
                          </div>
                        </div>
+                       
+                       {cierre.notasAuditoria && cierre.notasAuditoria.length > 0 && (
+                          <div className="mb-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
+                             <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-2 flex items-center gap-1">
+                                <MessageSquare size={12}/> Comentarios de Auditoría:
+                             </span>
+                             <div className="space-y-2">
+                               {cierre.notasAuditoria.map((n, i) => (
+                                  <div key={i} className="text-[11px] text-amber-900 dark:text-amber-200 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-amber-100 dark:border-amber-800/50">
+                                     <div className="font-bold mb-0.5 opacity-80">{n.autor} <span className="font-normal text-[9px]">({new Date(n.fecha).toLocaleDateString()})</span>:</div>
+                                     <div className="italic leading-snug">"{n.texto}"</div>
+                                  </div>
+                               ))}
+                             </div>
+                          </div>
+                       )}
                      </div>
                      
-                     <div className="flex gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
-                       <button onClick={() => imprimirPDF(cierre)} className="flex-1 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-400 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
-                          <FileOutput size={16}/> PDF
-                       </button>
-                       <button onClick={() => generarCSV(cierre)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
-                          <Download size={16}/> Excel
-                       </button>
+                     <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+                       <div className="flex gap-2">
+                          <button onClick={() => imprimirPDF(cierre)} className="flex-1 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-400 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
+                             <FileOutput size={16}/> PDF
+                          </button>
+                          <button onClick={() => generarCSV(cierre)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
+                             <Download size={16}/> Excel
+                          </button>
+                       </div>
+                       {esAuditor && (
+                          <button onClick={() => dejarComentarioAuditoria(cierre)} className="w-full mt-1 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-1.5 border border-purple-200">
+                             <MessageSquare size={14}/> Dejar Observación
+                          </button>
+                       )}
                      </div>
                   </div>
                 ))
@@ -625,7 +703,6 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                   <input type="text" placeholder="Buscar cliente..." className="w-full pl-9 pr-3 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
                </div>
                
-               {/* Controles de fecha rediseñados con opción de limpiar filtro */}
                <div className="flex w-full relative">
                   <input type="date" value={fechaFiltro} onChange={(e)=>setFechaFiltro(e.target.value)} className="w-full p-2.5 border border-slate-200 dark:border-slate-700 rounded-l-xl bg-white dark:bg-slate-900 text-sm font-bold outline-none focus:border-purple-500" title="Filtrar por fecha" />
                   <button onClick={()=>setFechaFiltro('')} className={`px-4 border border-l-0 border-slate-200 dark:border-slate-700 rounded-r-xl font-bold text-xs transition-colors outline-none focus:border-purple-500 ${!fechaFiltro ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-400' : 'bg-slate-50 text-slate-500 hover:bg-red-50 hover:text-red-600 dark:bg-slate-800'}`} title="Ver todas las fechas">
@@ -667,6 +744,14 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                </div>
             )}
          </>
+       )}
+
+       {/* MODAL PARA PREVISUALIZACIÓN DE IMÁGENES COMPLETA */}
+       {previewImage && (
+         <div className="fixed inset-0 z-[400] bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
+           <button onClick={() => setPreviewImage(null)} className="absolute top-6 right-6 text-white bg-white/20 p-2 rounded-full hover:bg-white/40 transition-colors"><X size={24}/></button>
+           <img src={getDirectUrl(previewImage)} alt="Vista Previa" className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain"/>
+         </div>
        )}
     </div>
   );

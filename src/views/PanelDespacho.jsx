@@ -33,7 +33,11 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return url;
   };
 
-  // AISLAMIENTO DE ALMACÉN: Solo operamos Envíos Nacionales
+  const getHoyISO = () => {
+    const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
   const pedidosValidados = pedidos.filter(p => p.status === 'Validado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional'));
   const pedidosDespachados = pedidos.filter(p => p.status === 'Despachado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional'));
   const pedidosPendientes = pedidos.filter(p => (p.status === 'Pendiente' || p.status === 'Rechazado') && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')).length;
@@ -47,8 +51,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const [conteoFisico, setConteoFisico] = useState({});
   const [notasConteo, setNotasConteo] = useState({});
   const [filtroFechaCierre, setFiltroFechaCierre] = useState('');
+  
+  // ESTADO NUEVO: Controla la fecha del cierre físico
+  const [fechaCierreElegida, setFechaCierreElegida] = useState(getHoyISO());
 
-  // LÓGICA DE NUMERACIÓN INDEPENDIENTE
   const numeracionDiaria = useMemo(() => {
     const map = {};
     const agrupados = {};
@@ -83,18 +89,18 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         aggr[`${p.nombre}|${pres}`] = { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
     })));
 
-    const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    const tDate = getVeneziaTime();
+    // LÓGICA ACTUALIZADA: Calcula el kardex en base a la fecha de cierre elegida
+    const [year, month, day] = fechaCierreElegida.split('-');
+    const tDate = new Date(year, month - 1, day);
     const todayStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
-    const startOfDay = new Date(tDate.getFullYear(), tDate.getMonth(), tDate.getDate()).getTime();
+    const startOfDay = tDate.getTime();
+    const endOfDay = startOfDay + 86400000;
 
     const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
 
     pedidos.forEach(p => {
-       // Kardex de Despacho
        if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')) {
            
-           // Unimos ventas y obsequios en un solo objeto para el cuadre
            const carritoTotal = { ...(p.carritoObj || {}) };
            if (p.carritoObsequiosObj) {
                Object.entries(p.carritoObsequiosObj).forEach(([k, qty]) => {
@@ -108,7 +114,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                if (boosterKeys.includes(k)) countBoosters += qty;
            });
 
-           // Si faltan concentrados, forzamos la suma como venta para que el cierre descuente el stock físico
            if (countBoosters > 0) {
                const concentradosActuales = carritoTotal["Concentrado|Unidad"] || 0;
                if (concentradosActuales < countBoosters) {
@@ -122,7 +127,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     });
 
     movimientos.forEach(m => {
-       if (m.fechaCreacion >= startOfDay) {
+       if (m.fechaCreacion >= startOfDay && m.fechaCreacion < endOfDay) {
            if (m.tipo === 'TRANSFERENCIA') {
                Object.entries(m.items || {}).forEach(([k, qty]) => {
                    if (aggr[k]) aggr[k].recepcion += qty; 
@@ -140,7 +145,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     });
     
     return aggr;
-  }, [pedidos, movimientos, catalogo]);
+  }, [pedidos, movimientos, catalogo, fechaCierreElegida]);
 
   const handleGuiaChange = (id, field, value) => setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
 
@@ -270,7 +275,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
         const updates = {};
         
-        // Consolidamos ventas, regalos y concentrados perdidos para devolverlos
         const carritoDevolver = { ...(pedido.carritoObj || {}) };
         if (pedido.carritoObsequiosObj) {
            Object.entries(pedido.carritoObsequiosObj).forEach(([k, qty]) => {
@@ -453,7 +457,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   };
 
   const guardarCierre = async () => {
-    dialogs.confirm("¿Estás seguro de registrar el cierre de inventario de hoy?", async () => {
+    dialogs.confirm("¿Estás seguro de registrar el cierre de inventario para la fecha seleccionada?", async () => {
       const productosCierre = [];
       let totalDiferencias = 0;
       
@@ -463,7 +467,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         
         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
         const inicioDia = sistema + kData.ventas + kData.recepcion + kData.salidas - kData.ingresos;
-        const fisico = conteoFisico[key] || 0;
+        const fisico = conteoFisico[key] ?? sistema; // Modificado para evitar vacíos
         const diferencia = fisico - sistema; 
         
         if (diferencia !== 0) totalDiferencias++;
@@ -484,10 +488,23 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         });
       })));
 
-      const nuevoCierre = { fecha: new Date().toLocaleDateString('es-VE'), timestamp: Date.now(), creadoPor: perfil?.nombre || 'Despachador', totalItemsAuditados: productosCierre.length, anomaliasDetectadas: totalDiferencias, productos: productosCierre, auditado: false };
+      // EXTRAEMOS LA FECHA DEL SELECTOR EN VEZ DEL DÍA ACTUAL
+      const [year, month, day] = fechaCierreElegida.split('-');
+      const fechaCierreFormat = `${day}/${month}/${year}`;
+
+      const nuevoCierre = { 
+         fecha: fechaCierreFormat, 
+         timestamp: Date.now(), 
+         creadoPor: perfil?.nombre || 'Despachador', 
+         totalItemsAuditados: productosCierre.length, 
+         anomaliasDetectadas: totalDiferencias, 
+         productos: productosCierre, 
+         auditado: false 
+      };
+
       try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario'), nuevoCierre);
-        loggear('CIERRE_INVENTARIO', `Cierre registrado con ${totalDiferencias} diferencias.`);
+        loggear('CIERRE_INVENTARIO', `Cierre registrado con ${totalDiferencias} diferencias para la fecha ${fechaCierreFormat}.`);
         setConteoActivo(false);
         dialogs.confirm("Cierre guardado con éxito. ¿Deseas descargar el reporte en PDF ahora?", () => { imprimirPDF(nuevoCierre); }, "Reporte Listo");
       } catch (error) { console.error(error); }
@@ -826,7 +843,18 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                    <h3 className="font-black text-sky-900 dark:text-sky-300 text-lg">Hoja de Trabajo Activa</h3>
                    <p className="text-sm font-medium text-sky-700 dark:text-sky-400">Las casillas ya tienen la cantidad del sistema. Modifica solo donde haya diferencias.</p>
                  </div>
-                 <div className="flex gap-3 w-full md:w-auto">
+                 <div className="flex gap-3 w-full md:w-auto items-center">
+                   {/* NUEVO SELECTOR DE FECHA */}
+                   <div className="flex items-center gap-2 mr-2 border-r pr-4 border-sky-200 dark:border-sky-800">
+                      <label className="text-xs font-bold text-sky-700 dark:text-sky-400 uppercase tracking-widest">Fecha a cerrar:</label>
+                      <input 
+                         type="date" 
+                         value={fechaCierreElegida} 
+                         onChange={(e) => setFechaCierreElegida(e.target.value)}
+                         className="bg-white dark:bg-slate-800 border border-sky-200 dark:border-sky-700 rounded-lg px-2 py-2 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-sky-500"
+                      />
+                   </div>
+
                    <button onClick={()=>setConteoActivo(false)} className="flex-1 md:flex-none px-6 py-3 font-bold text-slate-600 bg-white dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Cancelar</button>
                    <button onClick={guardarCierre} className="flex-1 md:flex-none px-6 py-3 font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 shadow-md flex items-center justify-center gap-2 transition-transform hover:-translate-y-0.5"><Save size={18}/> Finalizar y Guardar</button>
                  </div>

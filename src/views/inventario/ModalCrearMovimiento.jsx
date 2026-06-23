@@ -10,7 +10,10 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
   const [subiendoFoto, setSubiendoFoto] = useState(false);
   const [busqueda, setBusqueda] = useState(''); 
   
-  // NUEVO ESTADO: Para elegir el almacén de origen en caso de una SALIDA
+  // ESTADO AGREGADO PARA EVITAR DUPLICACIONES POR DOBLE CLIC
+  const [procesando, setProcesando] = useState(false);
+  
+  // ESTADO: Para elegir el almacén de origen en caso de una SALIDA
   const [origenSalida, setOrigenSalida] = useState('recepcion'); 
 
   const isTransfer = tipo === 'TRANSFERENCIA';
@@ -95,13 +98,18 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
   };
 
   const handleSubmit = async () => {
+    // BLOQUEO: Si ya se está procesando, no hacer nada aunque el usuario vuelva a hacer clic
+    if (procesando) return;
+    
     if (Object.keys(carrito).length === 0) return dialogs.alert("No has seleccionado ningún producto.", "Carrito Vacío");
     if (fotosUrls.length === 0) return dialogs.alert("Debes incluir al menos una foto como soporte físico de la operación.", "Soporte Obligatorio");
+    
+    // Activamos el estado de procesando
+    setProcesando(true);
     
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), {
         tipo, 
-        // ACTUALIZADO: Envía a la base de datos el origen seleccionado dinámicamente
         origen: isSalida ? origenSalida.toUpperCase() : (isTransfer ? 'ENVIOS' : 'PROVEEDOR'), 
         destino: isSalida ? 'AJUSTE/MERMAS' : (isTransfer ? 'RECEPCION' : 'ENVIOS'),
         items: carrito, 
@@ -127,7 +135,11 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
       loggear(`MOVIMIENTO_${tipo}`, `${perfil.nombre} generó un(a) ${tipo} de ${Object.keys(carrito).length} items.`);
       dialogs.alert(`La operación de ${tipo} fue registrada exitosamente. ${isSalida ? 'Requiere aprobación del administrador para descontar del stock.' : ''}`, "Movimiento Procesado"); 
       onClose();
-    } catch(e) { console.error(e); dialogs.alert("Error de conexión al procesar el movimiento."); }
+    } catch(e) { 
+      console.error(e); 
+      dialogs.alert("Error de conexión al procesar el movimiento.");
+      setProcesando(false); // Liberamos el botón si hubo un error para que pueda reintentar
+    }
   };
 
   const categoriasFiltradas = catalogo.map(cat => {
@@ -151,7 +163,6 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
              <button onClick={onClose} className="p-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-full transition-colors"><X size={20} className="text-slate-500 dark:text-slate-400"/></button>
            </div>
            
-           {/* BARRA DE BÚSQUEDA Y SELECTOR DE ALMACÉN */}
            <div className="px-4 pb-3 md:px-6 md:pb-4 flex flex-col md:flex-row gap-3">
               <div className="relative flex-1">
                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -164,7 +175,6 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
                  />
               </div>
               
-              {/* SELECTOR DE ORIGEN (Solo visible en Salidas) */}
               {isSalida && (
                  <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-900 rounded-xl px-2 shadow-inner">
                     <label className="text-[11px] md:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest pl-2 whitespace-nowrap">Origen:</label>
@@ -172,7 +182,7 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
                       value={origenSalida}
                       onChange={(e) => {
                          setOrigenSalida(e.target.value);
-                         setCarrito({}); // Limpiamos el carrito al cambiar de almacén para evitar errores
+                         setCarrito({}); 
                       }}
                       className="bg-transparent border-none text-slate-800 dark:text-slate-100 focus:ring-0 outline-none py-2.5 md:py-3 pr-4 text-sm md:text-base font-semibold cursor-pointer"
                     >
@@ -263,8 +273,10 @@ export default function ModalCrearMovimiento({ tipo, catalogo, stock, db, appId,
             <div className="font-bold text-slate-500 dark:text-slate-400 text-sm md:text-lg">
                Total: <span className="text-lg md:text-2xl text-slate-800 dark:text-white ml-1 md:ml-2">{Object.values(carrito).reduce((a,b)=>a+b,0)}</span>
             </div>
-            <button onClick={handleSubmit} className={`${isSalida ? 'bg-red-600 hover:bg-red-700' : 'bg-sky-600 hover:bg-sky-700'} text-white font-bold py-2.5 px-4 md:py-3 md:px-8 rounded-xl shadow-lg transition-all hover:-translate-y-0.5 text-sm md:text-lg`}>
-               {isSalida ? 'Confirmar Salida' : isTransfer ? 'Confirmar Transferencia' : 'Aprobar Ingreso'}
+            
+            {/* SE AÑADIÓ disabled={procesando} PARA CAMBIAR EL TEXTO Y DESHABILITAR EL BOTÓN */}
+            <button onClick={handleSubmit} disabled={procesando} className={`${isSalida ? 'bg-red-600 hover:bg-red-700' : 'bg-sky-600 hover:bg-sky-700'} text-white font-bold py-2.5 px-4 md:py-3 md:px-8 rounded-xl shadow-lg transition-all hover:-translate-y-0.5 text-sm md:text-lg disabled:opacity-50 disabled:cursor-not-allowed`}>
+               {procesando ? 'Procesando...' : (isSalida ? 'Confirmar Salida' : isTransfer ? 'Confirmar Transferencia' : 'Aprobar Ingreso')}
             </button>
           </div>
         </div>

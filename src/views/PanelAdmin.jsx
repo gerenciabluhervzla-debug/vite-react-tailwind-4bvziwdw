@@ -16,7 +16,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
   const [modalValidacion, setModalValidacion] = useState(null);
   const [backupLoading, setBackupLoading] = useState(false);
 
-  // ESTADOS PARA BUSCADOR, ANULADOS Y NUEVO FILTRO TIPO DESPACHO
   const [busqueda, setBusqueda] = useState('');
   const [mostrarAnulados, setMostrarAnulados] = useState(false);
   const [filtroDespacho, setFiltroDespacho] = useState('Todos');
@@ -88,7 +87,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             await fetch(URL_GOOGLE_SCRIPT, {
                 method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({ 
-                   tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN,
+                   tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN || "BLUHER_SECURE_TOKEN_2026",
                    fileName: `Backup_Bluher_${hoyStr.replace(/\//g,'-')}.json`, 
                    mimeType: 'application/json', data: base64data 
                 })
@@ -180,10 +179,9 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       });
     }
     
-    return todosHistorial.sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+    return todosHistorial.sort((a, b) => b.fechaCreacion - a.fechaCreacion);
   }, [pedidos, fechaInicio, fechaFin, mostrarAnulados]);
 
-  // APLICAR BUSCADOR Y NUEVO FILTRO TIPO DESPACHO
   const listado = useMemo(() => {
     let base = vistaAdmin === 'pendientes' ? pendientesOrdenados : historialFiltrado;
     
@@ -256,13 +254,12 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       previewUrl: isEdit && pedido.linkComprobanteAdmin ? pedido.linkComprobanteAdmin : '', 
       subiendo: false,
       isEdit: isEdit,
-      // CAMPOS PUNTO Y EFECTIVO (Abarca Tienda y Delivery)
       montoPuntoVentaBs: pedido.montoPuntoVentaBs?.toString() || '',
       montoEfectivoUsd: pedido.montoEfectivoUsd?.toString() || '',
-      montoEfectivoBs: pedido.montoEfectivoBs?.toString() || '', // NUEVO
-      montoTarjetaCreditoBs: pedido.montoTarjetaCreditoBs?.toString() || '', // NUEVO
+      montoEfectivoBs: pedido.montoEfectivoBs?.toString() || '',
+      montoTarjetaCreditoBs: pedido.montoTarjetaCreditoBs?.toString() || '',
       vueltoUsd: pedido.vueltoUsd?.toString() || '',
-      vueltoBs: pedido.vueltoBs?.toString() || '' // NUEVO
+      vueltoBs: pedido.vueltoBs?.toString() || '' 
     });
   };
 
@@ -290,7 +287,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     try {
       let urlComprobanteAdmin = pedido.linkComprobanteAdmin || '';
       
-      // 1. Subir la imagen si hay una nueva
       if (file && URL_GOOGLE_SCRIPT) {
         const base64Data = await compressImage(file, 800, 0.7);
         const response = await fetch(URL_GOOGLE_SCRIPT, {
@@ -301,7 +297,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         if (result.url) urlComprobanteAdmin = result.url;
       }
 
-      // 2. Descontar Inventario SOLO si NO es una edición
       if (!isEdit) {
          const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
          const updates = {};
@@ -313,7 +308,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
          if (Object.keys(updates).length > 0) { await setDoc(stockRef, updates, { merge: true }); }
       }
 
-      // 3. Cálculos de moneda
       let montoCalculadoUsd = 0;
       if (tipoDiferencia !== 'ninguno' && montoDiferencia) {
          const montoNum = parseFloat(montoDiferencia.replace(',', '.')) || 0;
@@ -334,7 +328,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           faltanteUsd: faltanteUsd 
       };
 
-      // REFLEJAR EN HISTORIAL: Inyectar nota automática de auditoría para clientes si hay diferencias
       if (!isEdit && (sobranteUsd > 0 || faltanteUsd > 0)) {
           const tipoNota = sobranteUsd > 0 ? `Sobrante a favor del cliente: $${sobranteUsd}` : `Faltante deudor: $${faltanteUsd}`;
           payloadPedido.notasAuditoria = [...(pedido.notasAuditoria || []), {
@@ -344,14 +337,13 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
           }];
       }
       
-      // Guardar pagos presenciales para Tienda y Delivery
       if (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') {
           payloadPedido.montoPuntoVentaBs = parseFloat(montoPuntoVentaBs) || 0;
           payloadPedido.montoEfectivoUsd = parseFloat(montoEfectivoUsd) || 0;
           payloadPedido.montoEfectivoBs = parseFloat(montoEfectivoBs) || 0;
           payloadPedido.montoTarjetaCreditoBs = parseFloat(montoTarjetaCreditoBs) || 0;
           payloadPedido.vueltoUsd = parseFloat(vueltoUsd) || 0;
-          payloadPedido.vueltoBs = parseFloat(vueltoBs) || 0; // NUEVO
+          payloadPedido.vueltoBs = parseFloat(vueltoBs) || 0; 
       }
 
       if (urlComprobanteAdmin) payloadPedido.linkComprobanteAdmin = urlComprobanteAdmin;
@@ -440,12 +432,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       if (!motivo) return;
       
       try {
-         // 1. Devolver el inventario
          const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
          const updates = {};
          const almacenDestino = (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') ? 'recepcion' : 'envios';
          
-         // Invertimos la lógica: En vez de restar, SUMAMOS el inventario de vuelta
          Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { 
              updates[itemKey] = { [almacenDestino]: increment(qty) }; 
          });
@@ -454,7 +444,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
              await setDoc(stockRef, updates, { merge: true }); 
          }
 
-         // 2. Limpiar datos financieros y devolver a estado Pendiente
          const payloadPedido = { 
             status: 'Pendiente', 
             sobranteUsd: 0, 
@@ -471,7 +460,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             }]
          };
 
-         // 3. Actualizar en Firebase
          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), payloadPedido);
          
          loggear('VALIDACION_REVERSADA', `Admin Supremo reversó el pago de ${pedido.clienteNombre}. Stock devuelto.`);
@@ -484,6 +472,16 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Confirmar Reversión");
   };
 
+  // NUEVA FUNCIÓN: Alternar el Check del Auditor
+  const toggleRevisadoAuditor = async (pedido) => {
+    if (!esAuditor) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { 
+          revisadoAuditorPersonal: !pedido.revisadoAuditorPersonal 
+      });
+    } catch(e) { console.error(e); }
+  };
+
   const diasAuditoria = useMemo(() => {
     const dias = {};
     pedidos.forEach(p => {
@@ -494,7 +492,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
        if (p.faltanteUsd > 0 || p.sobranteUsd > 0 || p.status === 'Rechazado' || p.status === 'Anulado') dias[iso].fallas++;
        dias[iso].pedidos.push(p);
     });
-    return Object.values(dias).sort((a,b) => a.isoKey.localeCompare(b.isoKey)); 
+    return Object.values(dias).sort((a,b) => b.isoKey.localeCompare(a.isoKey)); 
   }, [pedidos]);
 
   const fechaHoy = new Date().toLocaleDateString('es-VE');
@@ -656,7 +654,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             {listado.length === 0 ? (
               <div className="p-12 text-center text-slate-400 font-bold border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl">No hay pedidos para mostrar con estos filtros.</div>
             ) : listado.map((p, index) => (
-              <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-6 p-6 md:p-8 transition-all border-2 rounded-[2rem] shadow-sm bg-white dark:bg-slate-800 ${vistaAdmin === 'historial' && !p.auditado && p.status !== 'Anulado' ? 'border-amber-300 dark:border-amber-700' : 'border-slate-200 dark:border-slate-600 hover:border-sky-300'}`}>
+              <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-6 p-6 md:p-8 transition-all border-2 rounded-[2rem] shadow-sm 
+                ${vistaAdmin === 'historial' && esAuditor && p.revisadoAuditorPersonal ? 'bg-teal-50/50 dark:bg-teal-900/10 border-teal-200 dark:border-teal-800' 
+                : vistaAdmin === 'historial' && !p.auditado && p.status !== 'Anulado' ? 'bg-white dark:bg-slate-800 border-amber-300 dark:border-amber-700' 
+                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 hover:border-sky-300'}`}>
                  
                  <div className="absolute -top-3 -left-3 bg-[#003366] dark:bg-sky-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md z-10">
                     {index + 1}
@@ -671,7 +672,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                      <span>Ingreso: {new Date(p.fechaCreacion).toLocaleDateString('es-VE')} {new Date(p.fechaCreacion).toLocaleTimeString('es-VE', {hour: '2-digit', minute:'2-digit'})}</span>
                      <span className="bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-700">Pautado: {p.fechaDespacho || 'No asignado'}</span>
                      
-                     {/* BADGES VISUALES DE DESPACHO */}
                      {p.tipoDespacho === 'Delivery' && <span className="bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-400 px-2 py-0.5 rounded border border-fuchsia-200 dark:border-fuchsia-800 flex items-center gap-1"><Bike size={12}/> Delivery</span>}
                      {p.tipoDespacho === 'Tienda' && <span className="bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800 flex items-center gap-1"><StoreIcon size={12}/> Tienda</span>}
                      {(p.tipoDespacho === 'Nacional' || !p.tipoDespacho) && <span className="bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 px-2 py-0.5 rounded border border-orange-200 dark:border-orange-800 flex items-center gap-1"><Truck size={12}/> Nacional</span>}
@@ -682,7 +682,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                      {p.esMercadoLibre && <span className="bg-yellow-100 text-yellow-800 px-3 py-1.5 rounded-lg font-black uppercase tracking-widest border border-yellow-300">MercadoLibre</span>}
                    </div>
 
-                   {/* INFORMACIÓN DE RECEPCIÓN: RETIRA O DELIVERY */}
                    {p.tipoDespacho === 'Tienda' && p.retiroNombre && (
                      <div className="mb-4 text-xs font-bold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-100 dark:border-purple-800/50 flex flex-col">
                        <span className="uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1 opacity-70"><StoreIcon size={12}/> Datos de Retiro</span>
@@ -713,7 +712,19 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  </div>
 
                  <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0">
-                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-100 dark:border-slate-700 pb-2">Análisis Financiero</span>
+                   {/* TITULO CON CHECKBOX OPCIONAL PARA AUDITOR */}
+                   <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2 mb-3">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Análisis Financiero</span>
+                      {esAuditor && vistaAdmin === 'historial' && (
+                        <button 
+                          onClick={() => toggleRevisadoAuditor(p)} 
+                          className={`p-1.5 rounded-md transition-colors flex items-center gap-1 text-[10px] uppercase font-black tracking-wider ${p.revisadoAuditorPersonal ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-400' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-500'}`}
+                          title="Marcar o desmarcar como revisado personalmente"
+                        >
+                          <CheckSquare size={14}/> {p.revisadoAuditorPersonal ? 'Revisado' : 'Marcar'}
+                        </button>
+                      )}
+                   </div>
                    
                    {p.status === 'Anulado' ? (
                        <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-xl border border-slate-300 dark:border-slate-600 mb-4 opacity-70">
@@ -750,7 +761,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                       </div>
                    )}
 
-                   {/* DETALLE PAGOS EN TIENDA / DELIVERY */}
                    {(p.montoPuntoVentaBs > 0 || p.montoEfectivoUsd > 0 || p.vueltoUsd > 0 || p.montoEfectivoBs > 0 || p.montoTarjetaCreditoBs > 0) && (
                       <div className="mb-4 bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-200 dark:border-purple-800">
                          <div className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-400 mb-2">Detalles de Pago Presencial</div>
@@ -758,7 +768,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                             {p.montoPuntoVentaBs > 0 && <span className="text-[10px] font-bold text-slate-700 bg-white px-2 py-1 rounded border shadow-sm">Punto: Bs {p.montoPuntoVentaBs}</span>}
                             {p.montoEfectivoUsd > 0 && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200 shadow-sm">Efectivo: ${p.montoEfectivoUsd}</span>}
                             {p.montoEfectivoBs > 0 && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200 shadow-sm">Efectivo: Bs {p.montoEfectivoBs}</span>}
-                            {p.montoTarjetaCreditoBs > 0 && <span className="text-[10px] font-bold text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200 shadow-sm">TDC (+15%): Bs {p.montoTarjetaCreditoBs}</span>}
+                            {p.montoTarjetaCreditoBs > 0 && <span className="text-[10px] font-bold text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200 shadow-sm">TDC (+15% Recargo): Bs {p.montoTarjetaCreditoBs}</span>}
                             {p.vueltoUsd > 0 && <span className="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 shadow-sm">Vuelto Dado: ${p.vueltoUsd}</span>}
                             {p.vueltoBs > 0 && <span className="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 shadow-sm">Vuelto Dado: Bs {p.vueltoBs}</span>}
                          </div>
@@ -790,7 +800,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                         </button>
                      )}
 
-                     {/* NUEVO BOTÓN DE REVERSAR: Solo Admin Supremo en Historial de Validados */}
                      {vistaAdmin === 'historial' && esAdminSupremo && p.status === 'Validado' && (
                         <button onClick={()=>reversarValidacion(p)} className="mb-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm w-full">
                            <RotateCcw size={16}/> Reversar y Devolver Stock
@@ -906,7 +915,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                     </div>
                  </div>
 
-                 {/* NUEVO: PAGOS EN TIENDA Y DELIVERY */}
                  {(modalValidacion.pedido.tipoDespacho === 'Tienda' || modalValidacion.pedido.tipoDespacho === 'Delivery') && (
                    <div className="mb-6 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl border border-purple-200 dark:border-purple-800">
                       <label className="text-[10px] font-black uppercase text-purple-700 dark:text-purple-400 block mb-3">Detalles de Pago Presencial (Opcional)</label>
