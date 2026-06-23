@@ -35,13 +35,15 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
        };
     });
 
+    const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+
     pedidos.forEach(p => {
        const esParaHoy = p.fechaDespacho === hoyDDMM || (!p.fechaDespacho && new Date(p.fechaCreacion).toLocaleDateString('es-VE') === new Date().toLocaleDateString('es-VE'));
        
-       if (p.status !== 'Anulado' && p.status !== 'Rechazado' && esParaHoy) {
+       // CORRECCIÓN: Solo contar ventas si el pedido ya fue Validado o Despachado (los Pendientes aún no han descontado stock)
+       if (['Validado', 'Despachado'].includes(p.status) && esParaHoy) {
           const isRecepcion = p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Delivery';
           
-          // UNIMOS CARRITO Y OBSEQUIOS ANTES DE RECORRERLOS
           const carritoTotal = { ...(p.carritoObj || {}) };
           if (p.carritoObsequiosObj) {
               Object.entries(p.carritoObsequiosObj).forEach(([key, qty]) => {
@@ -49,12 +51,27 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
               });
           }
           
+          let countBoosters = 0;
+
           Object.entries(carritoTotal).forEach(([key, qty]) => {
              if (map[key]) {
                  if (isRecepcion) map[key].recepcion.ventas += qty;
                  else map[key].envios.ventas += qty;
              }
+             if (boosterKeys.includes(key)) countBoosters += qty;
           });
+
+          // CORRECCIÓN: Lógica de Concentrados faltantes por Boosters
+          if (countBoosters > 0) {
+              const concentradosActuales = carritoTotal["Concentrado|Unidad"] || 0;
+              if (concentradosActuales < countBoosters) {
+                  const faltantes = countBoosters - concentradosActuales;
+                  if (map["Concentrado|Unidad"]) {
+                      if (isRecepcion) map["Concentrado|Unidad"].recepcion.ventas += faltantes;
+                      else map["Concentrado|Unidad"].envios.ventas += faltantes;
+                  }
+              }
+          }
        }
     });
 
@@ -72,7 +89,6 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
                 }
                 if (type === 'TRANSFERENCIA' || type.includes('TRASLADO')) {
                    map[key].envios.trasladosOut += qty;
-                   // CORRECCIÓN: Solo se suma a la métrica de Recepción si ya lo aprobaron.
                    if (m.status === 'COMPLETADO') {
                       map[key].recepcion.trasladosIn += qty;
                    }
@@ -212,7 +228,6 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
                   );
                 }
 
-                // TAB RECEPCIÓN
                 return (
                   <tr key={item.key} className="border-b border-slate-50 dark:border-slate-700 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                     <td className="p-4">

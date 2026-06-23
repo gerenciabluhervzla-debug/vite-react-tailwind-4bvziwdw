@@ -302,10 +302,34 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
          const updates = {};
          const almacenDestino = (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') ? 'recepcion' : 'envios';
          
-         Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { 
+         // INTEGRACIÓN DE OBSEQUIOS Y CONCENTRADOS
+         const carritoTotal = { ...(pedido.carritoObj || {}) };
+         if (pedido.carritoObsequiosObj) {
+             Object.entries(pedido.carritoObsequiosObj).forEach(([key, qty]) => {
+                 carritoTotal[key] = (carritoTotal[key] || 0) + qty;
+             });
+         }
+
+         let countBoosters = 0;
+         const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+         Object.entries(carritoTotal).forEach(([k, qty]) => {
+             if (boosterKeys.includes(k)) countBoosters += qty;
+         });
+
+         if (countBoosters > 0) {
+             const concentradosActuales = carritoTotal["Concentrado|Unidad"] || 0;
+             if (concentradosActuales < countBoosters) {
+                 carritoTotal["Concentrado|Unidad"] = concentradosActuales + (countBoosters - concentradosActuales);
+             }
+         }
+
+         Object.entries(carritoTotal).forEach(([itemKey, qty]) => { 
              updates[itemKey] = { [almacenDestino]: increment(-qty) }; 
          });
-         if (Object.keys(updates).length > 0) { await setDoc(stockRef, updates, { merge: true }); }
+         
+         if (Object.keys(updates).length > 0) { 
+             await setDoc(stockRef, updates, { merge: true }); 
+         }
       }
 
       let montoCalculadoUsd = 0;
@@ -436,7 +460,28 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
          const updates = {};
          const almacenDestino = (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') ? 'recepcion' : 'envios';
          
-         Object.entries(pedido.carritoObj || {}).forEach(([itemKey, qty]) => { 
+         // INTEGRACIÓN DE OBSEQUIOS Y CONCENTRADOS AL REVERSAR (SUMAR AL INVENTARIO)
+         const carritoDevolver = { ...(pedido.carritoObj || {}) };
+         if (pedido.carritoObsequiosObj) {
+             Object.entries(pedido.carritoObsequiosObj).forEach(([key, qty]) => {
+                 carritoDevolver[key] = (carritoDevolver[key] || 0) + qty;
+             });
+         }
+
+         let countBoosters = 0;
+         const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+         Object.entries(carritoDevolver).forEach(([k, qty]) => {
+             if (boosterKeys.includes(k)) countBoosters += qty;
+         });
+
+         if (countBoosters > 0) {
+             const concentradosActuales = carritoDevolver["Concentrado|Unidad"] || 0;
+             if (concentradosActuales < countBoosters) {
+                 carritoDevolver["Concentrado|Unidad"] = concentradosActuales + (countBoosters - concentradosActuales);
+             }
+         }
+
+         Object.entries(carritoDevolver).forEach(([itemKey, qty]) => { 
              updates[itemKey] = { [almacenDestino]: increment(qty) }; 
          });
          
@@ -472,7 +517,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }, "Confirmar Reversión");
   };
 
-  // NUEVA FUNCIÓN: Alternar el Check del Auditor
   const toggleRevisadoAuditor = async (pedido) => {
     if (!esAuditor) return;
     try {
@@ -712,7 +756,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  </div>
 
                  <div className="lg:col-span-4 flex flex-col justify-start mt-4 lg:mt-0">
-                   {/* TITULO CON CHECKBOX OPCIONAL PARA AUDITOR */}
                    <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2 mb-3">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Análisis Financiero</span>
                       {esAuditor && vistaAdmin === 'historial' && (
