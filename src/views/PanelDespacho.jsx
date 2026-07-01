@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Truck, Clock, Printer, CheckSquare, AlertTriangle, Package, FileText, Camera, CheckCircle, Loader2, UploadCloud, Save, Download, FileSpreadsheet, CalendarDays, FileOutput, MessageSquare, ShieldCheck, Eye, X, Ban } from 'lucide-react';
 import { updateDoc, doc, addDoc, collection, onSnapshot, query, orderBy, setDoc, increment } from 'firebase/firestore';
 import { URL_GOOGLE_SCRIPT } from '../config/firebase';
@@ -38,9 +38,21 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  const pedidosValidados = pedidos.filter(p => p.status === 'Validado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional'));
-  const pedidosDespachados = pedidos.filter(p => p.status === 'Despachado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional'));
-  const pedidosPendientes = pedidos.filter(p => (p.status === 'Pendiente' || p.status === 'Rechazado') && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')).length;
+  // Excluimos explícitamente los Abonos de la vista de Despacho
+  const pedidosValidados = useMemo(() => 
+    pedidos.filter(p => p.status === 'Validado' && !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')),
+    [pedidos]
+  );
+
+  const pedidosDespachados = useMemo(() => 
+    pedidos.filter(p => p.status === 'Despachado' && !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')),
+    [pedidos]
+  );
+
+  const pedidosPendientes = useMemo(() => 
+    pedidos.filter(p => (p.status === 'Pendiente' || p.status === 'Rechazado') && !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')).length,
+    [pedidos]
+  );
 
   const [guiasInput, setGuiasInput] = useState({});
   const [subiendo, setSubiendo] = useState({ id: null, field: null });
@@ -52,30 +64,41 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const [notasConteo, setNotasConteo] = useState({});
   const [filtroFechaCierre, setFiltroFechaCierre] = useState('');
   
-  // ESTADO NUEVO: Controla la fecha del cierre físico
   const [fechaCierreElegida, setFechaCierreElegida] = useState(getHoyISO());
 
   const numeracionDiaria = useMemo(() => {
     const map = {};
     const agrupados = {};
-    pedidos.forEach(p => {
-       const fecha = p.fechaDespacho || 'Sin Fecha';
-       const tipo = p.tipoDespacho || 'Nacional'; 
-       const key = `${fecha}_${tipo}`;
-       
-       if (!agrupados[key]) agrupados[key] = [];
-       agrupados[key].push(p);
+    
+    // Solo pedidos nacionales con fecha, excluyendo Abonos puramente financieros
+    pedidos
+      .filter(p => !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional'))
+      .forEach(p => {
+        const fecha = p.fechaDespacho || 'Sin Fecha';
+        const tipo = p.tipoDespacho || 'Nacional'; 
+        const key = `${fecha}_${tipo}`;
+        
+        if (!agrupados[key]) agrupados[key] = [];
+        agrupados[key].push(p);
+      });
+      
+    Object.values(agrupados).forEach(group => {
+      group.sort((a, b) => a.fechaCreacion - b.fechaCreacion);
+      group.forEach((p, index) => { map[p.id] = index + 1; });
     });
-    Object.keys(agrupados).forEach(key => {
-       agrupados[key].sort((a, b) => a.fechaCreacion - b.fechaCreacion);
-       agrupados[key].forEach((p, index) => { map[p.id] = index + 1; });
-    });
+    
     return map;
   }, [pedidos]);
 
   useEffect(() => {
     const qCierres = query(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario'), orderBy('timestamp', 'desc'));
-    const unsubCierres = onSnapshot(qCierres, (snap) => setCierres(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubCierres = onSnapshot(
+      qCierres, 
+      (snap) => setCierres(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (error) => {
+        console.error("Error escuchando cierres:", error);
+      }
+    );
     
     const qMovs = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'));
     const unsubMovs = onSnapshot(qMovs, (snap) => setMovimientos(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
@@ -89,7 +112,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         aggr[`${p.nombre}|${pres}`] = { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
     })));
 
-    // LÓGICA ACTUALIZADA: Calcula el kardex en base a la fecha de cierre elegida
     const [year, month, day] = fechaCierreElegida.split('-');
     const tDate = new Date(year, month - 1, day);
     const todayStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
@@ -98,8 +120,9 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
     const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
 
+    // Ignoramos Abonos en el cálculo del Kardex Físico
     pedidos.forEach(p => {
-       if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')) {
+       if (['Validado', 'Despachado'].includes(p.status) && !p.esAbono && p.fechaDespacho === todayStr && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')) {
            
            const carritoTotal = { ...(p.carritoObj || {}) };
            if (p.carritoObsequiosObj) {
@@ -147,7 +170,9 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return aggr;
   }, [pedidos, movimientos, catalogo, fechaCierreElegida]);
 
-  const handleGuiaChange = (id, field, value) => setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  const handleGuiaChange = useCallback((id, field, value) => {
+    setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  }, []);
 
   const handleFileUpload = async (e, id, field) => {
     const file = e.target.files[0];
@@ -178,7 +203,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         const response = await fetch(URL_GOOGLE_SCRIPT, {
             method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify({ 
-               tokenSecreto: "BLUHER_SECURE_TOKEN_2026",
+               tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN,
                fileName: nombreFinal, 
                folderPath: rutaCarpetas,
                mimeType: 'image/jpeg', 
@@ -332,10 +357,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     setConteoActivo(true);
   };
 
-  const handleConteoChange = (key, val) => {
+  const handleConteoChange = useCallback((key, val) => {
     const num = parseInt(val, 10);
     setConteoFisico(prev => ({ ...prev, [key]: isNaN(num) ? 0 : num }));
-  };
+  }, []);
 
   const generarCSV = (cierre) => {
     let csv = 'Categoria,Producto,Presentacion,Inicio Dia,Ingresos,Recepcion,Salidas,Ventas/Regalos,Stock Sistema,Conteo Fisico,Diferencia,Estatus,Notas\n';
@@ -467,7 +492,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         
         const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
         const inicioDia = sistema + kData.ventas + kData.recepcion + kData.salidas - kData.ingresos;
-        const fisico = conteoFisico[key] ?? sistema; // Modificado para evitar vacíos
+        const fisico = conteoFisico[key] ?? sistema;
         const diferencia = fisico - sistema; 
         
         if (diferencia !== 0) totalDiferencias++;
@@ -488,7 +513,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         });
       })));
 
-      // EXTRAEMOS LA FECHA DEL SELECTOR EN VEZ DEL DÍA ACTUAL
       const [year, month, day] = fechaCierreElegida.split('-');
       const fechaCierreFormat = `${day}/${month}/${year}`;
 
@@ -536,12 +560,15 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     }, "Añadir Nota de Auditoría");
   };
 
-  const cierresFiltrados = cierres.filter(c => {
+  const cierresFiltrados = useMemo(() => 
+  cierres.filter(c => {
     if (!filtroFechaCierre) return true;
     const fechaFiltro = new Date(filtroFechaCierre);
     const fechaCierre = new Date(c.timestamp);
     return fechaFiltro.toLocaleDateString('es-VE') === fechaCierre.toLocaleDateString('es-VE');
-  });
+  }),
+  [cierres, filtroFechaCierre]
+);
 
   const todayStr = useMemo(() => {
     const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -844,7 +871,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                    <p className="text-sm font-medium text-sky-700 dark:text-sky-400">Las casillas ya tienen la cantidad del sistema. Modifica solo donde haya diferencias.</p>
                  </div>
                  <div className="flex gap-3 w-full md:w-auto items-center">
-                   {/* NUEVO SELECTOR DE FECHA */}
                    <div className="flex items-center gap-2 mr-2 border-r pr-4 border-sky-200 dark:border-sky-800">
                       <label className="text-xs font-bold text-sky-700 dark:text-sky-400 uppercase tracking-widest">Fecha a cerrar:</label>
                       <input 

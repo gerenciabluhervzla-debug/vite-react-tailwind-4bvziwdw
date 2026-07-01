@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users, Truck, Wallet, ArrowDownCircle, ShoppingBag, Briefcase, Activity } from 'lucide-react';
+import { DollarSign, Archive, Sparkles, CalendarDays, Gift, Store, Percent, TrendingUp, FileOutput, Users, Truck, Wallet, ArrowDownCircle, ShoppingBag, Briefcase, Activity, AlertCircle } from 'lucide-react';
 import { ROLES, BRAND_LOGO } from '../config/constants';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db, appId } from '../config/firebase';
@@ -78,6 +78,17 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     );
   }, [pedidos]);
 
+  // --- NUEVO: CÁLCULO DE CUENTAS POR COBRAR (CONSIGNACIONES ACTIVAS) ---
+  const consignacionesPendientes = useMemo(() => {
+    // Filtramos sin importar la fecha, porque la deuda sigue existiendo hasta que se pague a 0
+    return validados.filter(p => p.esConsignacion && parseFloat(p.saldoPendiente) > 0)
+                    .sort((a,b) => parseFloat(b.saldoPendiente) - parseFloat(a.saldoPendiente));
+  }, [validados]);
+
+  const totalDeudaConsignaciones = useMemo(() => {
+    return consignacionesPendientes.reduce((acc, curr) => acc + (parseFloat(curr.saldoPendiente) || 0), 0);
+  }, [consignacionesPendientes]);
+
   // --- FILTRAR REPORTES USANDO FECHA DE DESPACHO ---
   const parseDateVzla = (dateStr) => {
      if (!dateStr || dateStr === 'Sin Fecha') return 0;
@@ -89,6 +100,9 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     
     return validados.filter(p => {
+      // Excluir abonos puros del filtrado de "pedidos vendidos" para no inflar métricas
+      if (p.esAbono) return false;
+
       if (rangoRango === 'hoy') {
          const todayStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
          return p.fechaDespacho === todayStr;
@@ -162,13 +176,17 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       let valorVentaUsd = 0;
       if (p.carritoObj) {
         Object.entries(p.carritoObj).forEach(([key, qty]) => {
-          const [n, pr] = key.split('|');
-          catalogo.forEach(cat => cat.productos.forEach(prod => {
-            if (prod.nombre === n) {
-              const idx = prod.presentaciones.indexOf(pr);
-              if (idx >= 0 && prod.precios) { valorVentaUsd += (prod.precios[idx] * qty); }
-            }
-          }));
+          if (p.preciosPersonalizados?.[key]) {
+             valorVentaUsd += (parseFloat(p.preciosPersonalizados[key]) * qty);
+          } else {
+             const [n, pr] = key.split('|');
+             catalogo.forEach(cat => cat.productos.forEach(prod => {
+               if (prod.nombre === n) {
+                 const idx = prod.presentaciones.indexOf(pr);
+                 if (idx >= 0 && prod.precios) { valorVentaUsd += (prod.precios[idx] * qty); }
+               }
+             }));
+          }
         });
       }
 
@@ -356,7 +374,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     return Math.max(0, valorInicialStock - valorDescontarPorDespachos);
   }, [stock, catalogo, pedidosFiltrados]);
 
-  // --- NUEVA LÓGICA: PRODUCTOS Y PROMEDIO DIARIO ---
   const dataProductos = useMemo(() => {
     const map = {};
     pedidosFiltrados.forEach(p => {
@@ -365,14 +382,19 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
          Object.entries(carrito).forEach(([key, qty]) => {
             if (!map[key]) map[key] = { cantidad: 0, valor: 0 };
             map[key].cantidad += qty;
-            const [n, pr] = key.split('|');
+            
             let precioUnitario = 0;
-            catalogo.forEach(c => c.productos.forEach(prod => {
-              if (prod.nombre === n) {
-                const idx = prod.presentaciones.indexOf(pr);
-                if (idx >= 0) precioUnitario = prod.precios[idx] || 0;
-              }
-            }));
+            if (p.preciosPersonalizados?.[key]) {
+               precioUnitario = parseFloat(p.preciosPersonalizados[key]);
+            } else {
+               const [n, pr] = key.split('|');
+               catalogo.forEach(c => c.productos.forEach(prod => {
+                 if (prod.nombre === n) {
+                   const idx = prod.presentaciones.indexOf(pr);
+                   if (idx >= 0) precioUnitario = prod.precios[idx] || 0;
+                 }
+               }));
+            }
             map[key].valor += (qty * precioUnitario);
           });
       };
@@ -391,7 +413,6 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     }).sort((a, b) => b.cantidad - a.cantidad);
   }, [pedidosFiltrados, catalogo, diasSeleccionados]);
 
-  // El Top 10 se extrae de la nueva data
   const topProductos = dataProductos.slice(0, 10);
 
   const imprimirPDFVentas = () => {
@@ -443,18 +464,22 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              }
              
              if (!esObsequio) {
-                 const [n, pr] = key.split('|');
-                 let precioUnitarioCata = 0;
-                 catalogo.forEach(c => c.productos.forEach(prod => {
-                    if (prod.nombre === n) {
-                       const idx = prod.presentaciones.indexOf(pr);
-                       if (idx >= 0) precioUnitarioCata = prod.precios[idx] || 0;
+                 let precioConDescuento = 0;
+                 if (p.preciosPersonalizados?.[key]) {
+                    precioConDescuento = parseFloat(p.preciosPersonalizados[key]);
+                 } else {
+                    const [n, pr] = key.split('|');
+                    let precioUnitarioCata = 0;
+                    catalogo.forEach(c => c.productos.forEach(prod => {
+                       if (prod.nombre === n) {
+                          const idx = prod.presentaciones.indexOf(pr);
+                          if (idx >= 0) precioUnitarioCata = prod.precios[idx] || 0;
+                       }
+                    }));
+                    precioConDescuento = precioUnitarioCata;
+                    if (descuentoRealAplicado > 0) {
+                        precioConDescuento = precioUnitarioCata - (precioUnitarioCata * (descuentoRealAplicado / 100));
                     }
-                 }));
-                 
-                 let precioConDescuento = precioUnitarioCata;
-                 if (descuentoRealAplicado > 0) {
-                     precioConDescuento = precioUnitarioCata - (precioUnitarioCata * (descuentoRealAplicado / 100));
                  }
                  productosDetallados[keyPdf].valorRealUsd += (precioConDescuento * qty);
              }
@@ -663,7 +688,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     html += `
         <h2 style="margin-top: 50px;">Resumen de Productos Vendidos</h2>
         <div style="font-size: 10px; color: #64748b; margin-top: -5px; margin-bottom: 10px;">
-           * El "Valor Real ($)" refleja lo que realmente ingresó por ese producto luego de aplicar descuentos si los hubo (Los obsequios reflejan $0.00).
+            * El "Valor Real ($)" refleja lo que realmente ingresó por ese producto luego de aplicar descuentos si los hubo (Los obsequios reflejan $0.00).
         </div>
         <table>
           <thead>
@@ -733,6 +758,35 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     html += macroTablaPedidos("Envíos Nacionales", pedidosEnviosNacionales);
     html += macroTablaPedidos("Entregas en Tienda", pedidosEntregasTienda);
     html += macroTablaPedidos("Delivery", pedidosDelivery);
+
+    // --- NUEVO PARA EL PDF: Cuentas por Cobrar ---
+    if (consignacionesPendientes.length > 0) {
+       html += `
+        <h2 style="margin-top: 50px; color: #b45309; border-left-color: #f59e0b;">Cuentas por Cobrar (Consignaciones Activas)</h2>
+        <div style="font-size: 10px; color: #64748b; margin-top: -5px; margin-bottom: 10px;">
+            * Deuda activa de pedidos entregados a clientes o distribuidores.
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 30%;">Cliente / Teléfono</th>
+              <th style="width: 25%;">Asesora / Fecha</th>
+              <th style="width: 20%; text-align:right;">Total Facturado</th>
+              <th style="width: 25%; text-align:right;">Saldo Pendiente (USD)</th>
+            </tr>
+          </thead>
+          <tbody>
+       `;
+       consignacionesPendientes.forEach(p => {
+          html += `<tr>
+            <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${p.clienteTelefono}</span></td>
+            <td>${p.asesora}<br><span style="color:#64748b; font-size:10px;">${p.fechaDespacho}</span></td>
+            <td style="text-align:right; font-weight:bold;">$${(parseFloat(p.totalOrdenOriginalUsd) || parseFloat(p.montoUsd) || 0).toFixed(2)}</td>
+            <td style="text-align:right; font-weight:900; color:#ea580c; font-size:13px;">$${parseFloat(p.saldoPendiente).toFixed(2)}</td>
+          </tr>`;
+       });
+       html += `</tbody></table>`;
+    }
 
     html += `
       <div style="margin-top: 50px; border-top: 1px dashed #cbd5e1; padding-top: 20px; color: #94a3b8; font-size: 11px; text-align: center;">
@@ -854,7 +908,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
-      {/* MÉTRICAS SECUNDARIAS */}
+      {/* MÉTRICAS SECUNDARIAS E INGRESOS POR ABONOS */}
       {(verDinero || verTotalInventario) && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
            {verDinero && (
@@ -922,13 +976,13 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                   <TrendingUp size={80} className="absolute -right-4 -bottom-4 opacity-5"/>
                </div>
                
-               {/* CUADRO NUEVO: CONSIGNACIONES */}
+               {/* CUADRO: INGRESOS POR ABONOS */}
                <div className="bg-sky-600 text-white p-6 rounded-[2rem] shadow-md flex flex-col justify-center border-b-4 border-sky-800 relative overflow-hidden md:col-span-3">
                   <div className="relative z-10">
-                    <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-sky-200 mb-1">Pagos de Consignaciones ($)</div>
+                    <div className="text-[10px] uppercase font-black tracking-widest opacity-80 text-sky-200 mb-1">Pagos Recibidos por Consignaciones ($)</div>
                     <div className="text-2xl lg:text-3xl font-black">${totalIngresosConsignacionesUsd.toFixed(2)}</div>
                     <div className="text-[11px] font-bold mt-2 text-sky-100">
-                        Abonos recaudados en la fecha seleccionada
+                        Abonos y pagos recaudados en el rango de fechas seleccionado.
                     </div>
                   </div>
                   <Briefcase size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
@@ -946,6 +1000,81 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                 <Archive size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
              </div>
            )}
+        </div>
+      )}
+
+      {/* NUEVA SECCIÓN: CUENTAS POR COBRAR (Saldos Pendientes de Consignación) */}
+      {verDinero && (
+        <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-amber-200 dark:border-amber-800 transition-colors relative overflow-hidden">
+          {/* Fondo sutil ámbar para dar advertencia visual */}
+          <div className="absolute inset-0 bg-amber-50/50 dark:bg-amber-900/10 pointer-events-none"></div>
+          
+          <div className="relative z-10">
+             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-500 rounded-xl">
+                    <AlertCircle size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">Estado de Cuentas por Cobrar</h3>
+                    <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">Consignaciones con saldos pendientes (Histórico Total)</p>
+                  </div>
+                </div>
+                
+                <div className="bg-amber-500 text-white px-6 py-3 rounded-2xl shadow-md text-center shrink-0 w-full md:w-auto">
+                   <div className="text-[10px] font-black uppercase tracking-widest opacity-90 mb-0.5">Deuda Activa en Calle</div>
+                   <div className="text-2xl font-black">${totalDeudaConsignaciones.toFixed(2)}</div>
+                </div>
+             </div>
+
+             <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm bg-white dark:bg-slate-800">
+               <table className="w-full text-left text-sm border-collapse min-w-[700px]">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-b dark:border-slate-700">
+                      <th className="p-4 font-black tracking-wide">Cliente</th>
+                      <th className="p-4 font-black tracking-wide">Asesora Resp.</th>
+                      <th className="p-4 font-black tracking-wide">Fecha de Envío</th>
+                      <th className="p-4 font-black tracking-wide text-right">Total Facturado</th>
+                      <th className="p-4 font-black tracking-wide text-right text-amber-700 dark:text-amber-500">Saldo Pendiente</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {consignacionesPendientes.length === 0 ? (
+                       <tr><td colSpan="5" className="p-8 text-center text-slate-400 font-bold italic">¡Excelente! No hay deudas pendientes en calle por consignaciones.</td></tr>
+                    ) : consignacionesPendientes.map((p) => {
+                       const totalOriginal = parseFloat(p.totalOrdenOriginalUsd) || parseFloat(p.montoUsd) || 0;
+                       const saldo = parseFloat(p.saldoPendiente) || 0;
+                       const porcentajePagado = ((totalOriginal - saldo) / totalOriginal) * 100;
+
+                       return (
+                         <tr key={p.id} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <td className="p-4">
+                               <div className="font-bold text-slate-800 dark:text-slate-200">{p.clienteNombre}</div>
+                               <div className="text-xs text-slate-500 font-medium">{p.clienteTelefono}</div>
+                            </td>
+                            <td className="p-4">
+                               <span className="font-bold text-slate-700 dark:text-slate-300">{p.asesora || 'Sin Asignar'}</span>
+                            </td>
+                            <td className="p-4 font-medium text-slate-600 dark:text-slate-400">
+                               {p.fechaDespacho}
+                            </td>
+                            <td className="p-4 text-right font-bold text-slate-600 dark:text-slate-300">
+                               ${totalOriginal.toFixed(2)}
+                            </td>
+                            <td className="p-4 text-right">
+                               <div className="font-black text-lg text-amber-600 dark:text-amber-500">${saldo.toFixed(2)}</div>
+                               <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-2 overflow-hidden">
+                                 <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: `${porcentajePagado}%` }}></div>
+                               </div>
+                               <div className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-wider">{porcentajePagado.toFixed(0)}% Pagado</div>
+                            </td>
+                         </tr>
+                       );
+                    })}
+                  </tbody>
+               </table>
+             </div>
+          </div>
         </div>
       )}
 
@@ -1100,7 +1229,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              <Activity className="text-sky-600"/> Promedio de Ventas (Velocidad)
            </h3>
            <div className="text-xs font-bold bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 px-3 py-1.5 rounded-lg border border-sky-200 dark:border-sky-800">
-              Calculado sobre {diasSeleccionados} {diasSeleccionados === 1 ? 'día' : 'días'}
+             Calculado sobre {diasSeleccionados} {diasSeleccionados === 1 ? 'día' : 'días'}
            </div>
          </div>
          

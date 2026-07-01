@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban, Search, Edit3, Truck, Store as StoreIcon, Bike, RotateCcw } from 'lucide-react';
 import { StatusBadge, InputDark } from '../components/ui';
-import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection } from 'firebase/firestore'; 
+import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection, addDoc } from 'firebase/firestore'; 
 import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
 import { compressImage } from '../utils/image';
 import { ROLES } from '../config/constants';
@@ -46,7 +46,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     }
     return getFechaOperativaObj(pedido.fechaCreacion);
   };
- 
+  
   const [fechaInicio, setFechaInicio] = useState(hoyStr);
   const [fechaFin, setFechaFin] = useState(hoyStr);
 
@@ -87,7 +87,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             await fetch(URL_GOOGLE_SCRIPT, {
                 method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({ 
-                   tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN || "BLUHER_SECURE_TOKEN_2026",
+                   tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN,
                    fileName: `Backup_Bluher_${hoyStr.replace(/\//g,'-')}.json`, 
                    mimeType: 'application/json', data: base64data 
                 })
@@ -164,7 +164,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       .filter(p => p.status === 'Pendiente')
       .sort((a, b) => a.fechaCreacion - b.fechaCreacion); 
   }, [pedidos]);
- 
+  
   const historialFiltrado = useMemo(() => {
     let todosHistorial = pedidos.filter(p => p.status !== 'Pendiente');
     
@@ -291,18 +291,18 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         const base64Data = await compressImage(file, 800, 0.7);
         const response = await fetch(URL_GOOGLE_SCRIPT, {
           method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ tokenSecreto: "BLUHER_SECURE_TOKEN_2026", fileName: `ExtractoAdmin_${Date.now()}.jpg`, mimeType: 'image/jpeg', data: base64Data })
+          body: JSON.stringify({ tokenSecreto: import.meta.env.VITE_UPLOAD_TOKEN, fileName: `ExtractoAdmin_${Date.now()}.jpg`, mimeType: 'image/jpeg', data: base64Data })
         });
         const result = await response.json();
         if (result.url) urlComprobanteAdmin = result.url;
       }
 
-      if (!isEdit) {
+      // Si no es edición y NO es un Abono, descontamos stock. Si es Abono, saltamos esta parte porque no hay productos físicos moviéndose.
+      if (!isEdit && !pedido.esAbono) {
          const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
          const updates = {};
          const almacenDestino = (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') ? 'recepcion' : 'envios';
          
-         // INTEGRACIÓN DE OBSEQUIOS Y CONCENTRADOS
          const carritoTotal = { ...(pedido.carritoObj || {}) };
          if (pedido.carritoObsequiosObj) {
              Object.entries(pedido.carritoObsequiosObj).forEach(([key, qty]) => {
@@ -330,6 +330,21 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
          if (Object.keys(updates).length > 0) { 
              await setDoc(stockRef, updates, { merge: true }); 
          }
+      }
+
+      // Si es un abono a consignación y se está validando por primera vez, 
+      // generamos el registro en ingresos de caja para los reportes financieros.
+      if (!isEdit && pedido.esAbono) {
+         const pagoUsdNeto = parseFloat(pedido.montoUsd) || 0;
+         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ingresos_caja'), {
+             concepto: `Abono a Consignación - ${pedido.clienteNombre}`,
+             monto: pagoUsdNeto,
+             moneda: 'USD',
+             metodo: pedido.moneda, // VES, USD, ZELLE
+             referencia: pedido.referencia,
+             creadoPor: perfil.nombre,
+             fecha: Date.now()
+         });
       }
 
       let montoCalculadoUsd = 0;
@@ -374,8 +389,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), payloadPedido);
       
-      loggear(isEdit ? 'PAGO_CORREGIDO' : 'PAGO_VALIDADO', `${isEdit ? 'Corrección de validación' : 'Aprobación y descuento de stock'}: ${pedido.clienteNombre}`);
-      dialogs.alert(isEdit ? "La validación fue actualizada correctamente." : "El pago fue aprobado, el extracto guardado y el inventario descontado exitosamente.", "Éxito");
+      loggear(isEdit ? 'PAGO_CORREGIDO' : 'PAGO_VALIDADO', `${isEdit ? 'Corrección de validación' : (pedido.esAbono ? 'Validación de Abono' : 'Aprobación y descuento de stock')}: ${pedido.clienteNombre}`);
+      dialogs.alert(isEdit ? "La validación fue actualizada correctamente." : (pedido.esAbono ? "El pago del abono ha sido verificado y registrado en el reporte de ingresos a caja." : "El pago fue aprobado, el extracto guardado y el inventario descontado exitosamente."), "Éxito");
       setModalValidacion(null);
     } catch(e) { 
       console.error(e); 
@@ -456,37 +471,39 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       if (!motivo) return;
       
       try {
-         const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
-         const updates = {};
-         const almacenDestino = (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') ? 'recepcion' : 'envios';
-         
-         // INTEGRACIÓN DE OBSEQUIOS Y CONCENTRADOS AL REVERSAR (SUMAR AL INVENTARIO)
-         const carritoDevolver = { ...(pedido.carritoObj || {}) };
-         if (pedido.carritoObsequiosObj) {
-             Object.entries(pedido.carritoObsequiosObj).forEach(([key, qty]) => {
-                 carritoDevolver[key] = (carritoDevolver[key] || 0) + qty;
-             });
-         }
-
-         let countBoosters = 0;
-         const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
-         Object.entries(carritoDevolver).forEach(([k, qty]) => {
-             if (boosterKeys.includes(k)) countBoosters += qty;
-         });
-
-         if (countBoosters > 0) {
-             const concentradosActuales = carritoDevolver["Concentrado|Unidad"] || 0;
-             if (concentradosActuales < countBoosters) {
-                 carritoDevolver["Concentrado|Unidad"] = concentradosActuales + (countBoosters - concentradosActuales);
+         // Si es un abono, no interactuamos con inventario, solo regresamos el status
+         if (!pedido.esAbono) {
+             const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
+             const updates = {};
+             const almacenDestino = (pedido.tipoDespacho === 'Tienda' || pedido.tipoDespacho === 'Delivery') ? 'recepcion' : 'envios';
+             
+             const carritoDevolver = { ...(pedido.carritoObj || {}) };
+             if (pedido.carritoObsequiosObj) {
+                 Object.entries(pedido.carritoObsequiosObj).forEach(([key, qty]) => {
+                     carritoDevolver[key] = (carritoDevolver[key] || 0) + qty;
+                 });
              }
-         }
 
-         Object.entries(carritoDevolver).forEach(([itemKey, qty]) => { 
-             updates[itemKey] = { [almacenDestino]: increment(qty) }; 
-         });
-         
-         if (Object.keys(updates).length > 0) { 
-             await setDoc(stockRef, updates, { merge: true }); 
+             let countBoosters = 0;
+             const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
+             Object.entries(carritoDevolver).forEach(([k, qty]) => {
+                 if (boosterKeys.includes(k)) countBoosters += qty;
+             });
+
+             if (countBoosters > 0) {
+                 const concentradosActuales = carritoDevolver["Concentrado|Unidad"] || 0;
+                 if (concentradosActuales < countBoosters) {
+                     carritoDevolver["Concentrado|Unidad"] = concentradosActuales + (countBoosters - concentradosActuales);
+                 }
+             }
+
+             Object.entries(carritoDevolver).forEach(([itemKey, qty]) => { 
+                 updates[itemKey] = { [almacenDestino]: increment(qty) }; 
+             });
+             
+             if (Object.keys(updates).length > 0) { 
+                 await setDoc(stockRef, updates, { merge: true }); 
+             }
          }
 
          const payloadPedido = { 
@@ -500,15 +517,15 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             vueltoUsd: 0,
             notasAuditoria: [...(pedido.notasAuditoria || []), { 
                fecha: Date.now(), 
-               texto: `REVERSIÓN DE VALIDACIÓN (Inventario devuelto). Motivo: ${motivo}`, 
+               texto: pedido.esAbono ? `REVERSIÓN DE VALIDACIÓN DE ABONO. Motivo: ${motivo}` : `REVERSIÓN DE VALIDACIÓN (Inventario devuelto). Motivo: ${motivo}`, 
                autor: perfil.nombre 
             }]
          };
 
          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), payloadPedido);
          
-         loggear('VALIDACION_REVERSADA', `Admin Supremo reversó el pago de ${pedido.clienteNombre}. Stock devuelto.`);
-         dialogs.alert("La validación ha sido anulada. Los productos regresaron al stock y el pedido vuelve a estar Pendiente.", "Reversión Exitosa");
+         loggear('VALIDACION_REVERSADA', `Admin Supremo reversó el pago de ${pedido.clienteNombre}. ${pedido.esAbono ? '' : 'Stock devuelto.'}`);
+         dialogs.alert(pedido.esAbono ? "La validación del abono ha sido anulada. El pago vuelve a estar pendiente." : "La validación ha sido anulada. Los productos regresaron al stock y el pedido vuelve a estar Pendiente.", "Reversión Exitosa");
          
       } catch (e) { 
          console.error(e); 
@@ -521,7 +538,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
     if (!esAuditor) return;
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { 
-          revisadoAuditorPersonal: !pedido.revisadoAuditorPersonal 
+         revisadoAuditorPersonal: !pedido.revisadoAuditorPersonal 
       });
     } catch(e) { console.error(e); }
   };
@@ -643,10 +660,10 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  onChange={e=>setFiltroDespacho(e.target.value)}
                  className="w-full sm:w-32 p-2 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-sm font-bold outline-none focus:border-sky-500 transition-colors"
                >
-                  <option value="Todos">Todos</option>
-                  <option value="Nacional">Nacional</option>
-                  <option value="Delivery">Delivery</option>
-                  <option value="Tienda">Tienda</option>
+                 <option value="Todos">Todos</option>
+                 <option value="Nacional">Nacional</option>
+                 <option value="Delivery">Delivery</option>
+                 <option value="Tienda">Tienda</option>
                </select>
              </div>
 
@@ -710,11 +727,16 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  <div className="absolute top-5 right-6"><StatusBadge status={p.status}/></div>
 
                  <div className="lg:col-span-5 flex flex-col justify-start">
-                   <div className="font-bold text-xl text-slate-800 dark:text-slate-100 pr-24 leading-tight">{p.clienteNombre}</div>
+                   <div className="font-bold text-xl text-slate-800 dark:text-slate-100 pr-24 leading-tight">
+                      {p.clienteNombre}
+                   </div>
                    
                    <div className="text-[11px] font-black tracking-widest uppercase text-sky-600 dark:text-sky-400 mt-1 mb-3 flex items-center flex-wrap gap-2">
                      <span>Ingreso: {new Date(p.fechaCreacion).toLocaleDateString('es-VE')} {new Date(p.fechaCreacion).toLocaleTimeString('es-VE', {hour: '2-digit', minute:'2-digit'})}</span>
                      <span className="bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-700">Pautado: {p.fechaDespacho || 'No asignado'}</span>
+                     
+                     {p.esAbono && <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded border border-emerald-300 flex items-center gap-1"><Wallet size={12}/> ABONO PURO</span>}
+                     {p.esConsignacion && <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded border border-amber-300 flex items-center gap-1"><Package size={12}/> CONSIGNACIÓN</span>}
                      
                      {p.tipoDespacho === 'Delivery' && <span className="bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-400 px-2 py-0.5 rounded border border-fuchsia-200 dark:border-fuchsia-800 flex items-center gap-1"><Bike size={12}/> Delivery</span>}
                      {p.tipoDespacho === 'Tienda' && <span className="bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800 flex items-center gap-1"><StoreIcon size={12}/> Tienda</span>}
@@ -740,8 +762,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                    )}
                    
                    <div className="text-[13px] font-medium text-slate-700 dark:text-slate-300 bg-[#f0f4f8] dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-4 mt-1 rounded-xl shadow-inner">
-                     <span className="font-black text-sky-700 dark:text-sky-400 flex items-center gap-1.5 mb-2 uppercase tracking-wider text-[10px]"><Package size={14}/> Productos Facturados:</span>
-                     {p.productos ? <div className="whitespace-pre-wrap leading-relaxed">{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div> : 'Sin detalle.'}
+                     <span className="font-black text-sky-700 dark:text-sky-400 flex items-center gap-1.5 mb-2 uppercase tracking-wider text-[10px]"><Package size={14}/> {p.esAbono ? 'Detalle de Abono:' : 'Productos Facturados:'}</span>
+                     {p.productos ? <div className={`whitespace-pre-wrap leading-relaxed ${p.esAbono ? 'text-emerald-600 font-bold' : ''}`}>{typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}</div> : 'Sin detalle.'}
                    </div>
 
                    {p.notaVentas && (
@@ -779,7 +801,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                       <div className="font-black text-purple-600 dark:text-purple-400 text-lg flex items-center gap-2 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl mb-4"><Gift size={20}/> REGALO VIP</div>
                    ) : p.moneda === 'ZELLE' ? (
                       <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl border border-purple-200 dark:border-purple-800 mb-4">
-                        <div className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">Pago Vía Zelle</div>
+                        <div className="text-[10px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">{p.esAbono ? 'Abono Vía Zelle' : 'Pago Vía Zelle'}</div>
                         <div className="font-black text-purple-800 dark:text-purple-300 text-3xl">${(p.montoUsd||0).toFixed(2)}</div>
                         
                         <div className="flex flex-wrap gap-2 mt-3">
@@ -832,7 +854,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                      
                      {esAdmin && p.status === 'Pendiente' && (
                        <div className="flex flex-col gap-3 w-full mt-auto">
-                         <button onClick={()=>abrirModalValidacion(p, false)} className="bg-sky-600 text-white py-3.5 rounded-xl font-black text-sm shadow-lg hover:bg-sky-700 hover:-translate-y-0.5 transition-all w-full uppercase tracking-wider">Validar Pago</button>
+                         <button onClick={()=>abrirModalValidacion(p, false)} className="bg-sky-600 text-white py-3.5 rounded-xl font-black text-sm shadow-lg hover:bg-sky-700 hover:-translate-y-0.5 transition-all w-full uppercase tracking-wider">{p.esAbono ? 'Validar Abono' : 'Validar Pago'}</button>
                          <button onClick={()=>rechazarPago(p)} className="bg-white dark:bg-slate-800 border-2 border-red-200 text-red-600 py-3 rounded-xl font-bold text-sm hover:bg-red-50 transition-colors w-full">Devolver a Ventas</button>
                        </div>
                      )}
@@ -845,7 +867,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
                      {vistaAdmin === 'historial' && esAdminSupremo && p.status === 'Validado' && (
                         <button onClick={()=>reversarValidacion(p)} className="mb-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm w-full">
-                           <RotateCcw size={16}/> Reversar y Devolver Stock
+                           <RotateCcw size={16}/> {p.esAbono ? 'Reversar Validación Abono' : 'Reversar y Devolver Stock'}
                         </button>
                      )}
                      
@@ -1027,7 +1049,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                  </div>
                  
                  <button onClick={procesarValidacionDefinitiva} disabled={modalValidacion.subiendo} className="w-full bg-[#003366] hover:bg-[#002244] dark:bg-sky-600 dark:hover:bg-sky-700 text-white font-black py-4 rounded-xl mt-6 shadow-xl transition-transform hover:-translate-y-0.5 disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest">
-                   {modalValidacion.subiendo ? <><Loader2 className="animate-spin"/> Guardando...</> : (modalValidacion.isEdit ? 'Guardar Cambios' : 'Aprobar y Descontar')}
+                   {modalValidacion.subiendo ? <><Loader2 className="animate-spin"/> Guardando...</> : (modalValidacion.isEdit ? 'Guardar Cambios' : (modalValidacion.pedido?.esAbono ? 'Validar Abono' : 'Aprobar y Descontar'))}
                  </button>
               </div>
            </div>
