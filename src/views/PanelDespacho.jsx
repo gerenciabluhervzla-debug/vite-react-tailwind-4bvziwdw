@@ -38,7 +38,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  // Excluimos explícitamente los Abonos de la vista de Despacho
   const pedidosValidados = useMemo(() => 
     pedidos.filter(p => p.status === 'Validado' && !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')),
     [pedidos]
@@ -66,11 +65,16 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   
   const [fechaCierreElegida, setFechaCierreElegida] = useState(getHoyISO());
 
+  const parseDateVzla = (dateStr) => {
+      if (!dateStr || dateStr === 'Sin Fecha') return 0;
+      const parts = dateStr.split('/');
+      return parts.length === 3 ? new Date(parts[2], parts[1] - 1, parts[0]).getTime() : 0;
+  };
+
   const numeracionDiaria = useMemo(() => {
     const map = {};
     const agrupados = {};
     
-    // Solo pedidos nacionales con fecha, excluyendo Abonos puramente financieros
     pedidos
       .filter(p => !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional'))
       .forEach(p => {
@@ -114,35 +118,53 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
 
     const [year, month, day] = fechaCierreElegida.split('-');
     const tDate = new Date(year, month - 1, day);
-    const todayStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
+    const closureDateStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
     const startOfDay = tDate.getTime();
     const endOfDay = startOfDay + 86400000;
 
     const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
 
-    // Ignoramos Abonos en el cálculo del Kardex Físico
+    const dReal = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const realTodayStr = `${String(dReal.getDate()).padStart(2, '0')}/${String(dReal.getMonth() + 1).padStart(2, '0')}/${dReal.getFullYear()}`;
+
     pedidos.forEach(p => {
-       if (['Validado', 'Despachado'].includes(p.status) && !p.esAbono && p.fechaDespacho === todayStr && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')) {
+       if (['Validado', 'Despachado'].includes(p.status) && !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')) {
            
-           const carritoTotal = { ...(p.carritoObj || {}) };
-           if (p.carritoObsequiosObj) {
-               Object.entries(p.carritoObsequiosObj).forEach(([k, qty]) => {
-                   carritoTotal[k] = (carritoTotal[k] || 0) + qty;
-               });
+           let fechaAfectacionInventario = p.fechaValidacion;
+
+           if (!fechaAfectacionInventario) {
+               const pTime = parseDateVzla(p.fechaDespacho);
+               const timeInicioReceso = parseDateVzla("24/06/2026");
+               const todayTime = parseDateVzla(realTodayStr);
+               
+               if (pTime >= timeInicioReceso && pTime <= todayTime) {
+                   fechaAfectacionInventario = realTodayStr;
+               } else {
+                   fechaAfectacionInventario = p.fechaDespacho;
+               }
            }
 
-           let countBoosters = 0;
-           Object.entries(carritoTotal).forEach(([k, qty]) => {
-               if (aggr[k]) aggr[k].ventas += qty;
-               if (boosterKeys.includes(k)) countBoosters += qty;
-           });
+           if (fechaAfectacionInventario === closureDateStr) {
+               const carritoTotal = { ...(p.carritoObj || {}) };
+               if (p.carritoObsequiosObj) {
+                   Object.entries(p.carritoObsequiosObj).forEach(([k, qty]) => {
+                       carritoTotal[k] = (carritoTotal[k] || 0) + qty;
+                   });
+               }
 
-           if (countBoosters > 0) {
-               const concentradosActuales = carritoTotal["Concentrado|Unidad"] || 0;
-               if (concentradosActuales < countBoosters) {
-                   const faltantes = countBoosters - concentradosActuales;
-                   if (aggr["Concentrado|Unidad"]) {
-                       aggr["Concentrado|Unidad"].ventas += faltantes;
+               let countBoosters = 0;
+               Object.entries(carritoTotal).forEach(([k, qty]) => {
+                   if (aggr[k]) aggr[k].ventas += qty;
+                   if (boosterKeys.includes(k)) countBoosters += qty;
+               });
+
+               if (countBoosters > 0) {
+                   const concentradosActuales = carritoTotal["Concentrado|Unidad"] || 0;
+                   if (concentradosActuales < countBoosters) {
+                       const faltantes = countBoosters - concentradosActuales;
+                       if (aggr["Concentrado|Unidad"]) {
+                           aggr["Concentrado|Unidad"].ventas += faltantes;
+                       }
                    }
                }
            }
@@ -180,8 +202,8 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     if (!URL_GOOGLE_SCRIPT) return dialogs.alert("⚠️ Falta configurar el puente de Google Drive.", "Configuración Faltante");
     
     const pedidoActivo = pedidos.find(p => p.id === id);
-    const nombreBase = pedidoActivo?.clienteNombre || 'Sin_Nombre';
-    const nombreLimpio = nombreBase.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, '_');
+    const fontName = pedidoActivo?.clienteNombre || 'Sin_Nombre';
+    const nombreLimpio = fontName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, '_');
     
     const hoy = new Date();
     const dia = String(hoy.getDate()).padStart(2, '0');
@@ -575,12 +597,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     const tDate = getVeneziaTime();
     return `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
   }, []);
-
-  const parseDateVzla = (dateStr) => {
-      if (!dateStr || dateStr === 'Sin Fecha') return 0;
-      const parts = dateStr.split('/');
-      return parts.length === 3 ? new Date(parts[2], parts[1] - 1, parts[0]).getTime() : 0;
-  };
 
   const pedidosAMostrar = useMemo(() => {
     let lista = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
@@ -1056,7 +1072,6 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {/* MODAL PARA PREVISUALIZACIÓN DE IMÁGENES */}
       {previewImage && (
         <div className="fixed inset-0 z-[400] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center p-4">
           <button 

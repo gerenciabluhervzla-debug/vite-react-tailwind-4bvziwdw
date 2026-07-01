@@ -297,7 +297,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
         if (result.url) urlComprobanteAdmin = result.url;
       }
 
-      // Si no es edición y NO es un Abono, descontamos stock. Si es Abono, saltamos esta parte porque no hay productos físicos moviéndose.
       if (!isEdit && !pedido.esAbono) {
          const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
          const updates = {};
@@ -332,15 +331,13 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
          }
       }
 
-      // Si es un abono a consignación y se está validando por primera vez, 
-      // generamos el registro en ingresos de caja para los reportes financieros.
       if (!isEdit && pedido.esAbono) {
          const pagoUsdNeto = parseFloat(pedido.montoUsd) || 0;
          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ingresos_caja'), {
              concepto: `Abono a Consignación - ${pedido.clienteNombre}`,
              monto: pagoUsdNeto,
              moneda: 'USD',
-             metodo: pedido.moneda, // VES, USD, ZELLE
+             metodo: pedido.moneda, 
              referencia: pedido.referencia,
              creadoPor: perfil.nombre,
              fecha: Date.now()
@@ -361,10 +358,15 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       const sobranteUsd = tipoDiferencia === 'sobrante' ? Number(montoCalculadoUsd.toFixed(2)) : 0;
       const faltanteUsd = tipoDiferencia === 'faltante' ? Number(montoCalculadoUsd.toFixed(2)) : 0;
 
+      // --- CAMBIO CLAVE: Sello Dinámico de Validación en Zona Horaria CCS ---
+      const dReal = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+      const fechaValidacionActual = `${String(dReal.getDate()).padStart(2, '0')}/${String(dReal.getMonth() + 1).padStart(2, '0')}/${dReal.getFullYear()}`;
+
       const payloadPedido = { 
           status: 'Validado', 
           sobranteUsd: sobranteUsd, 
-          faltanteUsd: faltanteUsd 
+          faltanteUsd: faltanteUsd,
+          fechaValidacion: fechaValidacionActual // Guardamos la fecha del clic real de aprobación
       };
 
       if (!isEdit && (sobranteUsd > 0 || faltanteUsd > 0)) {
@@ -447,7 +449,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
        if(!nota) return;
        try {
           const notasExistentes = pedido.notasAuditoria || [];
-          const nuevasNotas = [...notasExistentes, { fecha: Date.now(), texto: nota, autor: perfil.nombre }];
+          const nuevasNotas = [...notasExistentes, { fecha: Date.now(), texto: nota, autor: perfil?.nombre || 'Auditor' }];
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedido.id), { auditado: true, notasAuditoria: nuevasNotas });
           loggear('AUDITORIA_NOTA', `Añadió comentario a: ${pedido.clienteNombre}`);
        } catch(e) { console.error(e); }
@@ -471,7 +473,6 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
       if (!motivo) return;
       
       try {
-         // Si es un abono, no interactuamos con inventario, solo regresamos el status
          if (!pedido.esAbono) {
              const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
              const updates = {};
@@ -515,6 +516,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             montoEfectivoBs: 0,
             montoTarjetaCreditoBs: 0,
             vueltoUsd: 0,
+            fechaValidacion: deleteDoc, // Al reversar limpiamos la fecha de afectación
             notasAuditoria: [...(pedido.notasAuditoria || []), { 
                fecha: Date.now(), 
                texto: pedido.esAbono ? `REVERSIÓN DE VALIDACIÓN DE ABONO. Motivo: ${motivo}` : `REVERSIÓN DE VALIDACIÓN (Inventario devuelto). Motivo: ${motivo}`, 
@@ -1014,8 +1016,8 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
 
                     {modalValidacion.tipoDiferencia !== 'ninguno' && (
                        <div className="flex gap-3 animate-in fade-in slide-in-from-top-2">
-                          <input type="number" step="0.01" value={modalValidacion.montoDiferencia} onChange={e=>setModalValidacion(prev=>({...prev, montoDiferencia: e.target.value}))} className="w-full border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 dark:text-white p-3 rounded-xl outline-none focus:border-sky-500 font-bold" placeholder="Monto (Ej: 5.50)" />
-                          <select value={modalValidacion.monedaDiferencia} onChange={e=>setModalValidacion(prev=>({...prev, monedaDiferencia: e.target.value}))} className="w-32 border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 dark:text-white p-3 rounded-xl outline-none focus:border-sky-500 font-bold">
+                          <input type="number" step="0.01" value={modalValidacion.montoDiferencia} onChange={e=>setModalValidacion(prev=>({...prev, montoDiferencia: e.target.value}))} className="w-full border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 dark:text-white p-3 rounded-xl outline-none focus:border-sky-500 font-bold" placeholder="Monto (Ej: 5.50)" />
+                          <select value={modalValidacion.monedaDiferencia} onChange={e=>setModalValidacion(prev=>({...prev, monedaDiferencia: e.target.value}))} className="w-32 border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 dark:text-white p-3 rounded-xl outline-none focus:border-sky-500 font-bold">
                              <option value="USD">$ USD</option>
                              <option value="VES">Bs (VES)</option>
                           </select>
@@ -1033,15 +1035,15 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                     onPaste={handlePasteComprobante}
                  >
                     {modalValidacion.previewUrl ? (
-                       <img src={modalValidacion.previewUrl} className="max-h-48 mx-auto rounded-lg shadow-sm" alt="Preview"/>
+                       <img src={getDirectUrl(modalValidacion.previewUrl)} alt="Preview" className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain"/>
                     ) : (
-                       <div className="text-sky-700 dark:text-sky-500 flex flex-col items-center py-4">
-                          <UploadCloud size={36} className="mb-3 opacity-80" />
-                          <p className="font-bold text-sm">Haz clic aquí y presiona <kbd className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-0.5 mx-1 shadow-sm text-slate-800 dark:text-slate-200">Ctrl</kbd> + <kbd className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-0.5 mx-1 shadow-sm text-slate-800 dark:text-slate-200">V</kbd></p>
-                          <p className="text-xs mt-1 opacity-70">Para pegar la captura del banco desde tu portapapeles</p>
+                       <div className="text-sky-700 dark:text-sky-400 text-center flex flex-col items-center justify-center p-6 border-2 border-dashed border-sky-200 dark:border-sky-800/50 rounded-2xl bg-slate-50/50 dark:bg-slate-900/30">
+                          <ImageIcon size={32} className="text-sky-500 mb-2" />
+                          <div className="font-bold text-xs">Sin Comprobante Adjunto</div>
+                          <div className="text-[10px] text-slate-400 mt-1">Arrastra o pega una imagen del extracto bancario</div>
                        </div>
                     )}
-                    <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={(e)=>{
+                    <input type="file" accept="image/*" className="hidden" id="file-admin-upload" onChange={(e) => {
                        if(e.target.files[0]){
                           setModalValidacion(prev=>({...prev, file: e.target.files[0], previewUrl: URL.createObjectURL(e.target.files[0])}))
                        }
