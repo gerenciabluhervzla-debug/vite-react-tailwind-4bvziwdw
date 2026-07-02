@@ -78,18 +78,64 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     );
   }, [pedidos]);
 
-  // --- NUEVO: CÁLCULO DE CUENTAS POR COBRAR (CONSIGNACIONES ACTIVAS) ---
+  // --- CÁLCULO DINÁMICO DE CUENTAS POR COBRAR Y ABONOS ---
   const consignacionesPendientes = useMemo(() => {
-    // Filtramos sin importar la fecha, porque la deuda sigue existiendo hasta que se pague a 0
-    return validados.filter(p => p.esConsignacion && parseFloat(p.saldoPendiente) > 0)
-                    .sort((a,b) => parseFloat(b.saldoPendiente) - parseFloat(a.saldoPendiente));
+    // 1. Extraemos todas las consignaciones puras (la deuda original)
+    const consignaciones = validados.filter(p => p.esConsignacion).map(c => {
+       const totalOriginal = parseFloat(c.totalOrdenOriginalUsd) || parseFloat(c.montoUsd) || 0;
+       const pagoInicial = parseFloat(c.montoUsd) || 0;
+       return {
+          ...c,
+          deudaRestante: totalOriginal - pagoInicial,
+          totalFacturadoBase: totalOriginal
+       };
+    });
+
+    // 2. Extraemos todos los abonos globales validados de todo el historial
+    const abonos = validados.filter(p => p.esAbono);
+
+    // 3. Agrupamos el saldo abonado por cada cliente
+    const pagosPorCliente = {};
+    abonos.forEach(a => {
+       const key = (a.clienteNombre || '').toLowerCase().trim();
+       pagosPorCliente[key] = (pagosPorCliente[key] || 0) + (parseFloat(a.montoUsd) || 0);
+    });
+
+    // 4. Aplicamos los abonos a las consignaciones (desde la más vieja a la más nueva)
+    consignaciones.sort((a,b) => a.fechaCreacion - b.fechaCreacion);
+    
+    consignaciones.forEach(c => {
+       const key = (c.clienteNombre || '').toLowerCase().trim();
+       let pagoDisp = pagosPorCliente[key] || 0;
+       
+       if (pagoDisp > 0 && c.deudaRestante > 0) {
+           if (pagoDisp >= c.deudaRestante) {
+               // El abono cubre la totalidad de esta factura
+               pagosPorCliente[key] = pagoDisp - c.deudaRestante;
+               c.deudaRestante = 0;
+           } else {
+               // El abono solo cubre una parte de la factura
+               c.deudaRestante -= pagoDisp;
+               pagosPorCliente[key] = 0;
+           }
+       }
+    });
+
+    // 5. Retornamos solo aquellas que aún conservan deuda pendiente
+    return consignaciones
+      .filter(c => c.deudaRestante > 0.01) // Margen de error de decimales
+      .map(c => ({
+          ...c,
+          saldoPendiente: c.deudaRestante,
+          totalOrdenOriginalUsd: c.totalFacturadoBase
+      }))
+      .sort((a,b) => b.deudaRestante - a.deudaRestante);
   }, [validados]);
 
   const totalDeudaConsignaciones = useMemo(() => {
     return consignacionesPendientes.reduce((acc, curr) => acc + (parseFloat(curr.saldoPendiente) || 0), 0);
   }, [consignacionesPendientes]);
 
-  // --- FILTRAR REPORTES USANDO FECHA DE DESPACHO ---
   const parseDateVzla = (dateStr) => {
      if (!dateStr || dateStr === 'Sin Fecha') return 0;
      const parts = dateStr.split('/');
@@ -100,24 +146,34 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     
     return validados.filter(p => {
-      // Excluir abonos puros del filtrado de "pedidos vendidos" para no inflar métricas
-      if (p.esAbono) return false;
+      // Para pedidos normales usamos su fecha pautada de despacho. 
+      // Para los Abonos usamos el momento exacto en que Administración validó el dinero.
+      let fechaCmp = p.fechaDespacho;
+      
+      if (p.esAbono) {
+         if (p.fechaValidacion) {
+            fechaCmp = p.fechaValidacion; 
+         } else {
+            const pTime = new Date(p.fechaCreacion);
+            fechaCmp = `${String(pTime.getDate()).padStart(2,'0')}/${String(pTime.getMonth()+1).padStart(2,'0')}/${pTime.getFullYear()}`;
+         }
+      }
 
       if (rangoRango === 'hoy') {
          const todayStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
-         return p.fechaDespacho === todayStr;
+         return fechaCmp === todayStr;
       }
       if (rangoRango === 'mes') {
-         const [, dMes, dAno] = (p.fechaDespacho || '').split('/');
+         const [, dMes, dAno] = (fechaCmp || '').split('/');
          return dMes === String(d.getMonth()+1).padStart(2,'0') && dAno === String(d.getFullYear());
       }
       if (rangoRango === 'año') {
-         const [, , dAno] = (p.fechaDespacho || '').split('/');
+         const [, , dAno] = (fechaCmp || '').split('/');
          return dAno === String(d.getFullYear());
       }
       if (rangoRango === 'todo') return true;
       if (rangoRango === 'custom') {
-        const pTime = parseDateVzla(p.fechaDespacho);
+        const pTime = parseDateVzla(fechaCmp);
         const start = fechaInicio ? new Date(fechaInicio + 'T00:00:00').getTime() : 0;
         const end = fechaFin ? new Date(fechaFin + 'T23:59:59').getTime() : Infinity;
         return pTime >= start && pTime <= end;
@@ -126,11 +182,10 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     });
   }, [validados, rangoRango, fechaInicio, fechaFin]);
 
-  // --- CÁLCULO DE DÍAS TRANSCURRIDOS PARA LOS PROMEDIOS ---
   const diasSeleccionados = useMemo(() => {
     const d = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
     if (rangoRango === 'hoy') return 1;
-    if (rangoRango === 'mes') return d.getDate(); // Días transcurridos del mes actual
+    if (rangoRango === 'mes') return d.getDate();
     if (rangoRango === 'año') {
       const start = new Date(d.getFullYear(), 0, 1);
       return Math.max(1, Math.ceil((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
@@ -309,11 +364,11 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              montoUsd: p.montoUsd || 0,
              montoVes: p.montoVes || 0,
              moneda: p.moneda,
-             origen: p.origenPedido || 'Sin Origen',
+             origen: p.esAbono ? 'ABONO DEUDA' : (p.origenPedido || 'Sin Origen'),
              costoEnvio: costoEnvio,
              tipoDespacho: p.tipoDespacho || 'Nacional',
              creditoRegalo: parseFloat(p.montoCreditoRegaloUsd) || 0,
-             fechaPedido: p.fechaDespacho || 'Sin Fecha'
+             fechaPedido: p.esAbono ? (p.fechaValidacion || p.fechaDespacho) : (p.fechaDespacho || 'Sin Fecha')
          });
       });
 
@@ -353,6 +408,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
     let valorDescontarPorDespachos = 0;
     pedidosFiltrados.forEach(p => {
+      if (p.esAbono) return; // Los abonos no descuentan mercancía
       const sumarAlDescuento = (carrito) => {
          if (!carrito) return;
          Object.entries(carrito).forEach(([key, qty]) => {
@@ -377,6 +433,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
   const dataProductos = useMemo(() => {
     const map = {};
     pedidosFiltrados.forEach(p => {
+      if (p.esAbono) return; // Los abonos no afectan al TOP 10 de productos físicos
       const contabilizar = (carrito) => {
          if (!carrito) return;
          Object.entries(carrito).forEach(([key, qty]) => {
@@ -437,7 +494,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
     const productosDetallados = {};
     pedidosFiltrados.forEach(p => {
-       if (p.esRegalo) return; 
+       if (p.esRegalo || p.esAbono) return; // Abonos no entran en detalle de productos físicos
        
        const descuentoAsesora = p.descuentoPorcentaje || 0;
        const descuentoGlobal = p.descuentoGlobalAplicado || 0;
@@ -559,7 +616,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
         <div class="header">
           <div>
-            <h1>Reporte de Ventas</h1>
+            <h1>Reporte de Ventas y Abonos</h1>
             <p style="color: #64748b; margin-top: 5px; font-size: 14px; font-weight: bold;">Periodo: ${periodoEtiqueta}</p>
           </div>
           <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
@@ -592,7 +649,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11"/><path d="M14 9h4l4 4v5c0 .6-.4 1-1 1h-2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>
               </div>
               <div>
-                 <div class="kpi-title" style="color: #64748b; margin-bottom: 2px;">Ventas en Envíos</div>
+                 <div class="kpi-title" style="color: #64748b; margin-bottom: 2px;">Ventas y Abonos en Envíos</div>
                  <div class="kpi-value" style="font-size: 20px; color: #0f172a;">$${metricas.ventasEnviosUsd.toFixed(2)}</div>
               </div>
            </div>
@@ -601,7 +658,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
               </div>
               <div>
-                 <div class="kpi-title" style="color: #64748b; margin-bottom: 2px;">Ventas Delivery</div>
+                 <div class="kpi-title" style="color: #64748b; margin-bottom: 2px;">Ventas y Abonos Delivery</div>
                  <div class="kpi-value" style="font-size: 20px; color: #0f172a;">$${metricas.ventasDeliveryUsd.toFixed(2)}</div>
               </div>
            </div>
@@ -610,7 +667,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2v0a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12v0a2 2 0 0 1-2-2V7"/></svg>
               </div>
               <div>
-                 <div class="kpi-title" style="color: #64748b; margin-bottom: 2px;">Ventas Entrega en Tienda</div>
+                 <div class="kpi-title" style="color: #64748b; margin-bottom: 2px;">Ventas y Abonos Tienda</div>
                  <div class="kpi-value" style="font-size: 20px; color: #0f172a;">$${metricas.ventasTiendaUsd.toFixed(2)}</div>
               </div>
            </div>
@@ -665,7 +722,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
             </p>
          </div>
          <table>
-            <thead><tr><th style="width:25%;">Cliente Atendido</th><th style="width:20%;">Teléfono</th><th style="width:20%;">Origen Pedido</th><th style="width:15%; text-align:right;">Monto Bs</th><th style="width:20%; text-align:right;">Monto USD / Zelle</th></tr></thead>
+            <thead><tr><th style="width:25%;">Cliente Atendido</th><th style="width:20%;">Teléfono</th><th style="width:20%;">Origen / Abono</th><th style="width:15%; text-align:right;">Monto Bs</th><th style="width:20%; text-align:right;">Monto USD / Zelle</th></tr></thead>
             <tbody>
        `;
        asesora.clientes.forEach(c => {
@@ -722,7 +779,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
             <tr>
               <th style="width: 20%;">Cliente / Asesora</th>
               <th style="width: 15%;">Ref. / Origen</th>
-              <th style="width: 45%;">Productos Facturados</th>
+              <th style="width: 45%;">Productos Facturados / Abono</th>
               <th style="text-align:right; width: 10%;">Bs</th>
               <th style="text-align:right; width: 10%;">USD</th>
             </tr>
@@ -733,14 +790,14 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           tablaHtml += `<tr><td colspan="5" style="text-align:center; padding: 20px; font-style: italic; color: #94a3b8;">No se registraron órdenes en esta sección.</td></tr>`;
        } else {
           listadoPedidos.forEach(p => {
-             const prodsFormat = typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos);
+             const prodsFormat = p.esAbono ? '<span style="color:#059669; font-weight:bold;">💸 ABONO A CONSIGNACIÓN (PAGO SIN PRODUCTOS)</span>' : (typeof p.productos === 'string' ? p.productos.replace(/\n/g, '<br>') : JSON.stringify(p.productos));
              const isZelle = p.moneda === 'ZELLE';
              const costoEnvio = parseFloat(p.costoEnvio) || 0;
              const creditoPdf = parseFloat(p.montoCreditoRegaloUsd) || 0;
              
              tablaHtml += `<tr>
-               <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${p.fechaDespacho}</span><br><span style="font-size:10px; font-weight:bold;">Asesora: ${p.asesora}</span></td>
-               <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia || 'N/A'}</span><br><span style="font-size:9px; font-weight:bold; color:#4338ca; display:block; margin-top:4px;">${p.origenPedido || 'Sin Origen'}</span></td>
+               <td><strong>${p.clienteNombre}</strong><br><span style="color:#64748b; font-size:10px;">${p.esAbono ? (p.fechaValidacion||p.fechaDespacho) : p.fechaDespacho}</span><br><span style="font-size:10px; font-weight:bold;">Asesora: ${p.asesora}</span></td>
+               <td><span style="background: #f1f5f9; padding: 4px 6px; border-radius: 4px; font-family: monospace;">${p.referencia || 'N/A'}</span><br><span style="font-size:9px; font-weight:bold; color:#4338ca; display:block; margin-top:4px;">${p.esAbono ? 'ABONO DEUDA' : (p.origenPedido || 'Sin Origen')}</span></td>
                <td class="products-list">${prodsFormat}</td>
                <td style="text-align:right; font-weight:bold; color:#059669;">${isZelle ? '-' : (p.montoVes || 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
                <td style="text-align:right; font-weight:900; font-size:13px;">
@@ -759,18 +816,17 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
     html += macroTablaPedidos("Entregas en Tienda", pedidosEntregasTienda);
     html += macroTablaPedidos("Delivery", pedidosDelivery);
 
-    // --- NUEVO PARA EL PDF: Cuentas por Cobrar ---
     if (consignacionesPendientes.length > 0) {
        html += `
         <h2 style="margin-top: 50px; color: #b45309; border-left-color: #f59e0b;">Cuentas por Cobrar (Consignaciones Activas)</h2>
         <div style="font-size: 10px; color: #64748b; margin-top: -5px; margin-bottom: 10px;">
-            * Deuda activa de pedidos entregados a clientes o distribuidores.
+            * Deuda activa de pedidos entregados a clientes o distribuidores. (Se descuentan los abonos automáticamente)
         </div>
         <table>
           <thead>
             <tr>
               <th style="width: 30%;">Cliente / Teléfono</th>
-              <th style="width: 25%;">Asesora / Fecha</th>
+              <th style="width: 25%;">Asesora / Fecha Inicial</th>
               <th style="width: 20%; text-align:right;">Total Facturado</th>
               <th style="width: 25%; text-align:right;">Saldo Pendiente (USD)</th>
             </tr>
@@ -881,7 +937,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                 <Truck size={28}/>
               </div>
               <div>
-                <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas en Envíos</div>
+                <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas y Abonos en Envíos</div>
                 <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.ventasEnviosUsd.toFixed(2)}</div>
               </div>
            </div>
@@ -891,7 +947,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                 <ShoppingBag size={28}/>
               </div>
               <div>
-                <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas Delivery</div>
+                <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas y Abonos Delivery</div>
                 <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.ventasDeliveryUsd.toFixed(2)}</div>
               </div>
            </div>
@@ -901,7 +957,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                 <Store size={28}/>
               </div>
               <div>
-                <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas Entrega en Tienda</div>
+                <div className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas y Abonos Tienda</div>
                 <div className="font-black text-2xl text-slate-800 dark:text-slate-100">${metricas.ventasTiendaUsd.toFixed(2)}</div>
               </div>
            </div>
@@ -1003,10 +1059,9 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         </div>
       )}
 
-      {/* NUEVA SECCIÓN: CUENTAS POR COBRAR (Saldos Pendientes de Consignación) */}
+      {/* SECCIÓN ACTUALIZADA: CUENTAS POR COBRAR */}
       {verDinero && (
         <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-sm border border-amber-200 dark:border-amber-800 transition-colors relative overflow-hidden">
-          {/* Fondo sutil ámbar para dar advertencia visual */}
           <div className="absolute inset-0 bg-amber-50/50 dark:bg-amber-900/10 pointer-events-none"></div>
           
           <div className="relative z-10">
@@ -1017,7 +1072,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                   </div>
                   <div>
                     <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">Estado de Cuentas por Cobrar</h3>
-                    <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">Consignaciones con saldos pendientes (Histórico Total)</p>
+                    <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">Consignaciones con saldos pendientes (Se descuentan los abonos automáticamente)</p>
                   </div>
                 </div>
                 
@@ -1033,7 +1088,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                     <tr className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-b dark:border-slate-700">
                       <th className="p-4 font-black tracking-wide">Cliente</th>
                       <th className="p-4 font-black tracking-wide">Asesora Resp.</th>
-                      <th className="p-4 font-black tracking-wide">Fecha de Envío</th>
+                      <th className="p-4 font-black tracking-wide">Fecha Inicial</th>
                       <th className="p-4 font-black tracking-wide text-right">Total Facturado</th>
                       <th className="p-4 font-black tracking-wide text-right text-amber-700 dark:text-amber-500">Saldo Pendiente</th>
                     </tr>
