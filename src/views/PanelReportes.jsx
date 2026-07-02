@@ -80,10 +80,39 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
   // --- CÁLCULO DINÁMICO DE CUENTAS POR COBRAR Y ABONOS ---
   const consignacionesPendientes = useMemo(() => {
-    // 1. Extraemos todas las consignaciones puras (la deuda original)
+    // 1. Extraemos todas las consignaciones (Calculando el valor real si son antiguas)
     const consignaciones = validados.filter(p => p.esConsignacion).map(c => {
-       const totalOriginal = parseFloat(c.totalOrdenOriginalUsd) || parseFloat(c.montoUsd) || 0;
+       let totalOriginal = parseFloat(c.totalOrdenOriginalUsd);
+       
+       // SALVAGUARDA: Si es una consignación antigua sin total guardado, lo calculamos al vuelo.
+       if (isNaN(totalOriginal) || totalOriginal <= 0) {
+          let subVentasCalculadas = 0;
+          if (c.carritoObj) {
+            Object.entries(c.carritoObj).forEach(([key, qty]) => {
+              if (c.preciosPersonalizados?.[key]) {
+                subVentasCalculadas += (parseFloat(c.preciosPersonalizados[key]) * qty);
+              } else {
+                const [n, pr] = key.split('|');
+                catalogo.forEach(cat => cat.productos.forEach(prod => { 
+                  if(prod.nombre===n){ 
+                    const i=prod.presentaciones.indexOf(pr); 
+                    if (i >= 0 && prod.precios) subVentasCalculadas += (prod.precios[i]*qty); 
+                  }
+                }));
+              }
+            });
+          }
+          const descGlobal = c.descuentoGlobalAplicado || 0;
+          const descAsesor = c.descuentoPorcentaje || 0;
+          const totalProd = (subVentasCalculadas * (1 - descGlobal / 100)) * (1 - descAsesor / 100);
+          const costoEnvio = parseFloat(c.costoEnvio) || 0;
+          const creditoR = parseFloat(c.montoCreditoRegaloUsd) || 0;
+          totalOriginal = totalProd + costoEnvio - creditoR;
+       }
+
+       if (isNaN(totalOriginal) || totalOriginal < 0) totalOriginal = 0;
        const pagoInicial = parseFloat(c.montoUsd) || 0;
+
        return {
           ...c,
           deudaRestante: totalOriginal - pagoInicial,
@@ -110,11 +139,9 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
        
        if (pagoDisp > 0 && c.deudaRestante > 0) {
            if (pagoDisp >= c.deudaRestante) {
-               // El abono cubre la totalidad de esta factura
                pagosPorCliente[key] = pagoDisp - c.deudaRestante;
                c.deudaRestante = 0;
            } else {
-               // El abono solo cubre una parte de la factura
                c.deudaRestante -= pagoDisp;
                pagosPorCliente[key] = 0;
            }
@@ -130,7 +157,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
           totalOrdenOriginalUsd: c.totalFacturadoBase
       }))
       .sort((a,b) => b.deudaRestante - a.deudaRestante);
-  }, [validados]);
+  }, [validados, catalogo]);
 
   const totalDeudaConsignaciones = useMemo(() => {
     return consignacionesPendientes.reduce((acc, curr) => acc + (parseFloat(curr.saldoPendiente) || 0), 0);
@@ -209,7 +236,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
   const metricas = useMemo(() => {
     let ventasVES = 0; let ventasZelle = 0; let mlUSD = 0; let mlVES = 0; let regalosUSD = 0; let descuentosUSD = 0;
-    let totalBrutoGeneralUsd = 0; let totalCobroEnviosUsd = 0;
+    let totalBrutoGeneralUsd = 0; let totalCobroEnviosUsd = 0; let totalAbonosPurosUsd = 0;
     
     let ventasEnviosUsd = 0; let ventasDeliveryUsd = 0; let ventasTiendaUsd = 0;
 
@@ -289,6 +316,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
 
         totalBrutoGeneralUsd += mUsd;
         totalCobroEnviosUsd += costoEnvio;
+        if (p.esAbono) totalAbonosPurosUsd += mUsd;
 
         if (p.moneda === 'ZELLE') {
            ventasZelle += mUsd;
@@ -299,7 +327,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
         if (p.esMercadoLibre) { mlUSD += mUsd; mlVES += (p.montoVes || 0); }
 
         const diferenciaReal = (valorVentaUsd + costoEnvio) - (mUsd + creditoRegalo);
-        if (diferenciaReal > 0) descuentosUSD += diferenciaReal;
+        if (diferenciaReal > 0 && !p.esAbono) descuentosUSD += diferenciaReal;
 
         const efeBs = p.montoEfectivoBs || 0;
         const ptoBs = p.montoPuntoVentaBs || 0;
@@ -326,7 +354,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
       }
     });
 
-    const totalNetoProductosUsd = totalBrutoGeneralUsd - totalCobroEnviosUsd;
+    // Para "Ventas Netas" excluimos los envíos y los abonos financieros
+    const totalNetoProductosUsd = totalBrutoGeneralUsd - totalCobroEnviosUsd - totalAbonosPurosUsd;
 
     return { 
        ventasVES, ventasZelle, mlUSD, mlVES, regalosUSD, descuentosUSD, 
@@ -364,7 +393,7 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
              montoUsd: p.montoUsd || 0,
              montoVes: p.montoVes || 0,
              moneda: p.moneda,
-             origen: p.esAbono ? 'ABONO DEUDA' : (p.origenPedido || 'Sin Origen'),
+             origen: p.esAbono ? 'ABONO A DEUDA' : (p.origenPedido || 'Sin Origen'),
              costoEnvio: costoEnvio,
              tipoDespacho: p.tipoDespacho || 'Nacional',
              creditoRegalo: parseFloat(p.montoCreditoRegaloUsd) || 0,
@@ -1013,8 +1042,8 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                     <div className="text-[10px] uppercase font-black tracking-widest opacity-70 mb-1">Transferencia o Pago Móvil</div>
                     <div className="text-xl lg:text-2xl font-black">${metricas.transfPagoMovilUsd.toFixed(2)}</div>
                     <div className="text-[11px] font-bold mt-2 text-blue-700">
-                        En Bs: Bs. {metricas.transfPagoMovilBs.toLocaleString('es-VE', {minimumFractionDigits: 2})} <br/>
-                        (Excluye Efectivo y Punto/TDC)
+                        En Bs: Bs. {metricas.transfPagoMovilBs.toLocaleString('es-VE', {minimumFractionDigits: 2})}<br/>
+                        (Excluye Efectivo, Punto y TDC)
                     </div>
                   </div>
                   <Wallet size={80} className="absolute -right-4 -bottom-4 opacity-10"/>
@@ -1097,9 +1126,9 @@ export default function PanelReportes({ pedidos, catalogo, stock, perfil }) {
                     {consignacionesPendientes.length === 0 ? (
                        <tr><td colSpan="5" className="p-8 text-center text-slate-400 font-bold italic">¡Excelente! No hay deudas pendientes en calle por consignaciones.</td></tr>
                     ) : consignacionesPendientes.map((p) => {
-                       const totalOriginal = parseFloat(p.totalOrdenOriginalUsd) || parseFloat(p.montoUsd) || 0;
+                       const totalOriginal = parseFloat(p.totalFacturadoBase) || 0;
                        const saldo = parseFloat(p.saldoPendiente) || 0;
-                       const porcentajePagado = ((totalOriginal - saldo) / totalOriginal) * 100;
+                       const porcentajePagado = totalOriginal > 0 ? ((totalOriginal - saldo) / totalOriginal) * 100 : 0;
 
                        return (
                          <tr key={p.id} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
