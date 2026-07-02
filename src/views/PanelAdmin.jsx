@@ -1035,7 +1035,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
                     onPaste={handlePasteComprobante}
                  >
                     {modalValidacion.previewUrl ? (
-                       <img src={getDirectUrl(modalValidacion.previewUrl)} alt="Preview" className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain"/>
+                       <img src={modalValidacion.previewUrl} className="max-h-48 mx-auto rounded-lg shadow-sm" alt="Preview"/>
                     ) : (
                        <div className="text-sky-700 dark:text-sky-400 text-center flex flex-col items-center justify-center p-6 border-2 border-dashed border-sky-200 dark:border-sky-800/50 rounded-2xl bg-slate-50/50 dark:bg-slate-900/30">
                           <ImageIcon size={32} className="text-sky-500 mb-2" />
