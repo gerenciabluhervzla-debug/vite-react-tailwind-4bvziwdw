@@ -110,41 +110,56 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return () => { unsubCierres(); unsubMovs(); };
   }, [db, appId]);
 
-  const hoyKardex = useMemo(() => {
+  // =========================================================================
+  // KARDEX PARAMETRIZADO — CORREGIDO
+  // - Usa fechaValidacion (momento real del descuento) en vez de fechaDespacho
+  // - Para días pasados, calcula movimientos posteriores para derivar
+  //   inicioDia y sistemaDia (stock al cierre de ese día en almacén envíos)
+  // =========================================================================
+  const kardexDelDia = useMemo(() => {
     const aggr = {};
+    const allKeys = [];
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
-        aggr[`${p.nombre}|${pres}`] = { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
+      const key = `${p.nombre}|${pres}`;
+      allKeys.push(key);
+      aggr[key] = { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0, ventasAfter: 0, recepcionAfter: 0, ingresosAfter: 0, salidasAfter: 0, inicioDia: 0, sistemaDia: 0 };
     })));
+
+    if (allKeys.length === 0) return aggr;
+
+    // Calcular "hoy" en zona horaria de Caracas dentro del memo
+    const dHoy = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const hoyISO = `${dHoy.getFullYear()}-${String(dHoy.getMonth() + 1).padStart(2, '0')}-${String(dHoy.getDate()).padStart(2, '0')}`;
 
     const [year, month, day] = fechaCierreElegida.split('-');
     const tDate = new Date(year, month - 1, day);
     const closureDateStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
     const startOfDay = tDate.getTime();
     const endOfDay = startOfDay + 86400000;
+    
+    const esCierreHoy = fechaCierreElegida === hoyISO;
 
     const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
 
-    const dReal = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-    const realTodayStr = `${String(dReal.getDate()).padStart(2, '0')}/${String(dReal.getMonth() + 1).padStart(2, '0')}/${dReal.getFullYear()}`;
+    // Helper: verifica si una fecha DD/MM/YYYY es estrictamente posterior al día elegido
+    const esFechaPosterior = (fechaStr) => {
+      if (!fechaStr || !fechaStr.includes('/')) return false;
+      const partes = fechaStr.split('/');
+      if (partes.length !== 3 || !partes[0] || !partes[1] || !partes[2]) return false;
+      const iso = `${partes[2]}-${partes[1]}-${partes[0]}`;
+      return iso > fechaCierreElegida;
+    };
 
+    // 1. VENTAS: usa fechaValidacion (cuando Admin realmente descontó el stock de envíos)
     pedidos.forEach(p => {
        if (['Validado', 'Despachado'].includes(p.status) && !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')) {
            
-           let fechaAfectacionInventario = p.fechaValidacion;
+           // Prioridad: fechaValidacion > fechaDespacho
+           const fechaAfectacion = p.fechaValidacion || p.fechaDespacho;
+           if (!fechaAfectacion) return;
 
-           if (!fechaAfectacionInventario) {
-               const pTime = parseDateVzla(p.fechaDespacho);
-               const timeInicioReceso = parseDateVzla("24/06/2026");
-               const todayTime = parseDateVzla(realTodayStr);
-               
-               if (pTime >= timeInicioReceso && pTime <= todayTime) {
-                   fechaAfectacionInventario = realTodayStr;
-               } else {
-                   fechaAfectacionInventario = p.fechaDespacho;
-               }
-           }
-
-           if (fechaAfectacionInventario === closureDateStr) {
+           if (fechaAfectacion === closureDateStr) {
+               // Venta que afectó el día seleccionado
                const carritoTotal = { ...(p.carritoObj || {}) };
                if (p.carritoObsequiosObj) {
                    Object.entries(p.carritoObsequiosObj).forEach(([k, qty]) => {
@@ -167,30 +182,92 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                        }
                    }
                }
+           } else if (!esCierreHoy && esFechaPosterior(fechaAfectacion)) {
+               // Venta posterior al día elegido (necesaria para revertir y obtener inicioDia)
+               const carritoTotal = { ...(p.carritoObj || {}) };
+               if (p.carritoObsequiosObj) {
+                   Object.entries(p.carritoObsequiosObj).forEach(([k, qty]) => {
+                       carritoTotal[k] = (carritoTotal[k] || 0) + qty;
+                   });
+               }
+
+               let countBoosters = 0;
+               Object.entries(carritoTotal).forEach(([k, qty]) => {
+                   if (aggr[k]) aggr[k].ventasAfter += qty;
+                   if (boosterKeys.includes(k)) countBoosters += qty;
+               });
+
+               if (countBoosters > 0) {
+                   const concentradosActuales = carritoTotal["Concentrado|Unidad"] || 0;
+                   if (concentradosActuales < countBoosters) {
+                       const faltantes = countBoosters - concentradosActuales;
+                       if (aggr["Concentrado|Unidad"]) {
+                           aggr["Concentrado|Unidad"].ventasAfter += faltantes;
+                       }
+                   }
+               }
            }
        }
     });
 
+    // 2. MOVIMIENTOS por ventana de tiempo
     movimientos.forEach(m => {
+       const isTransferencia = m.tipo === 'TRANSFERENCIA';
+       const isIngreso = m.tipo === 'INGRESO';
+       const isSalida = m.tipo === 'SALIDA' && m.status === 'COMPLETADO' && (!m.origen || m.origen === 'envios');
+       if (!isTransferencia && !isIngreso && !isSalida) return;
+
        if (m.fechaCreacion >= startOfDay && m.fechaCreacion < endOfDay) {
-           if (m.tipo === 'TRANSFERENCIA') {
-               Object.entries(m.items || {}).forEach(([k, qty]) => {
-                   if (aggr[k]) aggr[k].recepcion += qty; 
-               });
-           } else if (m.tipo === 'INGRESO') {
-               Object.entries(m.items || {}).forEach(([k, qty]) => {
-                   if (aggr[k]) aggr[k].ingresos += qty;
-               });
-           } else if (m.tipo === 'SALIDA' && m.status === 'COMPLETADO' && (!m.origen || m.origen === 'envios')) {
-               Object.entries(m.items || {}).forEach(([k, qty]) => {
-                   if (aggr[k]) aggr[k].salidas += qty;
-               });
+           // Movimiento DEL día seleccionado
+           if (isTransferencia) {
+               Object.entries(m.items || {}).forEach(([k, qty]) => { if (aggr[k]) aggr[k].recepcion += qty; });
+           } else if (isIngreso) {
+               Object.entries(m.items || {}).forEach(([k, qty]) => { if (aggr[k]) aggr[k].ingresos += qty; });
+           } else {
+               Object.entries(m.items || {}).forEach(([k, qty]) => { if (aggr[k]) aggr[k].salidas += qty; });
+           }
+       } else if (!esCierreHoy && m.fechaCreacion >= endOfDay) {
+           // Movimiento POSTERIOR al día seleccionado
+           if (isTransferencia) {
+               Object.entries(m.items || {}).forEach(([k, qty]) => { if (aggr[k]) aggr[k].recepcionAfter += qty; });
+           } else if (isIngreso) {
+               Object.entries(m.items || {}).forEach(([k, qty]) => { if (aggr[k]) aggr[k].ingresosAfter += qty; });
+           } else {
+               Object.entries(m.items || {}).forEach(([k, qty]) => { if (aggr[k]) aggr[k].salidasAfter += qty; });
            }
        }
     });
     
+    // 3. CALCULAR inicioDia y sistemaDia para cada producto
+    // Fórmula envíos: stock = inicio + ingresos + recepcion - ventas - salidas
+    // => inicio = stock - ingresos - recepcion + ventas + salidas
+    allKeys.forEach(key => {
+      const kData = aggr[key];
+      const stockActual = typeof stock[key] === 'object' ? (stock[key].envios || 0) : (stock[key] || 0);
+      
+      if (esCierreHoy) {
+        // Cierre de hoy: se reverse-calcula desde el stock actual
+        kData.inicioDia = stockActual - kData.ingresos - kData.recepcion + kData.ventas + kData.salidas;
+        kData.sistemaDia = stockActual;
+      } else {
+        // Cierre de día pasado:
+        // inicioDia = stockActual - ingresos_dia - recepcion_dia + ventas_dia + salidas_dia 
+        //              - ingresos_after - recepcion_after + ventas_after + salidas_after
+        kData.inicioDia = stockActual - kData.ingresos - kData.recepcion + kData.ventas + kData.salidas - kData.ingresosAfter - kData.recepcionAfter + kData.ventasAfter + kData.salidasAfter;
+        // sistemaDia (stock al cierre de ese día) = stockActual - ingresos_after - recepcion_after + ventas_after + salidas_after
+        kData.sistemaDia = stockActual - kData.ingresosAfter - kData.recepcionAfter + kData.ventasAfter + kData.salidasAfter;
+      }
+    });
+
     return aggr;
-  }, [pedidos, movimientos, catalogo, fechaCierreElegida]);
+  }, [pedidos, movimientos, catalogo, stock, fechaCierreElegida]);
+
+  // Indicador si el cierre elegido es de un día pasado
+  const esCierreRetroactivo = useMemo(() => {
+    const dHoy = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const hoyISO = `${dHoy.getFullYear()}-${String(dHoy.getMonth() + 1).padStart(2, '0')}-${String(dHoy.getDate()).padStart(2, '0')}`;
+    return fechaCierreElegida < hoyISO;
+  }, [fechaCierreElegida]);
 
   const handleGuiaChange = useCallback((id, field, value) => {
     setGuiasInput(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
@@ -369,10 +446,20 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   };
 
   const iniciarConteo = () => {
+    const dHoy = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const hoyISO = `${dHoy.getFullYear()}-${String(dHoy.getMonth() + 1).padStart(2, '0')}-${String(dHoy.getDate()).padStart(2, '0')}`;
+    const esHoy = fechaCierreElegida === hoyISO;
+
     const inicial = {};
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
       const key = `${p.nombre}|${pres}`;
-      inicial[key] = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+      if (esHoy) {
+        // Cierre de hoy: pre-llenar con stock actual de envíos
+        inicial[key] = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
+      } else {
+        // Cierre de día pasado: pre-llenar con el stock calculado al cierre de ese día
+        inicial[key] = kardexDelDia[key]?.sistemaDia ?? 0;
+      }
     })));
     setConteoFisico(inicial);
     setNotasConteo({});
@@ -420,6 +507,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           .badge { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; text-transform: uppercase; }
           .badge-ok { background: #dcfce7; color: #166534; }
           .badge-warn { background: #fee2e2; color: #991b1b; }
+          .badge-retro { background: #fff7ed; color: #c2410c; border: 1px solid #fdba74; }
           .status-box { padding: 15px; border-radius: 8px; font-weight: 900; text-align: center; border: 1px solid currentColor; margin-bottom: 30px; font-size: 13px; letter-spacing: 1px; }
           table { width: 100%; border-collapse: collapse; font-size: 11px; }
           th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 6px; text-align: left; }
@@ -442,7 +530,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
         </div>
         <div class="meta-info">
-           <div class="meta-box"><p><strong>Fecha del Cierre:</strong> ${cierre.fecha}</p><p><strong>Realizado por:</strong> ${cierre.creadoPor}</p></div>
+           <div class="meta-box"><p><strong>Fecha del Cierre:</strong> ${cierre.fecha}</p><p><strong>Realizado por:</strong> ${cierre.creadoPor}</p>${cierre.esCierreRetroactivo ? '<p><span class="badge badge-retro">CIERRE RETROACTIVO</span></p>' : ''}</div>
            <div class="meta-box" style="text-align: right;">
               <p><strong>Items Auditados:</strong> ${cierre.totalItemsAuditados}</p>
               <p><strong>Anomalías:</strong> 
@@ -504,16 +592,27 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   };
 
   const guardarCierre = async () => {
-    dialogs.confirm("¿Estás seguro de registrar el cierre de inventario para la fecha seleccionada?", async () => {
+    const dHoy = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const hoyISO = `${dHoy.getFullYear()}-${String(dHoy.getMonth() + 1).padStart(2, '0')}-${String(dHoy.getDate()).padStart(2, '0')}`;
+    const esHoy = fechaCierreElegida === hoyISO;
+
+    const msgConfirm = esCierreRetroactivo
+      ? `¿Estás seguro de registrar el cierre FÍSICO RETROACTIVO de Envíos para un día anterior?\n\n⚠️ El stock REAL del sistema NO se ajustará (solo se guarda el reporte con los datos calculados de ese día).`
+      : "¿Estás seguro de registrar el cierre de inventario para la fecha seleccionada?";
+
+    dialogs.confirm(msgConfirm, async () => {
       const productosCierre = [];
       let totalDiferencias = 0;
+      const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
+      const updates = {};
       
       catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
         const key = `${p.nombre}|${pres}`;
-        const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
+        const kData = kardexDelDia[key] || { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0, inicioDia: 0, sistemaDia: 0 };
         
-        const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
-        const inicioDia = sistema + kData.ventas + kData.recepcion + kData.salidas - kData.ingresos;
+        // Usar los valores pre-calculados por el Kardex
+        const sistema = kData.sistemaDia;
+        const inicioDia = kData.inicioDia;
         const fisico = conteoFisico[key] ?? sistema;
         const diferencia = fisico - sistema; 
         
@@ -533,6 +632,11 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
            diferencia, 
            nota: notasConteo[key] || '' 
         });
+
+        // Solo ajustar el stock real si es cierre del día actual y hay diferencias
+        if (diferencia !== 0 && esHoy) {
+           updates[key] = { envios: fisico };
+        }
       })));
 
       const [year, month, day] = fechaCierreElegida.split('-');
@@ -545,16 +649,21 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
          totalItemsAuditados: productosCierre.length, 
          anomaliasDetectadas: totalDiferencias, 
          productos: productosCierre, 
-         auditado: false 
+         auditado: false,
+         esCierreRetroactivo: esCierreRetroactivo 
       };
 
       try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario'), nuevoCierre);
-        loggear('CIERRE_INVENTARIO', `Cierre registrado con ${totalDiferencias} diferencias para la fecha ${fechaCierreFormat}.`);
+        if (Object.keys(updates).length > 0) { 
+           await setDoc(stockRef, updates, { merge: true }); 
+        }
+        loggear('CIERRE_INVENTARIO', `Cierre ${esCierreRetroactivo ? 'RETROACTIVO' : ''} registrado con ${totalDiferencias} diferencias para la fecha ${fechaCierreFormat}.`);
         setConteoActivo(false);
+        setVistaDespacho('historial_cierres');
         dialogs.confirm("Cierre guardado con éxito. ¿Deseas descargar el reporte en PDF ahora?", () => { imprimirPDF(nuevoCierre); }, "Reporte Listo");
       } catch (error) { console.error(error); }
-    }, "Confirmar Cierre");
+    }, esCierreRetroactivo ? "Cierre Retroactivo" : "Confirmar Cierre");
   };
 
   const auditarCierreRapido = async (cierre) => {
@@ -563,7 +672,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
         auditado: true, auditadoPor: perfil?.nombre || 'Auditor', fechaAuditoria: Date.now() 
       });
-      loggear('AUDITORIA_CIERRE_RAPIDA', `Cierre de ${cierre.fecha} validado.`);
+      loggger('AUDITORIA_CIERRE_RAPIDA', `Cierre de ${cierre.fecha} validado.`);
     } catch(e) { console.error(e); }
   };
 
@@ -583,14 +692,14 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   };
 
   const cierresFiltrados = useMemo(() => 
-  cierres.filter(c => {
-    if (!filtroFechaCierre) return true;
-    const fechaFiltro = new Date(filtroFechaCierre);
-    const fechaCierre = new Date(c.timestamp);
-    return fechaFiltro.toLocaleDateString('es-VE') === fechaCierre.toLocaleDateString('es-VE');
-  }),
-  [cierres, filtroFechaCierre]
-);
+    cierres.filter(c => {
+      if (!filtroFechaCierre) return true;
+      const fechaFiltro = new Date(filtroFechaCierre);
+      const fechaCierre = new Date(c.timestamp);
+      return fechaFiltro.toLocaleDateString('es-VE') === fechaCierre.toLocaleDateString('es-VE');
+    }),
+    [cierres, filtroFechaCierre]
+  );
 
   const todayStr = useMemo(() => {
     const getVeneziaTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
@@ -665,6 +774,263 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
+      {/* VISTA: CIERRE FÍSICO */}
+      {vistaDespacho === 'inventario' && (
+        <div className="animate-in fade-in">
+          {!conteoActivo ? (
+            <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700">
+              <CheckSquare size={64} className="mx-auto text-sky-300 dark:text-sky-800 mb-6" />
+              <h3 className="text-2xl font-black text-slate-700 dark:text-slate-200 mb-2">Cierre Físico de Almacén</h3>
+              <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6">Compara el inventario físico del almacén de envíos contra el registrado en el sistema.</p>
+              
+              {/* Selector de fecha ANTES de iniciar conteo */}
+              <div className="flex items-center justify-center gap-3 mb-6">
+                 <label className="text-sm font-bold text-slate-600 dark:text-slate-300">Fecha a cerrar:</label>
+                 <input 
+                    type="date" 
+                    value={fechaCierreElegida} 
+                    max={getHoyISO()}
+                    onChange={(e) => setFechaCierreElegida(e.target.value)}
+                    className="bg-white dark:bg-slate-800 border-2 border-sky-200 dark:border-sky-700 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-sky-500"
+                 />
+              </div>
+
+              {esCierreRetroactivo && (
+                 <div className="max-w-md mx-auto mb-6 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-700 rounded-xl p-4 text-left">
+                    <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-black text-sm mb-1">
+                       <AlertTriangle size={16} /> Cierre Retroactivo
+                    </div>
+                    <p className="text-xs text-amber-600 dark:text-amber-500 font-medium">
+                       Estás seleccionando un día anterior. El sistema calculará los movimientos de esa fecha y el stock al cierre de dicho día en el almacén. El stock real NO se modificará, solo se genera el reporte.
+                    </p>
+                 </div>
+              )}
+
+              <button onClick={iniciarConteo} className="bg-sky-600 hover:bg-sky-700 text-white font-black py-4 px-8 rounded-xl shadow-lg transition-all hover:-translate-y-1">
+                Iniciar Conteo
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Banner de cierre retroactivo */}
+              {esCierreRetroactivo && (
+                 <div className="bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-700 p-4 rounded-2xl flex items-start gap-3">
+                    <AlertTriangle size={20} className="text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                       <div className="font-black text-amber-800 dark:text-amber-300 text-sm">Modo Cierre Retroactivo — {fechaCierreElegida.split('-').reverse().join('/')}</div>
+                       <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">La columna "Stock Final (Sis)" muestra el stock calculado al cierre de ese día (no el stock actual). Las diferencias NO ajustarán el inventario real.</p>
+                    </div>
+                 </div>
+              )}
+
+              <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-sky-50 dark:bg-sky-900/20 p-6 rounded-2xl border border-sky-100 dark:border-sky-800">
+                 <div>
+                   <h3 className="font-black text-sky-900 dark:text-sky-300 text-lg">Hoja de Trabajo Activa</h3>
+                   <p className="text-sm font-medium text-sky-700 dark:text-sky-400">Las casillas ya tienen la cantidad del sistema calculada. Modifica solo donde haya diferencias.</p>
+                 </div>
+                 <div className="flex flex-wrap gap-3 w-full md:w-auto items-center">
+                    {/* Selector de fecha durante el conteo */}
+                    <div className="flex items-center gap-2 mr-2 border-r pr-4 border-sky-200 dark:border-sky-800">
+                       <label className="text-xs font-bold text-sky-700 dark:text-sky-400 uppercase tracking-widest">Fecha:</label>
+                       <input 
+                          type="date" 
+                          value={fechaCierreElegida} 
+                          max={getHoyISO()}
+                          onChange={(e) => setFechaCierreElegida(e.target.value)}
+                          className="bg-white dark:bg-slate-800 border border-sky-200 dark:border-sky-700 rounded-lg px-2 py-2 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-sky-500"
+                       />
+                    </div>
+
+                   <button onClick={()=>setConteoActivo(false)} className="flex-1 md:flex-none px-6 py-3 font-bold text-slate-600 bg-white dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Cancelar</button>
+                   <button onClick={guardarCierre} className="flex-1 md:flex-none px-6 py-3 font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 shadow-md flex items-center justify-center gap-2 transition-transform hover:-translate-y-0.5"><Save size={18}/> Finalizar y Guardar</button>
+                 </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                 <table className="w-full text-left text-sm border-collapse min-w-[1100px]">
+                   <thead>
+                     <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                       <th className="p-4 font-black">Producto</th>
+                       <th className="p-4 font-black text-center w-24">Inicio Día</th>
+                       <th className="p-4 font-black text-center w-24 text-blue-600">Ingresos</th>
+                       <th className="p-4 font-black text-center w-24 text-purple-600">A Recepción</th>
+                       <th className="p-4 font-black text-center w-24 text-orange-600">Salidas</th>
+                       <th className="p-4 font-black text-center w-24 text-emerald-600">Ventas</th>
+                       <th className="p-4 font-black text-center w-28">
+                          {esCierreRetroactivo ? (
+                             <div>
+                               <div>Stock Sist.</div>
+                               <div className="text-[9px] font-normal text-slate-400 normal-case tracking-normal">(fin de ese día)</div>
+                             </div>
+                          ) : 'Stock Final (Sis)'}
+                       </th>
+                       <th className="p-4 font-black text-center bg-sky-100 dark:bg-sky-900/40 w-32">Físico Real</th>
+                       <th className="p-4 font-black text-center w-28">Diferencia</th>
+                       <th className="p-4 font-black">Notas / Justificación</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
+                        const key = `${p.nombre}|${pres}`;
+                        const kData = kardexDelDia[key] || { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0, inicioDia: 0, sistemaDia: 0 };
+                        
+                        // Usar valores pre-calculados por el Kardex
+                        const sistema = kData.sistemaDia;
+                        const inicioDia = kData.inicioDia;
+                        const fisico = conteoFisico[key] ?? sistema;
+                        const diferencia = fisico - sistema;
+                        
+                        let badgeDif = <span className="text-slate-400 font-bold">OK</span>;
+                        if (diferencia > 0) badgeDif = <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-black text-xs uppercase tracking-widest">+ {diferencia} (Sob)</span>;
+                        if (diferencia < 0) badgeDif = <span className="bg-red-100 text-red-700 px-2 py-1 rounded font-black text-xs uppercase tracking-widest">{diferencia} (Falt)</span>;
+
+                        return (
+                          <tr key={key} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                             <td className="p-4">
+                               <div className="font-bold text-slate-800 dark:text-slate-100">{p.nombre}</div>
+                               <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{pres}</div>
+                             </td>
+                             <td className="p-4 text-center font-bold text-lg text-slate-500">{inicioDia}</td>
+                             <td className="p-4 text-center font-bold text-lg text-blue-600">{kData.ingresos}</td>
+                             <td className="p-4 text-center font-bold text-lg text-purple-600">{kData.recepcion}</td>
+                             <td className="p-4 text-center font-bold text-lg text-orange-600">{kData.salidas}</td>
+                             <td className="p-4 text-center font-bold text-lg text-emerald-600">{kData.ventas}</td>
+                             <td className="p-4 text-center font-black text-lg text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-900/30">{sistema}</td>
+                             <td className="p-4 text-center bg-sky-50 dark:bg-sky-900/20">
+                                <input 
+                                  type="number" 
+                                  min="0"
+                                  className="w-full text-center p-2 rounded-lg font-black text-lg border-2 border-slate-200 dark:border-slate-600 focus:border-sky-500 outline-none bg-white dark:bg-slate-800 dark:text-white"
+                                  value={fisico}
+                                  onChange={(e) => handleConteoChange(key, e.target.value)}
+                                />
+                             </td>
+                             <td className="p-4 text-center">{badgeDif}</td>
+                             <td className="p-4">
+                                <input 
+                                  type="text" 
+                                  placeholder={diferencia !== 0 ? "Requerido: ¿Por qué?" : "Opcional..."}
+                                  className={`w-full p-2 rounded-lg border-2 outline-none text-sm dark:bg-slate-800 dark:text-white ${diferencia !== 0 && !(notasConteo[key]||'') ? 'border-red-300 focus:border-red-500 bg-red-50' : 'border-slate-200 dark:border-slate-600 focus:border-sky-500'}`}
+                                  value={notasConteo[key] || ''}
+                                  onChange={(e) => setNotasConteo(prev => ({...prev, [key]: e.target.value}))}
+                                />
+                             </td>
+                          </tr>
+                        );
+                     })))}
+                   </tbody>
+                 </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VISTA: HISTORIAL DE CIERRES */}
+      {vistaDespacho === 'historial_cierres' && (
+        <div className="animate-in fade-in space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 gap-4">
+             <div>
+               <h3 className="font-black text-slate-700 dark:text-slate-200 text-lg flex items-center gap-2"><FileSpreadsheet className="text-sky-600"/> Cierres de Almacén de Envíos</h3>
+               <p className="text-sm text-slate-500">Consulta, audita y descarga cierres de inventario.</p>
+             </div>
+             <div className="flex items-center gap-2">
+                <CalendarDays className="text-slate-400 shrink-0"/>
+                <input 
+                  type="date"
+                  value={filtroFechaCierre}
+                  onChange={(e) => setFiltroFechaCierre(e.target.value)}
+                  className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold outline-none focus:border-sky-500 transition-colors"
+                />
+                {filtroFechaCierre && <button onClick={() => setFiltroFechaCierre('')} className="text-xs text-red-500 hover:text-red-700 underline font-bold px-2">Limpiar</button>}
+             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {cierresFiltrados.length === 0 ? (
+               <div className="col-span-full py-10 text-center text-slate-400 font-bold italic border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl">
+                 No hay cierres de inventario registrados{filtroFechaCierre ? ' para esta fecha.' : '.'}
+               </div>
+            ) : (
+               cierresFiltrados.map(cierre => (
+                 <div key={cierre.id} className="bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
+                    <div>
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="flex flex-col gap-1">
+                          <div className="bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-400 px-3 py-1 rounded-lg font-black text-sm tracking-widest">{cierre.fecha}</div>
+                          {cierre.esCierreRetroactivo && (
+                             <span className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest inline-block w-fit">Retroactivo</span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-bold uppercase text-right">Por: {cierre.creadoPor}</div>
+                      </div>
+                      
+                      <div className="space-y-2 mb-4">
+                        <div className="flex justify-between text-sm">
+                          <span className="font-medium text-slate-500">Items Auditados:</span>
+                          <span className="font-black text-slate-700 dark:text-slate-200">{cierre.totalItemsAuditados}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="font-medium text-slate-500">Anomalías:</span>
+                          {cierre.anomaliasDetectadas === 0 
+                            ? <span className="font-black text-emerald-600 flex items-center gap-1"><CheckCircle size={14}/> Sin Anomalías</span>
+                            : <span className="font-black text-red-500 flex items-center gap-1"><AlertTriangle size={14}/> {cierre.anomaliasDetectadas} Diferencias</span>
+                          }
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="font-medium text-slate-500">Auditoría:</span>
+                          {cierre.auditado 
+                            ? <span className="font-black text-emerald-600 flex items-center gap-1"><ShieldCheck size={14}/> Validado</span>
+                            : <span className="font-black text-amber-500">Pendiente</span>
+                          }
+                        </div>
+                      </div>
+                      
+                      {cierre.notasAuditoria && cierre.notasAuditoria.length > 0 && (
+                         <div className="mb-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
+                            <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-2 flex items-center gap-1">
+                               <MessageSquare size={12}/> Observaciones:
+                            </span>
+                            <div className="space-y-2">
+                              {cierre.notasAuditoria.map((n, i) => (
+                                 <div key={i} className="text-[11px] text-amber-900 dark:text-amber-200 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-amber-100 dark:border-amber-800/50">
+                                    <div className="font-bold mb-0.5 opacity-80">{n.autor} <span className="font-normal text-[9px]">({new Date(n.fecha).toLocaleDateString()})</span>:</div>
+                                    <div className="italic leading-snug">"{n.texto}"</div>
+                                 </div>
+                              ))}
+                            </div>
+                         </div>
+                      )}
+                    </div>
+                    
+                    <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+                      <div className="flex gap-2">
+                         <button onClick={() => imprimirPDF(cierre)} className="flex-1 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-400 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
+                            <FileOutput size={16}/> PDF
+                         </button>
+                         <button onClick={() => generarCSV(cierre)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
+                            <Download size={16}/> Excel
+                         </button>
+                      </div>
+                      {esAuditor && !cierre.auditado && (
+                         <div className="flex gap-2">
+                            <button onClick={() => auditarCierreRapido(cierre)} className="flex-1 mt-1 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-1.5 border border-emerald-200">
+                               <ShieldCheck size={14}/> Validar Rápido
+                            </button>
+                            <button onClick={() => auditarCierreConNota(cierre)} className="flex-1 mt-1 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-1.5 border border-sky-200">
+                               <MessageSquare size={14}/> Con Nota
+                            </button>
+                         </div>
+                      )}
+                    </div>
+                 </div>
+               ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* VISTAS: PENDIENTES E HISTORIAL DE PEDIDOS */}
       {['pendientes', 'historial'].includes(vistaDespacho) && (
         <div className="flex flex-col gap-8 w-full">
           {pedidosOrdenados.length === 0 ? (
@@ -842,21 +1208,13 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                       )}
 
                       {!esSoloLectura && (
-                        <div className="flex flex-col gap-2 mt-2">
-                           <div className="flex flex-col lg:flex-row gap-2">
-                             <button onClick={() => guardarAvance(p)} className="flex-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-white text-xs font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                               <Save size={16}/> Guardar Avance
-                             </button>
-                             <button onClick={() => guardarGuia(p)} className="flex-1 bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white text-xs font-bold py-3 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
-                               <Truck size={16}/> Archivar
-                             </button>
-                           </div>
-                           
-                           {puedeAnular && (
-                              <button onClick={() => anularEnvio(p)} className="w-full bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:hover:bg-red-900/40 dark:text-red-400 py-2.5 rounded-xl text-xs font-bold transition-colors border border-red-200 dark:border-red-800/50 flex justify-center items-center gap-1.5 mt-1">
-                                 <Ban size={14}/> Cancelar Envío (Devolver Inventario)
-                              </button>
-                           )}
+                        <div className="flex flex-col gap-2 mt-auto pt-2">
+                           <button onClick={() => guardarAvance(p)} className="w-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm transition-colors">
+                              <Save size={16} /> Guardar Avance
+                           </button>
+                           <button onClick={() => guardarGuia(p)} disabled={subiendo.field !== null} className="w-full bg-sky-600 hover:bg-sky-700 text-white font-black py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm transition-colors shadow-md disabled:opacity-50 uppercase tracking-widest">
+                              <Truck size={16} /> Archivar y Despachar
+                           </button>
                         </div>
                       )}
                     </div>
@@ -868,229 +1226,11 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         </div>
       )}
 
-      {vistaDespacho === 'inventario' && puedeHacerCierre && !esSoloLectura && (
-        <div className="animate-in fade-in">
-          {!conteoActivo ? (
-            <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700">
-               <CheckSquare size={64} className="mx-auto text-sky-300 dark:text-sky-800 mb-6" />
-               <h3 className="text-2xl font-black text-slate-700 dark:text-slate-200 mb-2">Auditoría Diaria de Despacho</h3>
-               <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara las cantidades físicas en los anaqueles contra las registradas en el sistema para detectar faltantes o sobrantes.</p>
-               <button onClick={iniciarConteo} className="bg-sky-600 hover:bg-sky-700 text-white font-black py-4 px-8 rounded-xl shadow-lg transition-all hover:-translate-y-1">
-                 Iniciar Conteo del Día
-               </button>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-sky-50 dark:bg-sky-900/20 p-6 rounded-2xl border border-sky-100 dark:border-sky-800">
-                 <div>
-                   <h3 className="font-black text-sky-900 dark:text-sky-300 text-lg">Hoja de Trabajo Activa</h3>
-                   <p className="text-sm font-medium text-sky-700 dark:text-sky-400">Las casillas ya tienen la cantidad del sistema. Modifica solo donde haya diferencias.</p>
-                 </div>
-                 <div className="flex gap-3 w-full md:w-auto items-center">
-                   <div className="flex items-center gap-2 mr-2 border-r pr-4 border-sky-200 dark:border-sky-800">
-                      <label className="text-xs font-bold text-sky-700 dark:text-sky-400 uppercase tracking-widest">Fecha a cerrar:</label>
-                      <input 
-                         type="date" 
-                         value={fechaCierreElegida} 
-                         onChange={(e) => setFechaCierreElegida(e.target.value)}
-                         className="bg-white dark:bg-slate-800 border border-sky-200 dark:border-sky-700 rounded-lg px-2 py-2 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-sky-500"
-                      />
-                   </div>
-
-                   <button onClick={()=>setConteoActivo(false)} className="flex-1 md:flex-none px-6 py-3 font-bold text-slate-600 bg-white dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Cancelar</button>
-                   <button onClick={guardarCierre} className="flex-1 md:flex-none px-6 py-3 font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 shadow-md flex items-center justify-center gap-2 transition-transform hover:-translate-y-0.5"><Save size={18}/> Finalizar y Guardar</button>
-                 </div>
-              </div>
-
-              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                 <table className="w-full text-left text-sm border-collapse min-w-[900px]">
-                   <thead>
-                     <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                       <th className="p-4 font-black">Producto</th>
-                       <th className="p-4 font-black text-center w-24">Inicio Día</th>
-                       <th className="p-4 font-black text-center w-24 text-blue-600">Ingresos</th>
-                       <th className="p-4 font-black text-center w-24 text-purple-600">A Recepción</th>
-                       <th className="p-4 font-black text-center w-24 text-orange-600">Salidas</th>
-                       <th className="p-4 font-black text-center w-24 text-emerald-600">Ventas/Obsequios</th>
-                       <th className="p-4 font-black text-center w-24">Stock Final</th>
-                       <th className="p-4 font-black text-center bg-sky-100 dark:bg-sky-900/40 w-32">Validación Física</th>
-                       <th className="p-4 font-black text-center w-28">Diferencia</th>
-                       <th className="p-4 font-black">Notas / Justificación</th>
-                     </tr>
-                   </thead>
-                   <tbody>
-                     {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
-                        const key = `${p.nombre}|${pres}`;
-                        const kData = hoyKardex[key] || { ventas: 0, recepcion: 0, ingresos: 0, salidas: 0 };
-                        
-                        const sistema = typeof stock[key] === 'object' ? stock[key].envios : (stock[key] || 0);
-                        const inicioDia = sistema + kData.ventas + kData.recepcion + kData.salidas - kData.ingresos;
-                        const fisico = conteoFisico[key] ?? sistema;
-                        const diferencia = fisico - sistema;
-                        
-                        let badgeDif = <span className="text-slate-400 font-bold">OK</span>;
-                        if (diferencia > 0) badgeDif = <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-black text-xs uppercase tracking-widest">+ {diferencia} (Sob)</span>;
-                        if (diferencia < 0) badgeDif = <span className="bg-red-100 text-red-700 px-2 py-1 rounded font-black text-xs uppercase tracking-widest">{diferencia} (Falt)</span>;
-
-                        return (
-                          <tr key={key} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                             <td className="p-4">
-                               <div className="font-bold text-slate-800 dark:text-slate-100">{p.nombre}</div>
-                               <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{pres}</div>
-                             </td>
-                             <td className="p-4 text-center font-bold text-lg text-slate-500">{inicioDia}</td>
-                             <td className="p-4 text-center font-bold text-lg text-blue-600">{kData.ingresos}</td>
-                             <td className="p-4 text-center font-bold text-lg text-purple-600">{kData.recepcion}</td>
-                             <td className="p-4 text-center font-bold text-lg text-orange-600">{kData.salidas}</td>
-                             <td className="p-4 text-center font-bold text-lg text-emerald-600">{kData.ventas}</td>
-                             <td className="p-4 text-center font-black text-lg text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-900/30">{sistema}</td>
-                             <td className="p-4 text-center bg-sky-50 dark:bg-sky-900/20">
-                                <input 
-                                  type="number" 
-                                  min="0"
-                                  className="w-full text-center p-2 rounded-lg font-black text-lg border-2 border-slate-200 dark:border-slate-600 focus:border-sky-500 outline-none bg-white dark:bg-slate-800 dark:text-white"
-                                  value={fisico}
-                                  onChange={(e) => handleConteoChange(key, e.target.value)}
-                                />
-                             </td>
-                             <td className="p-4 text-center">{badgeDif}</td>
-                             <td className="p-4">
-                                <input 
-                                  type="text" 
-                                  placeholder={diferencia !== 0 ? "Requerido: ¿Por qué la diferencia?" : "Opcional..."}
-                                  className={`w-full p-2 rounded-lg border-2 outline-none text-sm dark:bg-slate-800 dark:text-white ${diferencia !== 0 && !(notasConteo[key]||'') ? 'border-red-300 focus:border-red-500 bg-red-50' : 'border-slate-200 dark:border-slate-600 focus:border-sky-500'}`}
-                                  value={notasConteo[key] || ''}
-                                  onChange={(e) => setNotasConteo(prev => ({...prev, [key]: e.target.value}))}
-                                />
-                             </td>
-                          </tr>
-                        );
-                     })))}
-                   </tbody>
-                 </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {vistaDespacho === 'historial_cierres' && (
-        <div className="animate-in fade-in space-y-6">
-          <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
-             <div>
-               <h3 className="font-black text-slate-700 dark:text-slate-200 text-lg flex items-center gap-2"><FileSpreadsheet className="text-emerald-600"/> Reportes Guardados</h3>
-               <p className="text-sm text-slate-500">Consulta, descarga o audita cierres de inventario.</p>
-             </div>
-             <div className="flex items-center gap-3 mt-4 sm:mt-0 w-full sm:w-auto">
-               <CalendarDays className="text-slate-400 shrink-0"/>
-               <input 
-                 type="date" 
-                 value={filtroFechaCierre} 
-                 onChange={e => setFiltroFechaCierre(e.target.value)}
-                 className="p-3 w-full rounded-xl border-2 border-slate-200 dark:border-slate-700 dark:bg-slate-800 font-bold outline-none focus:border-sky-500"
-               />
-               {filtroFechaCierre && <button onClick={()=>setFiltroFechaCierre('')} className="text-xs font-bold text-red-500 hover:text-red-700 underline">Limpiar</button>}
-             </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {cierresFiltrados.length === 0 ? (
-               <div className="col-span-full py-10 text-center text-slate-400 font-bold italic border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl">
-                 No se encontraron cierres de inventario en la fecha seleccionada.
-               </div>
-            ) : (
-               cierresFiltrados.map(cierre => (
-                 <div key={cierre.id} className={`bg-white dark:bg-slate-800 border-2 p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between ${cierre.auditado ? 'border-emerald-200 dark:border-emerald-800/50' : 'border-slate-100 dark:border-slate-700'}`}>
-                    <div>
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-400 px-3 py-1 rounded-lg font-black text-sm tracking-widest">{cierre.fecha}</div>
-                        <div className="text-[10px] text-slate-400 font-bold uppercase text-right">Por: {cierre.creadoPor}</div>
-                      </div>
-                      
-                      <div className="space-y-2 mb-6">
-                        <div className="flex justify-between text-sm">
-                          <span className="font-medium text-slate-500">Items Auditados:</span>
-                          <span className="font-black text-slate-700 dark:text-slate-200">{cierre.totalItemsAuditados}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="font-medium text-slate-500">Estado de la Auditoría:</span>
-                          {cierre.anomaliasDetectadas === 0 
-                            ? <span className="font-black text-emerald-600 flex items-center gap-1"><CheckCircle size={14}/> Perfecto</span>
-                            : <span className="font-black text-red-500 flex items-center gap-1"><AlertTriangle size={14}/> {cierre.anomaliasDetectadas} Diferencias</span>
-                          }
-                        </div>
-                      </div>
-                      
-                      {cierre.notasAuditoria && cierre.notasAuditoria.length > 0 && (
-                        <div className="mb-4 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
-                          <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest mb-2 flex items-center gap-1">
-                            <MessageSquare size={12}/> Hilo de Comentarios:
-                          </span>
-                          <div className="space-y-2">
-                            {cierre.notasAuditoria.map((n, i) => (
-                               <div key={i} className="text-[11px] text-amber-900 dark:text-amber-200 bg-white dark:bg-slate-800 p-2 rounded-lg shadow-sm border border-amber-100 dark:border-amber-800/50">
-                                  <div className="font-bold mb-0.5 opacity-80">{n.autor} <span className="font-normal text-[9px]">({new Date(n.fecha).toLocaleDateString()})</span>:</div>
-                                  <div className="italic leading-snug">"{n.texto}"</div>
-                               </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
-                       <div className="flex gap-2">
-                         <button onClick={() => imprimirPDF(cierre)} className="flex-1 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-400 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
-                            <FileOutput size={16}/> PDF
-                         </button>
-                         <button onClick={() => generarCSV(cierre)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 font-bold rounded-xl flex justify-center items-center gap-2 transition-colors text-sm">
-                            <Download size={16}/> Excel
-                         </button>
-                       </div>
-
-                       {esAuditor && (
-                          <div className="flex gap-2 mt-2">
-                             {!cierre.auditado && (
-                                <button onClick={()=>auditarCierreRapido(cierre)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl flex items-center justify-center shadow-md transition-colors font-bold text-xs"><CheckCircle size={16} className="mr-1.5"/> Aprobar Rápido</button>
-                             )}
-                             <button onClick={()=>auditarCierreConNota(cierre)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 py-2.5 rounded-xl flex items-center justify-center transition-colors font-bold text-xs">
-                                <MessageSquare size={16} className="mr-1.5"/> {cierre.notasAuditoria?.length > 0 ? 'Responder' : 'Añadir Nota'}
-                             </button>
-                          </div>
-                       )}
-
-                       {cierre.auditado && (
-                          <div className="text-center font-black text-emerald-700 dark:text-emerald-400 uppercase text-[10px] tracking-widest mt-2 bg-emerald-50 dark:bg-emerald-900/20 py-2.5 rounded-lg border border-emerald-200 dark:border-emerald-800 flex items-center justify-center gap-1.5">
-                             <ShieldCheck size={14}/> Cierre Validado por {cierre.auditadoPor}
-                          </div>
-                       )}
-                    </div>
-                 </div>
-               ))
-            )}
-          </div>
-        </div>
-      )}
-
+      {/* MODAL PARA PREVISUALIZACIÓN DE IMÁGENES */}
       {previewImage && (
-        <div className="fixed inset-0 z-[400] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center p-4">
-          <button 
-            onClick={() => setPreviewImage(null)} 
-            className="absolute top-6 right-6 text-white bg-white/20 p-2 rounded-full hover:bg-white/40 transition-colors">
-            <X size={24}/>
-          </button>
-          <img 
-            src={getDirectUrl(previewImage)} 
-            alt="Vista previa" 
-            className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain"
-          />
-          <a 
-            href={previewImage} 
-            target="_blank" 
-            rel="noreferrer" 
-            className="mt-6 bg-sky-600 hover:bg-sky-500 text-white font-bold px-6 py-3 rounded-xl flex items-center gap-2 transition-colors">
-            Abrir Original en Google Drive
-          </a>
+        <div className="fixed inset-0 z-[400] bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
+          <button onClick={() => setPreviewImage(null)} className="absolute top-6 right-6 text-white bg-white/20 p-2 rounded-full hover:bg-white/40 transition-colors"><X size={24}/></button>
+          <img src={getDirectUrl(previewImage)} alt="Vista Previa" className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain"/>
         </div>
       )}
     </div>

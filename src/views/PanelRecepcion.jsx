@@ -55,56 +55,122 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
     return () => unsubMovs();
   }, [db, appId]);
 
-  // Lógica del Kardex Diario de Recepción parametrizado por fecha elegida
-  const hoyKardex = useMemo(() => {
+  // =========================================================================
+  // KARDEX PARAMETRIZADO — CORREGIDO
+  // - Usa fechaValidacion (momento real del descuento) en vez de fechaDespacho
+  // - Para días pasados, calcula movimientos posteriores para derivar
+  //   inicioDia y sistemaDia (stock al cierre de ese día)
+  // =========================================================================
+  const kardexDelDia = useMemo(() => {
     const aggr = {};
+    const allKeys = [];
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
-        aggr[`${p.nombre}|${pres}`] = { ventas: 0, ingresos: 0, salidas: 0 };
+      const key = `${p.nombre}|${pres}`;
+      allKeys.push(key);
+      aggr[key] = { ventas: 0, ingresos: 0, salidas: 0, ventasAfter: 0, ingresosAfter: 0, salidasAfter: 0, inicioDia: 0, sistemaDia: 0 };
     })));
+
+    if (allKeys.length === 0) return aggr;
+
+    // Calcular "hoy" en zona horaria de Caracas dentro del memo para evitar dependencias rotas
+    const dHoy = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const hoyISO = `${dHoy.getFullYear()}-${String(dHoy.getMonth() + 1).padStart(2, '0')}-${String(dHoy.getDate()).padStart(2, '0')}`;
 
     const [year, month, day] = fechaCierreElegida.split('-');
     const tDate = new Date(year, month - 1, day);
     const todayStr = `${String(tDate.getDate()).padStart(2, '0')}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${tDate.getFullYear()}`;
     const startOfDay = tDate.getTime();
     const endOfDay = startOfDay + 86400000;
-
-    // 1. Sumar Ventas y Obsequios (Pedidos Tienda o Delivery del día seleccionado)
-    pedidos.forEach(p => {
-        if (['Validado', 'Despachado'].includes(p.status) && p.fechaDespacho === todayStr && ['Tienda', 'Delivery'].includes(p.tipoDespacho)) {
-            const carritoTotal = { ...(p.carritoObj || {}) };
-            if (p.carritoObsequiosObj) {
-                Object.entries(p.carritoObsequiosObj).forEach(([k, qty]) => {
-                    carritoTotal[k] = (carritoTotal[k] || 0) + qty;
-                });
-            }
-
-            Object.entries(carritoTotal).forEach(([k, qty]) => {
-                if (aggr[k]) aggr[k].ventas += qty;
-            });
-        }
-    });
-
-    // 2. Sumar Movimientos filtrando por la ventana de tiempo del día elegido
-    movimientos.forEach(m => {
-        if (m.fechaCreacion >= startOfDay && m.fechaCreacion < endOfDay) {
-            if (m.tipo === 'TRANSFERENCIA') {
-                Object.entries(m.items || {}).forEach(([k, qty]) => {
-                    if (aggr[k]) aggr[k].ingresos += qty;
-                });
-            } else if (m.tipo === 'INGRESO' && (!m.destino || m.destino === 'recepcion' || m.destino === 'tienda')) {
-                Object.entries(m.items || {}).forEach(([k, qty]) => {
-                    if (aggr[k]) aggr[k].ingresos += qty;
-                });
-            } else if (m.tipo === 'SALIDA' && m.status === 'COMPLETADO' && (m.origen === 'recepcion' || m.origen === 'tienda')) {
-                Object.entries(m.items || {}).forEach(([k, qty]) => {
-                    if (aggr[k]) aggr[k].salidas += qty;
-                });
-            }
-        }
-    });
     
+    const esCierreHoy = fechaCierreElegida === hoyISO;
+
+    // Helper: verifica si una fecha DD/MM/YYYY es estrictamente posterior al día elegido
+    const esFechaPosterior = (fechaStr) => {
+      if (!fechaStr || !fechaStr.includes('/')) return false;
+      const partes = fechaStr.split('/');
+      if (partes.length !== 3 || !partes[0] || !partes[1] || !partes[2]) return false;
+      const iso = `${partes[2]}-${partes[1]}-${partes[0]}`;
+      return iso > fechaCierreElegida;
+    };
+
+    // 1. VENTAS: usa fechaValidacion (cuando Admin realmente descontó el stock)
+    pedidos.forEach(p => {
+      if (['Validado', 'Despachado'].includes(p.status) && ['Tienda', 'Delivery'].includes(p.tipoDespacho)) {
+        const fechaAfectacion = p.fechaValidacion || p.fechaDespacho;
+        if (!fechaAfectacion) return;
+        
+        const carritoTotal = { ...(p.carritoObj || {}) };
+        if (p.carritoObsequiosObj) {
+          Object.entries(p.carritoObsequiosObj).forEach(([k, qty]) => {
+            carritoTotal[k] = (carritoTotal[k] || 0) + qty;
+          });
+        }
+
+        if (fechaAfectacion === todayStr) {
+          // Venta que afectó el día seleccionado
+          Object.entries(carritoTotal).forEach(([k, qty]) => {
+            if (aggr[k]) aggr[k].ventas += qty;
+          });
+        } else if (!esCierreHoy && esFechaPosterior(fechaAfectacion)) {
+          // Venta posterior al día elegido (necesaria para revertir y obtener inicioDia)
+          Object.entries(carritoTotal).forEach(([k, qty]) => {
+            if (aggr[k]) aggr[k].ventasAfter += qty;
+          });
+        }
+      }
+    });
+
+    // 2. MOVIMIENTOS (Transferencias, Ingresos, Salidas) por ventana de tiempo
+    movimientos.forEach(m => {
+      const isTransferencia = m.tipo === 'TRANSFERENCIA';
+      const isIngreso = m.tipo === 'INGRESO' && (!m.destino || m.destino === 'recepcion' || m.destino === 'tienda');
+      const isSalida = m.tipo === 'SALIDA' && m.status === 'COMPLETADO' && (m.origen === 'recepcion' || m.origen === 'tienda');
+      if (!isTransferencia && !isIngreso && !isSalida) return;
+
+      if (m.fechaCreacion >= startOfDay && m.fechaCreacion < endOfDay) {
+        // Movimiento DEL día seleccionado
+        if (isTransferencia || isIngreso) {
+          Object.entries(m.items || {}).forEach(([k, qty]) => { if (aggr[k]) aggr[k].ingresos += qty; });
+        } else {
+          Object.entries(m.items || {}).forEach(([k, qty]) => { if (aggr[k]) aggr[k].salidas += qty; });
+        }
+      } else if (!esCierreHoy && m.fechaCreacion >= endOfDay) {
+        // Movimiento POSTERIOR al día seleccionado
+        if (isTransferencia || isIngreso) {
+          Object.entries(m.items || {}).forEach(([k, qty]) => { if (aggr[k]) aggr[k].ingresosAfter += qty; });
+        } else {
+          Object.entries(m.items || {}).forEach(([k, qty]) => { if (aggr[k]) aggr[k].salidasAfter += qty; });
+        }
+      }
+    });
+
+    // 3. CALCULAR inicioDia y sistemaDia para cada producto
+    allKeys.forEach(key => {
+      const kData = aggr[key];
+      const stockActual = typeof stock[key] === 'object' ? (stock[key].recepcion || stock[key].tienda || 0) : 0;
+      
+      if (esCierreHoy) {
+        // Cierre de hoy: se reverse-calcula desde el stock actual (no hay movimientos "after")
+        kData.inicioDia = stockActual + kData.ventas + kData.salidas - kData.ingresos;
+        kData.sistemaDia = stockActual;
+      } else {
+        // Cierre de día pasado:
+        // inicioDia = stockActual - ingresos_dia + ventas_dia + salidas_dia - ingresos_after + ventas_after + salidas_after
+        kData.inicioDia = stockActual - kData.ingresos + kData.ventas + kData.salidas - kData.ingresosAfter + kData.ventasAfter + kData.salidasAfter;
+        // sistemaDia (stock al cierre de ese día) = stockActual - ingresos_after + ventas_after + salidas_after
+        kData.sistemaDia = stockActual - kData.ingresosAfter + kData.ventasAfter + kData.salidasAfter;
+      }
+    });
+
     return aggr;
-  }, [pedidos, movimientos, catalogo, fechaCierreElegida]);
+  }, [pedidos, movimientos, catalogo, stock, fechaCierreElegida]);
+
+  // Indicador si el cierre elegido es de un día pasado
+  const esCierreRetroactivo = useMemo(() => {
+    const dHoy = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const hoyISO = `${dHoy.getFullYear()}-${String(dHoy.getMonth() + 1).padStart(2, '0')}-${String(dHoy.getDate()).padStart(2, '0')}`;
+    return fechaCierreElegida < hoyISO;
+  }, [fechaCierreElegida]);
 
   const pedidosRecepcionBase = useMemo(() => {
      return pedidos.filter(p => 
@@ -197,10 +263,20 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   }, [vista, db, appId]);
 
   const iniciarConteo = () => {
+    const dHoy = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const hoyISO = `${dHoy.getFullYear()}-${String(dHoy.getMonth() + 1).padStart(2, '0')}-${String(dHoy.getDate()).padStart(2, '0')}`;
+    const esHoy = fechaCierreElegida === hoyISO;
+
     const inicial = {};
     catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
       const key = `${p.nombre}|${pres}`;
-      inicial[key] = typeof stock[key] === 'object' ? (stock[key].recepcion || stock[key].tienda || 0) : 0;
+      if (esHoy) {
+        // Cierre de hoy: pre-llenar con stock actual del sistema
+        inicial[key] = typeof stock[key] === 'object' ? (stock[key].recepcion || stock[key].tienda || 0) : 0;
+      } else {
+        // Cierre de día pasado: pre-llenar con el stock calculado al cierre de ese día
+        inicial[key] = kardexDelDia[key]?.sistemaDia ?? 0;
+      }
     })));
     setConteoFisico(inicial);
     setNotasConteo({});
@@ -213,7 +289,15 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
   };
 
   const guardarCierre = async () => {
-    dialogs.confirm("¿Estás seguro de registrar el cierre físico de Recepción?", async () => {
+    const dHoy = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const hoyISO = `${dHoy.getFullYear()}-${String(dHoy.getMonth() + 1).padStart(2, '0')}-${String(dHoy.getDate()).padStart(2, '0')}`;
+    const esHoy = fechaCierreElegida === hoyISO;
+
+    const msgConfirm = esCierreRetroactivo
+      ? `¿Estás seguro de registrar el cierre FÍSICO RETROACTIVO de Recepción para un día anterior?\n\n⚠️ El stock REAL del sistema NO se ajustará (solo se guarda el reporte con los datos calculados de ese día).`
+      : "¿Estás seguro de registrar el cierre físico de Recepción?";
+
+    dialogs.confirm(msgConfirm, async () => {
       const productosCierre = [];
       let totalDiferencias = 0;
       const stockRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'stock');
@@ -221,10 +305,11 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
       
       catalogo.forEach(c => c.productos.forEach(p => p.presentaciones.forEach(pres => {
         const key = `${p.nombre}|${pres}`;
-        const kData = hoyKardex[key] || { ventas: 0, ingresos: 0, salidas: 0 };
+        const kData = kardexDelDia[key] || { ventas: 0, ingresos: 0, salidas: 0, inicioDia: 0, sistemaDia: 0 };
         
-        const sistema = typeof stock[key] === 'object' ? (stock[key].recepcion || stock[key].tienda || 0) : 0;
-        const inicioDia = sistema + kData.ventas + kData.salidas - kData.ingresos;
+        // Usar los valores pre-calculados por el Kardex
+        const sistema = kData.sistemaDia;
+        const inicioDia = kData.inicioDia;
         const fisico = conteoFisico[key] ?? sistema;
         const diferencia = fisico - sistema; 
         
@@ -244,7 +329,8 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
            nota: notasConteo[key] || '' 
         });
 
-        if (diferencia !== 0) {
+        // Solo ajustar el stock real si es cierre del día actual y hay diferencias
+        if (diferencia !== 0 && esHoy) {
            updates[key] = { recepcion: fisico };
         }
       })));
@@ -259,7 +345,8 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
          totalItemsAuditados: productosCierre.length, 
          anomaliasDetectadas: totalDiferencias, 
          productos: productosCierre, 
-         auditado: false 
+         auditado: false,
+         esCierreRetroactivo: esCierreRetroactivo 
       };
 
       try {
@@ -267,12 +354,12 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
         if (Object.keys(updates).length > 0) { 
            await setDoc(stockRef, updates, { merge: true }); 
         }
-        loggear('CIERRE_RECEPCION_FISICO', `Cierre registrado con ${totalDiferencias} diferencias para la fecha ${fechaCierreFormat}.`);
+        loggear('CIERRE_RECEPCION_FISICO', `Cierre ${esCierreRetroactivo ? 'RETROACTIVO' : ''} registrado con ${totalDiferencias} diferencias para la fecha ${fechaCierreFormat}.`);
         setConteoActivo(false);
         setVista('auditoria');
         dialogs.confirm("Cierre guardado con éxito. ¿Deseas descargar el reporte en PDF ahora?", () => { imprimirPDF(nuevoCierre); }, "Reporte Listo");
       } catch (error) { console.error(error); dialogs.alert("Error al guardar el cierre.", "Fallo del Sistema"); }
-    }, "Confirmar Cierre");
+    }, esCierreRetroactivo ? "Cierre Retroactivo" : "Confirmar Cierre");
   };
 
   const generarCSV = (cierre) => {
@@ -311,6 +398,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
           .badge { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; text-transform: uppercase; }
           .badge-ok { background: #dcfce7; color: #166534; }
           .badge-warn { background: #fee2e2; color: #991b1b; }
+          .badge-retro { background: #fff7ed; color: #c2410c; border: 1px solid #fdba74; }
           .status-box { padding: 15px; border-radius: 8px; font-weight: 900; text-align: center; border: 1px solid currentColor; margin-bottom: 30px; font-size: 13px; letter-spacing: 1px; }
           table { width: 100%; border-collapse: collapse; font-size: 11px; }
           th, td { border-bottom: 1px solid #e2e8f0; padding: 12px 6px; text-align: left; }
@@ -329,7 +417,7 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
           <img src="${BRAND_LOGO}" class="logo" alt="Bluher Logo"/>
         </div>
         <div class="meta-info">
-           <div class="meta-box"><p><strong>Fecha del Cierre:</strong> ${cierre.fecha}</p><p><strong>Operador Responsable:</strong> ${cierre.creadoPor}</p></div>
+           <div class="meta-box"><p><strong>Fecha del Cierre:</strong> ${cierre.fecha}</p><p><strong>Operador Responsable:</strong> ${cierre.creadoPor}</p>${cierre.esCierreRetroactivo ? '<p><span class="badge badge-retro">CIERRE RETROACTIVO</span></p>' : ''}</div>
            <div class="meta-box" style="text-align: right;">
               <p><strong>Total Items Auditados:</strong> ${cierre.totalItemsAuditados}</p>
               <p><strong>Resultado:</strong> 
@@ -448,7 +536,6 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
            {typeof p.productos === 'string' ? p.productos : JSON.stringify(p.productos)}
         </div>
 
-        {/* CORRECCIÓN DE FOTOS: Se envuelven las URLs en getDirectUrl para habilitar la visualización */}
         <div className="flex flex-wrap gap-2.5 mb-4 bg-white dark:bg-slate-950 p-2 rounded-xl border border-slate-100 dark:border-slate-800/60 justify-center">
            {[ {url: urlValidacion, txt: 'Pago'}, {url: urlExtracto, txt: 'Extracto'}, {url: urlProductoFinal, txt: 'Paquete'} ].map(img => (
               (typeof img.url === 'string' && img.url.startsWith('http')) && (
@@ -517,24 +604,60 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                 <CheckSquare size={64} className="mx-auto text-purple-300 dark:text-purple-800 mb-6" />
                 <h3 className="text-2xl font-black text-slate-700 dark:text-slate-200 mb-2">Auditoría Diaria de Recepción</h3>
                 <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8">Compara el inventario físico en la tienda contra el registrado en Bluher Sys evaluando el Kárdex.</p>
+                
+                {/* Selector de fecha ANTES de iniciar conteo */}
+                <div className="flex items-center justify-center gap-3 mb-6">
+                   <label className="text-sm font-bold text-slate-600 dark:text-slate-300">Fecha a cerrar:</label>
+                   <input 
+                      type="date" 
+                      value={fechaCierreElegida} 
+                      max={getHoyISO()}
+                      onChange={(e) => setFechaCierreElegida(e.target.value)}
+                      className="bg-white dark:bg-slate-800 border-2 border-purple-200 dark:border-purple-700 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-purple-500"
+                   />
+                </div>
+
+                {esCierreRetroactivo && (
+                   <div className="max-w-md mx-auto mb-6 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-700 rounded-xl p-4 text-left">
+                      <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-black text-sm mb-1">
+                         <AlertTriangle size={16} /> Cierre Retroactivo
+                      </div>
+                      <p className="text-xs text-amber-600 dark:text-amber-500 font-medium">
+                         Estás seleccionando un día anterior. El sistema calculará los movimientos de esa fecha y el stock al cierre de dicho día. El stock real NO se modificará, solo se genera el reporte.
+                      </p>
+                   </div>
+                )}
+
                 <button onClick={iniciarConteo} className="bg-purple-600 hover:bg-purple-700 text-white font-black py-4 px-8 rounded-xl shadow-lg transition-all hover:-translate-y-1">
-                  Iniciar Conteo del Día
+                  Iniciar Conteo
                 </button>
              </div>
            ) : (
              <div className="space-y-6">
+               {/* Banner de cierre retroactivo */}
+               {esCierreRetroactivo && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-700 p-4 rounded-2xl flex items-start gap-3">
+                     <AlertTriangle size={20} className="text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                     <div>
+                        <div className="font-black text-amber-800 dark:text-amber-300 text-sm">Modo Cierre Retroactivo — {fechaCierreElegida.split('-').reverse().join('/')}</div>
+                        <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">La columna "Stock Sist." muestra el stock calculado al cierre de ese día (no el stock actual). Las diferencias NO ajustarán el inventario real.</p>
+                     </div>
+                  </div>
+               )}
+
                <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-purple-50 dark:bg-purple-900/20 p-6 rounded-2xl border border-purple-100 dark:border-purple-800">
                   <div>
                     <h3 className="font-black text-purple-900 dark:text-purple-300 text-lg">Hoja de Trabajo Activa</h3>
-                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Las casillas ya tienen la cantidad final del sistema calculada en base a los movimientos. Modifica solo donde haya diferencias.</p>
+                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Las casillas ya tienen la cantidad del sistema calculada en base a los movimientos. Modifica solo donde haya diferencias.</p>
                   </div>
                   <div className="flex flex-wrap gap-3 w-full md:w-auto items-center">
-                     {/* NUEVO CALENDARIO PARA CAMBIAR DÍA DEL CIERRE */}
+                     {/* Selector de fecha durante el conteo */}
                      <div className="flex items-center gap-2 mr-2 border-r pr-4 border-purple-200 dark:border-purple-800">
-                        <label className="text-xs font-bold text-purple-700 dark:text-purple-400 uppercase tracking-widest">Fecha a cerrar:</label>
+                        <label className="text-xs font-bold text-purple-700 dark:text-purple-400 uppercase tracking-widest">Fecha:</label>
                         <input 
                            type="date" 
                            value={fechaCierreElegida} 
+                           max={getHoyISO()}
                            onChange={(e) => setFechaCierreElegida(e.target.value)}
                            className="bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-700 rounded-lg px-2 py-2 text-sm font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-purple-500"
                         />
@@ -554,7 +677,14 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                         <th className="p-4 font-black text-center w-24 text-blue-600">Ingresos</th>
                         <th className="p-4 font-black text-center w-24 text-orange-600">Salidas</th>
                         <th className="p-4 font-black text-center w-24 text-emerald-600">Ventas</th>
-                        <th className="p-4 font-black text-center w-24">Stock Sist.</th>
+                        <th className="p-4 font-black text-center w-28">
+                           {esCierreRetroactivo ? (
+                              <div>
+                                <div>Stock Sist.</div>
+                                <div className="text-[9px] font-normal text-slate-400 normal-case tracking-normal">(fin de ese día)</div>
+                              </div>
+                           ) : 'Stock Sist.'}
+                        </th>
                         <th className="p-4 font-black text-center bg-purple-100 dark:bg-purple-900/40 w-32">Físico Tienda</th>
                         <th className="p-4 font-black text-center w-28">Diferencia</th>
                         <th className="p-4 font-black">Notas / Justificación</th>
@@ -563,10 +693,11 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                     <tbody>
                       {catalogo.map(c => c.productos.map(p => p.presentaciones.map(pres => {
                          const key = `${p.nombre}|${pres}`;
-                         const kData = hoyKardex[key] || { ventas: 0, ingresos: 0, salidas: 0 };
+                         const kData = kardexDelDia[key] || { ventas: 0, ingresos: 0, salidas: 0, inicioDia: 0, sistemaDia: 0 };
                          
-                         const sistema = typeof stock[key] === 'object' ? (stock[key].recepcion || stock[key].tienda || 0) : 0;
-                         const inicioDia = sistema + kData.ventas + kData.salidas - kData.ingresos;
+                         // Usar valores pre-calculados por el Kardex
+                         const sistema = kData.sistemaDia;
+                         const inicioDia = kData.inicioDia;
                          const fisico = conteoFisico[key] ?? sistema;
                          const diferencia = fisico - sistema;
                          
@@ -637,7 +768,12 @@ export default function PanelRecepcion({ pedidos, catalogo = [], stock = {}, per
                   <div key={cierre.id} className="bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
                      <div>
                        <div className="flex justify-between items-start mb-4">
-                         <div className="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400 px-3 py-1 rounded-lg font-black text-sm tracking-widest">{cierre.fecha}</div>
+                         <div className="flex flex-col gap-1">
+                           <div className="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400 px-3 py-1 rounded-lg font-black text-sm tracking-widest">{cierre.fecha}</div>
+                           {cierre.esCierreRetroactivo && (
+                              <span className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest inline-block w-fit">Retroactivo</span>
+                           )}
+                         </div>
                          <div className="text-[10px] text-slate-400 font-bold uppercase text-right">Por: {cierre.creadoPor}</div>
                        </div>
                        

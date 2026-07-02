@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Wallet, CheckSquare, Package, Gift, FileText, ShieldCheck, Eye, CalendarDays, Clock, AlertTriangle, CheckCircle, Percent, Power, PowerOff, X, UploadCloud, Loader2, ImageIcon, MessageSquare, Database, DownloadCloud, Upload, Ban, Search, Edit3, Truck, Store as StoreIcon, Bike, RotateCcw } from 'lucide-react';
 import { StatusBadge, InputDark } from '../components/ui';
-import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection, addDoc } from 'firebase/firestore'; 
-import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
+import { setDoc, doc, updateDoc, increment, deleteDoc, getDocs, getDoc, collection, addDoc, deleteField } from 'firebase/firestore'; import { URL_GOOGLE_SCRIPT } from '../config/firebase'; 
 import { compressImage } from '../utils/image';
 import { ROLES } from '../config/constants';
 
@@ -516,7 +515,7 @@ export default function PanelAdmin({ perfil, config, pedidos, stock, db, appId, 
             montoEfectivoBs: 0,
             montoTarjetaCreditoBs: 0,
             vueltoUsd: 0,
-            fechaValidacion: deleteDoc, // Al reversar limpiamos la fecha de afectación
+            fechaValidacion: deleteField(), // Al reversar limpiamos la fecha de afectación
             notasAuditoria: [...(pedido.notasAuditoria || []), { 
                fecha: Date.now(), 
                texto: pedido.esAbono ? `REVERSIÓN DE VALIDACIÓN DE ABONO. Motivo: ${motivo}` : `REVERSIÓN DE VALIDACIÓN (Inventario devuelto). Motivo: ${motivo}`, 

@@ -23,6 +23,11 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
     return ['Todas', ...Array.from(cats).filter(Boolean)];
   }, [lista]);
 
+  // =========================================================================
+  // MÉTRICAS DEL DÍA — CORREGIDAS
+  // - Ventas filtradas por fechaValidacion (momento real del descuento)
+  // - Eliminado el fallback a fechaCreacion que causaba duplicados
+  // =========================================================================
   const metricasDia = useMemo(() => {
     const hoyDDMM = getHoyDDMMYYYY();
     const hoyISO = getHoyISO();
@@ -37,69 +42,81 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
 
     const boosterKeys = ["Booster de Hidratacion|Unidad", "Booster de Reparacion|Unidad", "Booster de Nutricion|Unidad", "Booster Profesional|Unidad"];
 
+    // Ventas: usar fechaValidacion (cuando Admin realmente descontó el stock)
     pedidos.forEach(p => {
-       const esParaHoy = p.fechaDespacho === hoyDDMM || (!p.fechaDespacho && new Date(p.fechaCreacion).toLocaleDateString('es-VE') === new Date().toLocaleDateString('es-VE'));
+       if (!['Validado', 'Despachado'].includes(p.status)) return;
        
-       // CORRECCIÓN: Solo contar ventas si el pedido ya fue Validado o Despachado (los Pendientes aún no han descontado stock)
-       if (['Validado', 'Despachado'].includes(p.status) && esParaHoy) {
-          const isRecepcion = p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Delivery';
-          
-          const carritoTotal = { ...(p.carritoObj || {}) };
-          if (p.carritoObsequiosObj) {
-              Object.entries(p.carritoObsequiosObj).forEach(([key, qty]) => {
-                  carritoTotal[key] = (carritoTotal[key] || 0) + qty;
-              });
-          }
-          
-          let countBoosters = 0;
+       // La fecha que determina en qué día se descontó el stock
+       const fechaAfectacion = p.fechaValidacion || p.fechaDespacho;
+       if (!fechaAfectacion) return; // Si no tiene fechaValidacion, no contamos (pendientes antiguos sin validar aún)
+       
+       // Solo contar si la afectación fue HOY
+       if (fechaAfectacion !== hoyDDMM) return;
+       
+       const isRecepcion = p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Delivery';
+       
+       const carritoTotal = { ...(p.carritoObj || {}) };
+       if (p.carritoObsequiosObj) {
+           Object.entries(p.carritoObsequiosObj).forEach(([key, qty]) => {
+               carritoTotal[key] = (carritoTotal[key] || 0) + qty;
+           });
+       }
+       
+       let countBoosters = 0;
 
-          Object.entries(carritoTotal).forEach(([key, qty]) => {
-             if (map[key]) {
-                 if (isRecepcion) map[key].recepcion.ventas += qty;
-                 else map[key].envios.ventas += qty;
-             }
-             if (boosterKeys.includes(key)) countBoosters += qty;
-          });
-
-          // CORRECCIÓN: Lógica de Concentrados faltantes por Boosters
-          if (countBoosters > 0) {
-              const concentradosActuales = carritoTotal["Concentrado|Unidad"] || 0;
-              if (concentradosActuales < countBoosters) {
-                  const faltantes = countBoosters - concentradosActuales;
-                  if (map["Concentrado|Unidad"]) {
-                      if (isRecepcion) map["Concentrado|Unidad"].recepcion.ventas += faltantes;
-                      else map["Concentrado|Unidad"].envios.ventas += faltantes;
-                  }
-              }
+       Object.entries(carritoTotal).forEach(([key, qty]) => {
+          if (map[key]) {
+              if (isRecepcion) map[key].recepcion.ventas += qty;
+              else map[key].envios.ventas += qty;
           }
+          if (boosterKeys.includes(key)) countBoosters += qty;
+       });
+
+       // Lógica de Concentrados faltantes por Boosters
+       if (countBoosters > 0) {
+           const concentradosActuales = carritoTotal["Concentrado|Unidad"] || 0;
+           if (concentradosActuales < countBoosters) {
+               const faltantes = countBoosters - concentradosActuales;
+               if (map["Concentrado|Unidad"]) {
+                   if (isRecepcion) map["Concentrado|Unidad"].recepcion.ventas += faltantes;
+                   else map["Concentrado|Unidad"].envios.ventas += faltantes;
+               }
+           }
        }
     });
 
+    // Movimientos (Transferencias, Ingresos, Salidas) por timestamp del día
+    const startOfDay = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = startOfDay.getTime() + 86400000;
+    const startTs = startOfDay.getTime();
+
     movimientos?.forEach(m => {
-       const isToday = m.fecha === hoyISO || m.fecha === hoyDDMM || new Date(m.fechaCreacion || Date.now()).toLocaleDateString('es-VE') === new Date().toLocaleDateString('es-VE');
-       if (isToday) {
-          const type = (m.tipo || '').toUpperCase();
-          const itemsObj = m.carritoObj || m.items || {};
-          const origen = m.origen ? m.origen.toLowerCase() : 'envios';
-          
-          Object.entries(itemsObj).forEach(([key, qty]) => {
-             if (map[key]) {
-                if (type === 'INGRESO') {
-                   map[key].envios.ingresos += qty;
-                }
-                if (type === 'TRANSFERENCIA' || type.includes('TRASLADO')) {
-                   map[key].envios.trasladosOut += qty;
-                   if (m.status === 'COMPLETADO') {
-                      map[key].recepcion.trasladosIn += qty;
-                   }
-                }
-                if (type === 'SALIDA' && m.status === 'COMPLETADO') {
-                   if (origen === 'recepcion') map[key].recepcion.salidas += qty;
-                   else map[key].envios.salidas += qty;
+       // Filtrar estrictamente por ventana de tiempo del día de hoy
+       const isToday = m.fechaCreacion >= startTs && m.fechaCreacion < endOfDay;
+       if (!isToday) return;
+
+       const type = (m.tipo || '').toUpperCase();
+       const itemsObj = m.carritoObj || m.items || {};
+       const origen = m.origen ? m.origen.toLowerCase() : 'envios';
+       
+       Object.entries(itemsObj).forEach(([key, qty]) => {
+          if (map[key]) {
+             if (type === 'INGRESO') {
+                map[key].envios.ingresos += qty;
+             }
+             if (type === 'TRANSFERENCIA' || type.includes('TRASLADO')) {
+                map[key].envios.trasladosOut += qty;
+                if (m.status === 'COMPLETADO') {
+                   map[key].recepcion.trasladosIn += qty;
                 }
              }
-          });
-       }
+             if (type === 'SALIDA' && m.status === 'COMPLETADO') {
+                if (origen === 'recepcion') map[key].recepcion.salidas += qty;
+                else map[key].envios.salidas += qty;
+             }
+          }
+       });
     });
 
     return map;
@@ -196,8 +213,13 @@ export default function SubPanelStock({ lista, notas, stock, movimientos, pedido
               {listaFiltrada.map(item => {
                 const m = metricasDia[item.key];
                 
-                const inicioEnvios = item.envios + m.envios.ventas + m.envios.trasladosOut + m.envios.salidas - m.envios.ingresos;
-                const inicioRecepcion = item.recepcion + m.recepcion.ventas + m.recepcion.salidas - m.recepcion.trasladosIn;
+                // Fórmula Envíos: stock = inicio + ingresos - trasladosOut - ventas - salidas
+                // => inicio = stock - ingresos + trasladosOut + ventas + salidas
+                const inicioEnvios = item.envios - m.envios.ingresos + m.envios.trasladosOut + m.envios.ventas + m.envios.salidas;
+                
+                // Fórmula Recepción: stock = inicio + trasladosIn - ventas - salidas
+                // => inicio = stock - trasladosIn + ventas + salidas
+                const inicioRecepcion = item.recepcion - m.recepcion.trasladosIn + m.recepcion.ventas + m.recepcion.salidas;
 
                 if (activeTab === 'envios') {
                   return (
