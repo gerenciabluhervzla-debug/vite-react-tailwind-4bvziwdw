@@ -487,17 +487,22 @@ export default function PanelVentas({
     });
 
     if (extraConcentrados > 0) {
-       const qtyConcentradosActual = carritoTotal["Concentrado|Unidad"] || 0;
-       const totalConcentradosNecesarios = qtyConcentradosActual + extraConcentrados;
-       const dispConcentrado = typeof stock["Concentrado|Unidad"] === 'object' ? (stock["Concentrado|Unidad"][tipoInventario] || 0) : (stock["Concentrado|Unidad"]||0);
-       
-       if (totalConcentradosNecesarios > dispConcentrado) {
-          sinStock = true;
-          if (!itemsFaltantes.some(i => i.includes("Concentrado"))) {
-             itemsFaltantes.push(`Concentrado (Requiere ${totalConcentradosNecesarios} total por los Boosters)`);
-          }
-       }
-    }
+      const qtyConcentradosActual = carritoTotal["Concentrado|Unidad"] || 0;
+      const faltantes = Math.max(0, extraConcentrados - qtyConcentradosActual);
+      const totalConcentradosNecesarios = qtyConcentradosActual + faltantes;
+      // Si usuario puso 1 concentrado + 1 booster = pide solo 1 concentrado ✅
+      
+      const dispConcentrado = typeof stock["Concentrado|Unidad"] === 'object' 
+        ? (stock["Concentrado|Unidad"][tipoInventario] || 0) 
+        : (stock["Concentrado|Unidad"]||0);
+      
+      if (totalConcentradosNecesarios > dispConcentrado) {
+         sinStock = true;
+         if (!itemsFaltantes.some(i => i.includes("Concentrado"))) {
+            itemsFaltantes.push(`Concentrado (Requiere ${totalConcentradosNecesarios} total por los Boosters)`);
+         }
+      }
+   }
 
     if (sinStock) {
       const confirmarFuerza = window.confirm(
@@ -551,8 +556,14 @@ export default function PanelVentas({
     Object.entries(finalCarritoObsequios).forEach(([key, qty]) => { if (boosterKeys.includes(key)) countBoosters += qty; });
 
     if (countBoosters > 0) {
-      finalCarrito["Concentrado|Unidad"] = (finalCarrito["Concentrado|Unidad"] || 0) + countBoosters;
-      if (!finalProductosText.includes("Concentrado (Unidad)")) finalProductosText += `\n- ${countBoosters}x Concentrado (Unidad) [Auto]`;
+      const concentradosActuales = finalCarrito["Concentrado|Unidad"] || 0;
+      if (concentradosActuales < countBoosters) {
+        const faltantes = countBoosters - concentradosActuales;
+        finalCarrito["Concentrado|Unidad"] = countBoosters;
+        if (!finalProductosText.includes("Concentrado (Unidad)")) {
+          finalProductosText += `\n- ${faltantes}x Concentrado (Unidad) [Auto]`;
+        }
+      }
     }
     
     const getVeneziaTime = () => {

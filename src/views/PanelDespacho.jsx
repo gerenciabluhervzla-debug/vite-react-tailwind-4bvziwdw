@@ -76,7 +76,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     const agrupados = {};
     
     pedidos
-      .filter(p => !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional'))
+      .filter(p => !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional') && p.status !== 'Anulado')
       .forEach(p => {
         const fecha = p.fechaDespacho || 'Sin Fecha';
         const tipo = p.tipoDespacho || 'Nacional'; 
@@ -672,7 +672,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'cierres_inventario', cierre.id), { 
         auditado: true, auditadoPor: perfil?.nombre || 'Auditor', fechaAuditoria: Date.now() 
       });
-      loggger('AUDITORIA_CIERRE_RAPIDA', `Cierre de ${cierre.fecha} validado.`);
+      loggear('AUDITORIA_CIERRE_RAPIDA', `Cierre de ${cierre.fecha} validado.`);
     } catch(e) { console.error(e); }
   };
 
