@@ -239,23 +239,23 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     });
     
     // 3. CALCULAR inicioDia y sistemaDia para cada producto
-    // Fórmula envíos: stock = inicio + ingresos + recepcion - ventas - salidas
-    // => inicio = stock - ingresos - recepcion + ventas + salidas
+    // Fórmula real de envíos: stock_actual = inicio + ingresos - recepcion (salidas a recepción) - ventas - salidas (daños)
+    // Despejando inicio: inicio = stock_actual - ingresos + recepcion + ventas + salidas
     allKeys.forEach(key => {
       const kData = aggr[key];
       const stockActual = typeof stock[key] === 'object' ? (stock[key].envios || 0) : (stock[key] || 0);
       
       if (esCierreHoy) {
         // Cierre de hoy: se reverse-calcula desde el stock actual
-        kData.inicioDia = stockActual - kData.ingresos - kData.recepcion + kData.ventas + kData.salidas;
+        kData.inicioDia = stockActual - kData.ingresos + kData.recepcion + kData.ventas + kData.salidas;
         kData.sistemaDia = stockActual;
       } else {
-        // Cierre de día pasado:
-        // inicioDia = stockActual - ingresos_dia - recepcion_dia + ventas_dia + salidas_dia 
-        //              - ingresos_after - recepcion_after + ventas_after + salidas_after
-        kData.inicioDia = stockActual - kData.ingresos - kData.recepcion + kData.ventas + kData.salidas - kData.ingresosAfter - kData.recepcionAfter + kData.ventasAfter + kData.salidasAfter;
-        // sistemaDia (stock al cierre de ese día) = stockActual - ingresos_after - recepcion_after + ventas_after + salidas_after
-        kData.sistemaDia = stockActual - kData.ingresosAfter - kData.recepcionAfter + kData.ventasAfter + kData.salidasAfter;
+        // Cierre de día pasado (Retroactivo):
+        // 1. Primero calculamos el stock al cierre de ese día (sistemaDia) revirtiendo los movimientos posteriores (after)
+        kData.sistemaDia = stockActual - kData.ingresosAfter + kData.recepcionAfter + kData.ventasAfter + kData.salidasAfter;
+        
+        // 2. Luego calculamos el inicio de ese día basándonos en su propio stock de cierre (sistemaDia)
+        kData.inicioDia = kData.sistemaDia - kData.ingresos + kData.recepcion + kData.ventas + kData.salidas;
       }
     });
 
