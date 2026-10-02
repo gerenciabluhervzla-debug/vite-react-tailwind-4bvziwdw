@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  signInWithPopup, signOut, onAuthStateChanged, signInAnonymously 
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  signInWithPopup, signOut, onAuthStateChanged, signInAnonymously
 } from 'firebase/auth';
-import { 
-  collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit
+import {
+  collection, addDoc, onSnapshot, updateDoc, doc, setDoc, query, orderBy, limit,
+  where, getDocs
 } from 'firebase/firestore';
-import { 
-  ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users, 
-  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X, Inbox, UserSquare, Briefcase 
+import {
+  ShoppingCart, CheckSquare, Truck, Clock, Loader2, Archive, LogOut, ShieldCheck, Users,
+  FileText, FileSpreadsheet, Store, Moon, Sun, Menu, X, Inbox, UserSquare, Briefcase
 } from 'lucide-react';
 
 import { auth, db, googleProvider, appId } from './config/firebase';
@@ -16,7 +17,7 @@ import { TabButton } from './components/ui';
 
 import GlobalDialog from './components/modals/GlobalDialog';
 import VistaImpresion from './components/print/VistaImpresion';
-import PublicPortal from './views/PublicPortal'; 
+import PublicPortal from './views/PublicPortal';
 import PanelVentas from './views/PanelVentas';
 import PanelAdmin from './views/PanelAdmin';
 import PanelDespacho from './views/PanelDespacho';
@@ -28,13 +29,13 @@ import PanelLogs from './views/PanelLogs';
 // NUEVOS MÓDULOS
 import PanelRecepcion from './views/PanelRecepcion';
 import PanelClientes from './views/PanelClientes';
-import PanelConsignaciones from './views/PanelConsignaciones'; 
+import PanelConsignaciones from './views/PanelConsignaciones';
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  
+
   const [pedidos, setPedidos] = useState([]);
   const [catalogo, setCatalogo] = useState(DEFAULT_CATALOGO);
   const [stockInventario, setStockInventario] = useState({});
@@ -47,9 +48,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('ventas');
   const [darkMode, setDarkMode] = useState(false);
   const [isPublicRoute, setIsPublicRoute] = useState(window.location.hash === '#tienda');
-  
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  
+
   // ESTADO PARA COMUNICAR CLIENTES AL PANEL DE VENTAS
   const [clienteParaPedido, setClienteParaPedido] = useState(null);
 
@@ -108,24 +109,24 @@ export default function App() {
   // PERFIL DE EMPLEADOS
   // =======================================================================
   useEffect(() => {
-    if (!user || user.isAnonymous) return; 
+    if (!user || user.isAnonymous) return;
 
     let isFirstLoad = true;
     const unsubs = [];
-    
+
     const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
     unsubs.push(onSnapshot(userRef, async (snap) => {
       if (snap.exists()) {
         const profile = snap.data();
         setUserProfile(profile);
         if (isFirstLoad) {
-           isFirstLoad = false;
-           if (!profile.isOnline) {
-              updateDoc(userRef, { isOnline: true });
-              addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
-                 accion: 'INICIO_SESION', detalle: 'El usuario inició sesión en el sistema.', usuarioEmail: profile.email, usuarioNombre: profile.nombre, usuarioRol: profile.role, fecha: Date.now()
-              }).catch(()=>{});
-           }
+          isFirstLoad = false;
+          if (!profile.isOnline) {
+            updateDoc(userRef, { isOnline: true });
+            addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), {
+              accion: 'INICIO_SESION', detalle: 'El usuario inició sesión en el sistema.', usuarioEmail: profile.email, usuarioNombre: profile.nombre, usuarioRol: profile.role, fecha: Date.now()
+            }).catch(() => { });
+          }
         }
       } else {
         const newProfile = { uid: user.uid, email: user.email, nombre: user.displayName || 'Usuario', foto: user.photoURL || '', role: 'Pendiente', isApproved: false, isOnline: true, fechaRegistro: Date.now() };
@@ -154,7 +155,7 @@ export default function App() {
     }, onError));
 
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'general'), (docSnap) => {
-      if(docSnap.exists()) setConfigGral(docSnap.data());
+      if (docSnap.exists()) setConfigGral(docSnap.data());
     }, onError));
 
     return () => unsubs.forEach(unsub => unsub());
@@ -163,20 +164,58 @@ export default function App() {
   // =======================================================================
   // CARGA DE DATOS PRIVADOS (SOLO EMPLEADOS APROBADOS)
   // =======================================================================
+  // 🔥 ESTRATEGIA LAZY: Solo escuchamos pedidos ACTIVOS en tiempo real.
+  // El historial se carga bajo demanda por fecha en los paneles que lo necesitan.
   useEffect(() => {
     if (!userProfile || !userProfile.isApproved) return;
     const unsubs = [];
 
-    const qPedidos = query(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'), orderBy('fechaCreacion', 'desc'), limit(2000));
-    unsubs.push(onSnapshot(qPedidos, (snapshot) => {
-      setPedidos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    // Solo pedidos activos (Pendiente, Rechazado): máximo 200, tiempo real.
+    // Nota: sin orderBy para evitar índice compuesto. Se ordena en cliente.
+    const qActivos = query(
+      collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'),
+      where('status', 'in', ['Pendiente', 'Rechazado', 'En Espera (Sin Stock)', 'Por Pagar / Cotización']),
+      limit(300)
+    );
+    unsubs.push(onSnapshot(qActivos, (snapshot) => {
+      const activos = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.fechaCreacion || 0) - (a.fechaCreacion || 0));
+      setPedidos(prev => {
+        // Fusionar activos con el historial ya cargado, priorizando los activos frescos
+        const ids = new Set(activos.map(p => p.id));
+        const historial = prev.filter(p => !ids.has(p.id) && !['Pendiente', 'Rechazado', 'En Espera (Sin Stock)', 'Por Pagar / Cotización'].includes(p.status));
+        return [...activos, ...historial];
+      });
+    }));
+
+    // Validados y Despachados del día actual (para despacho y recepción)
+    // Query simple por fecha para no requerir índice compuesto
+    const getHoyStr = () => {
+      const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Caracas' }));
+      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+    };
+    const hoyStr = getHoyStr();
+    const qHoy = query(
+      collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'),
+      where('fechaDespacho', '==', hoyStr),
+      limit(300)
+    );
+    unsubs.push(onSnapshot(qHoy, (snapshot) => {
+      const deHoy = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(p => ['Validado', 'Despachado'].includes(p.status));
+      setPedidos(prev => {
+        const ids = new Set(deHoy.map(p => p.id));
+        const resto = prev.filter(p => !ids.has(p.id));
+        return [...deHoy, ...resto];
+      });
     }));
 
     unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventario', 'notas'), (docSnap) => {
       setNotasInventario(docSnap.exists() ? docSnap.data() : {});
     }));
 
-    const qMovimientos = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), orderBy('fechaCreacion', 'desc'), limit(50));
+    const qMovimientos = query(collection(db, 'artifacts', appId, 'public', 'data', 'movimientos'), orderBy('fechaCreacion', 'desc'), limit(100));
     unsubs.push(onSnapshot(qMovimientos, (snapshot) => {
       setMovimientos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }));
@@ -186,7 +225,7 @@ export default function App() {
       unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snapshot) => {
         setUsuarios(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }));
-      
+
       const qLogs = query(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), orderBy('fecha', 'desc'), limit(50));
       unsubs.push(onSnapshot(qLogs, (snapshot) => {
         setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -195,6 +234,65 @@ export default function App() {
 
     return () => unsubs.forEach(unsub => unsub());
   }, [userProfile?.isApproved]);
+
+  // =======================================================================
+  // FUNCIÓN PARA CARGAR PEDIDOS POR FECHA (BAJO DEMANDA)
+  // Usada por los paneles que necesitan historial
+  // =======================================================================
+  const cargarPedidosPorFecha = useCallback(async (fechaStr) => {
+    // fechaStr en formato DD/MM/YYYY
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'),
+          where('fechaDespacho', '==', fechaStr),
+          orderBy('fechaCreacion', 'desc'),
+          limit(500)
+        )
+      );
+      const nuevos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setPedidos(prev => {
+        const ids = new Set(nuevos.map(p => p.id));
+        const resto = prev.filter(p => !ids.has(p.id));
+        return [...nuevos, ...resto];
+      });
+      return nuevos;
+    } catch (e) {
+      console.error('Error cargando pedidos por fecha:', e);
+      return [];
+    }
+  }, [db, appId]);
+
+  // Cargar pedidos por rango de fechas ISO (YYYY-MM-DD)
+  const cargarPedidosPorRango = useCallback(async (fechaInicioISO, fechaFinISO) => {
+    try {
+      // Convertir ISO a timestamps para consulta
+      const [yI, mI, dI] = fechaInicioISO.split('-');
+      const [yF, mF, dF] = fechaFinISO.split('-');
+      const tsInicio = new Date(yI, mI - 1, dI, 0, 0, 0).getTime();
+      const tsFin = new Date(yF, mF - 1, dF, 23, 59, 59).getTime();
+
+      const snap = await getDocs(
+        query(
+          collection(db, 'artifacts', appId, 'public', 'data', 'pedidos'),
+          where('fechaCreacion', '>=', tsInicio),
+          where('fechaCreacion', '<=', tsFin),
+          orderBy('fechaCreacion', 'desc'),
+          limit(1000)
+        )
+      );
+      const nuevos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setPedidos(prev => {
+        const ids = new Set(nuevos.map(p => p.id));
+        const resto = prev.filter(p => !ids.has(p.id));
+        return [...nuevos, ...resto];
+      });
+      return nuevos;
+    } catch (e) {
+      console.error('Error cargando pedidos por rango:', e);
+      return [];
+    }
+  }, [db, appId]);
 
   const registrarLogSistem = async (perfilActivo, accion, detalle) => {
     if (!perfilActivo) return;
@@ -207,27 +305,27 @@ export default function App() {
   const loggear = (accion, detalle) => registrarLogSistem(userProfile, accion, detalle);
 
   const signInGoogle = async () => {
-    try { 
-      setAuthLoading(true); 
-      await signInWithPopup(auth, googleProvider); 
-    } 
-    catch (error) { 
-      console.error(error); 
-      dialogs.alert("Error de conexión al iniciar sesión."); 
-      setAuthLoading(false); 
+    try {
+      setAuthLoading(true);
+      await signInWithPopup(auth, googleProvider);
+    }
+    catch (error) {
+      console.error(error);
+      dialogs.alert("Error de conexión al iniciar sesión.");
+      setAuthLoading(false);
     }
   };
-  
+
   const cerrarSesion = async () => {
     if (userProfile && user) {
-       try {
-         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { isOnline: false });
-         await registrarLogSistem(userProfile, 'CIERRE_SESION', `Cerró sesión.`);
-       } catch(e) {}
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { isOnline: false });
+        await registrarLogSistem(userProfile, 'CIERRE_SESION', `Cerró sesión.`);
+      } catch (e) { }
     }
     await signOut(auth);
-    window.location.hash = ''; 
-    window.location.reload(); 
+    window.location.hash = '';
+    window.location.reload();
   };
 
   const cambiarEstadoPedido = async (id, nuevoEstado) => {
@@ -250,26 +348,26 @@ export default function App() {
   const handleActualizarCliente = async (clienteModificado) => {
     try {
       const { keyOriginal, nombre, cedula, telefono, direccion } = clienteModificado;
-      
+
       // Filtramos todos los pedidos que tienen la misma clave original (teléfono, cédula o nombre antiguo)
       const pedidosActualizar = pedidos.filter(p => {
-         const tlf = p.clienteTelefono ? String(p.clienteTelefono).trim() : '';
-         const ci = p.clienteCedula ? String(p.clienteCedula).trim() : '';
-         const nom = p.clienteNombre ? String(p.clienteNombre).trim() : 'Sin Nombre';
-         const key = tlf || ci || nom;
-         return key === keyOriginal;
+        const tlf = p.clienteTelefono ? String(p.clienteTelefono).trim() : '';
+        const ci = p.clienteCedula ? String(p.clienteCedula).trim() : '';
+        const nom = p.clienteNombre ? String(p.clienteNombre).trim() : 'Sin Nombre';
+        const key = tlf || ci || nom;
+        return key === keyOriginal;
       });
 
       // Actualizamos los datos en lote en la colección de pedidos
-      const promesas = pedidosActualizar.map(p => 
-         updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', p.id), {
-            clienteNombre: nombre,
-            clienteCedula: cedula,
-            clienteTelefono: telefono,
-            direccion: direccion
-         })
+      const promesas = pedidosActualizar.map(p =>
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', p.id), {
+          clienteNombre: nombre,
+          clienteCedula: cedula,
+          clienteTelefono: telefono,
+          direccion: direccion
+        })
       );
-      
+
       await Promise.all(promesas);
 
       loggear('CLIENTE_ACTUALIZADO', `Se actualizaron los datos de ${nombre} en ${pedidosActualizar.length} pedidos.`);
@@ -283,8 +381,56 @@ export default function App() {
   const handleTomarPedido = (cliente) => {
     setClienteParaPedido(cliente);
     setActiveTab('ventas');
-    setIsMobileMenuOpen(false); 
+    setIsMobileMenuOpen(false);
   };
+
+  // =======================================================================
+  // CAMBIAR FECHA DE DESPACHO DE UN PEDIDO
+  // =======================================================================
+  const cambiarFechaDespacho = useCallback(async (pedidoId, nuevaFechaStr) => {
+    // nuevaFechaStr en formato DD/MM/YYYY
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', pedidoId), {
+        fechaDespacho: nuevaFechaStr
+      });
+      // Actualizar estado local inmediatamente
+      setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, fechaDespacho: nuevaFechaStr } : p));
+      loggear('FECHA_DESPACHO_MODIFICADA', `Fecha de despacho cambiada a ${nuevaFechaStr} (pedido ${pedidoId})`);
+      return true;
+    } catch (e) {
+      console.error('Error cambiando fecha de despacho:', e);
+      return false;
+    }
+  }, [db, appId, loggear]);
+
+  // =======================================================================
+  // RENOMBRAR ASESORA EN LOTE
+  // Cambia el nombre de la asesora en todos los pedidos que ya están en estado
+  // =======================================================================
+  const renombrarAsesora = useCallback(async (nombreAntiguo, nombreNuevo) => {
+    if (!nombreAntiguo || !nombreNuevo || nombreAntiguo === nombreNuevo) return 0;
+    try {
+      const pedidosAfectados = pedidos.filter(
+        p => p.asesora && p.asesora.trim().toLowerCase() === nombreAntiguo.trim().toLowerCase()
+      );
+      if (pedidosAfectados.length === 0) return 0;
+      const promesas = pedidosAfectados.map(p =>
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos', p.id), { asesora: nombreNuevo })
+      );
+      await Promise.all(promesas);
+      // Actualizar estado local inmediatamente
+      setPedidos(prev => prev.map(p =>
+        p.asesora && p.asesora.trim().toLowerCase() === nombreAntiguo.trim().toLowerCase()
+          ? { ...p, asesora: nombreNuevo }
+          : p
+      ));
+      loggear('ASESORA_RENOMBRADA', `Asesora "${nombreAntiguo}" renombrada a "${nombreNuevo}" en ${pedidosAfectados.length} pedidos.`);
+      return pedidosAfectados.length;
+    } catch (e) {
+      console.error('Error renombrando asesora:', e);
+      return -1;
+    }
+  }, [db, appId, pedidos, loggear]);
 
 
   let content;
@@ -302,15 +448,15 @@ export default function App() {
   } else if (!user || user.isAnonymous) {
     content = (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-[#f0f4f8] to-[#d8e4f0] dark:from-slate-900 dark:to-slate-800 transition-colors text-slate-800 dark:text-slate-100">
-        <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-md text-sky-600 dark:text-sky-400 hover:text-sky-800 transition-colors">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button></div>
-        
+        <div className="absolute top-4 right-4"><button onClick={() => setDarkMode(!darkMode)} className="p-3 bg-white dark:bg-slate-800 rounded-full shadow-md text-sky-600 dark:text-sky-400 hover:text-sky-800 transition-colors">{darkMode ? <Sun size={20} /> : <Moon size={20} />}</button></div>
+
         <div className="bg-white dark:bg-slate-800 p-10 rounded-[2rem] shadow-2xl max-w-sm w-full text-center border-t-[6px] border-sky-600 relative overflow-hidden transition-colors">
           <div className="absolute top-0 left-0 w-full h-32 bg-sky-50/50 dark:bg-slate-700/30 -z-10 rounded-t-[2rem]"></div>
           <img src={BRAND_LOGO} alt="Logo Bluher" className="h-24 mx-auto object-contain mb-8 z-10 drop-shadow-sm mix-blend-multiply dark:invert" />
           <h1 className="text-3xl font-black tracking-tight mb-2">Ingreso</h1>
           <p className="text-slate-500 dark:text-slate-400 mb-8 text-sm">Sistema de Gestión Logística Bluher.</p>
           <button onClick={signInGoogle} className="w-full bg-[#003366] dark:bg-sky-600 hover:bg-[#002244] dark:hover:bg-sky-500 text-white font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300 shadow-lg hover:-translate-y-0.5 mb-4">Acceso Empleados</button>
-          <button onClick={() => window.location.hash = '#tienda'} className="w-full bg-[#f0f4f8] dark:bg-slate-700 hover:bg-[#e2ebf3] dark:hover:bg-slate-600 text-sky-900 dark:text-slate-200 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300 border border-sky-100 dark:border-slate-600"><Store size={18}/> Comprar Online (Clientes)</button>
+          <button onClick={() => window.location.hash = '#tienda'} className="w-full bg-[#f0f4f8] dark:bg-slate-700 hover:bg-[#e2ebf3] dark:hover:bg-slate-600 text-sky-900 dark:text-slate-200 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all duration-300 border border-sky-100 dark:border-slate-600"><Store size={18} /> Comprar Online (Clientes)</button>
         </div>
       </div>
     );
@@ -330,13 +476,13 @@ export default function App() {
     const r = userProfile?.role;
     const showVentas = [ROLES.ADMIN, ROLES.VENTAS, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
     const showAdmin = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA].includes(r);
-    
+
     // Despacho opera envíos nacionales
     const showDespacho = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.DESPACHO, ROLES.AUDITORIA].includes(r);
-    
+
     // NUEVO: Recepción opera Deliverys y Entregas en Tienda
     const showRecepcion = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.DESPACHO].includes(r);
-    
+
     // NUEVO: CRM de Clientes
     const showClientes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA].includes(r);
 
@@ -344,11 +490,11 @@ export default function App() {
     const showConsignaciones = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA].includes(r);
 
     const showReportes = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r);
-    const showInventario = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r); 
+    const showInventario = [ROLES.ADMIN, ROLES.ADMINISTRACION, ROLES.VENTAS, ROLES.AUDITORIA, ROLES.DESPACHO].includes(r);
     const showUsuarios = [ROLES.ADMIN].includes(r);
     const showLogs = [ROLES.ADMIN, ROLES.AUDITORIA].includes(r);
 
-    const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
+    const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
     const tDateApp = getVeneziaTimeApp();
     const ddApp = String(tDateApp.getDate()).padStart(2, '0');
     const mmApp = String(tDateApp.getMonth() + 1).padStart(2, '0');
@@ -356,7 +502,7 @@ export default function App() {
 
     content = (
       <div className="flex flex-col min-h-screen bg-[#f0f4f8] dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors selection:bg-sky-200 dark:selection:bg-sky-900">
-        
+
         {/* HEADER MÓVIL */}
         <div className="md:hidden flex items-center justify-between bg-[#003366] dark:bg-slate-950 p-4 text-white sticky top-0 z-40 shadow-md">
           <div className="flex items-center gap-3">
@@ -366,7 +512,7 @@ export default function App() {
             <img src={BRAND_LOGO} alt="Logo" className="h-8 brightness-200" />
           </div>
           <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
-            {darkMode ? <Sun size={18}/> : <Moon size={18}/>}
+            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </div>
 
@@ -380,46 +526,46 @@ export default function App() {
           <aside id="recepcion" className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-[#003366] dark:bg-slate-950 text-slate-200 flex flex-col h-full transform transition-transform duration-300 ease-in-out md:sticky md:top-0 md:h-screen md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
             <div className="p-8 pb-4 flex flex-col items-center border-b border-sky-800/50 dark:border-slate-800/50 relative">
               <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden absolute top-4 right-4 p-1.5 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
-                <X size={20}/>
+                <X size={20} />
               </button>
               <button onClick={() => setDarkMode(!darkMode)} className="hidden md:block absolute top-4 right-4 p-1.5 bg-sky-800/50 dark:bg-slate-800 rounded-full text-sky-200 dark:text-slate-400 hover:text-white transition-colors">
-                {darkMode ? <Sun size={14}/> : <Moon size={14}/>}
+                {darkMode ? <Sun size={14} /> : <Moon size={14} />}
               </button>
-              
+
               <div className="w-full flex justify-center mb-6 mt-4 md:mt-0">
-                 <img src={BRAND_LOGO} alt="Logo Bluher" className="h-12 w-auto object-contain drop-shadow-md mix-blend-screen dark:mix-blend-normal invert dark:invert-0 brightness-200 dark:brightness-100" />
+                <img src={BRAND_LOGO} alt="Logo Bluher" className="h-12 w-auto object-contain drop-shadow-md mix-blend-screen dark:mix-blend-normal invert dark:invert-0 brightness-200 dark:brightness-100" />
               </div>
-              
+
               <div className="w-full bg-sky-900/40 dark:bg-slate-800/50 rounded-xl p-4 border border-sky-700/50 dark:border-slate-700/50 text-center">
-                 <div className="text-xs font-medium text-sky-300 dark:text-slate-400 mb-1">Usuario Activo</div>
-                 <div className="text-sm font-bold text-white truncate px-2" title={user.email}>{user.displayName}</div>
-                 <div className="mt-2 inline-flex items-center justify-center px-3 py-1 rounded-full bg-sky-800/80 dark:bg-sky-900/50 text-sky-100 dark:text-sky-300 text-[10px] font-bold uppercase tracking-widest border border-sky-700/50 dark:border-sky-800/50">
-                   {userProfile?.role}
-                 </div>
+                <div className="text-xs font-medium text-sky-300 dark:text-slate-400 mb-1">Usuario Activo</div>
+                <div className="text-sm font-bold text-white truncate px-2" title={user.email}>{user.displayName}</div>
+                <div className="mt-2 inline-flex items-center justify-center px-3 py-1 rounded-full bg-sky-800/80 dark:bg-sky-900/50 text-sky-100 dark:text-sky-300 text-[10px] font-bold uppercase tracking-widest border border-sky-700/50 dark:border-sky-800/50">
+                  {userProfile?.role}
+                </div>
               </div>
             </div>
-            
+
             <nav className="mt-6 flex flex-col gap-1.5 px-4 overflow-y-auto flex-1 pb-4">
               <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Área Operativa</div>
-              {showVentas && <TabButton active={activeTab === 'ventas'} onClick={() => handleTabClick('ventas')} icon={<ShoppingCart size={18} />} label="Ventas y Web" badge={pedidos.filter(p=>p.status==='Rechazado' || p.esPublico).length} badgeColor="bg-red-500 dark:bg-sky-500" />}
-              
+              {showVentas && <TabButton active={activeTab === 'ventas'} onClick={() => handleTabClick('ventas')} icon={<ShoppingCart size={18} />} label="Ventas y Web" badge={pedidos.filter(p => p.status === 'Rechazado' || p.esPublico).length} badgeColor="bg-red-500 dark:bg-sky-500" />}
+
               {/* BOTON CONSIGNACIONES */}
               {showConsignaciones && <TabButton active={activeTab === 'consignaciones'} onClick={() => handleTabClick('consignaciones')} icon={<Briefcase size={18} />} label="Consignaciones" />}
-              
-              {showAdmin && <TabButton active={activeTab === 'admin'} onClick={() => handleTabClick('admin')} icon={<CheckSquare size={18} />} label={r === ROLES.AUDITORIA ? 'Auditoría Pagos' : 'Admin y Pagos'} badge={pedidos.filter(p=>p.status==='Pendiente').length} />}
-              
+
+              {showAdmin && <TabButton active={activeTab === 'admin'} onClick={() => handleTabClick('admin')} icon={<CheckSquare size={18} />} label={r === ROLES.AUDITORIA ? 'Auditoría Pagos' : 'Admin y Pagos'} badge={pedidos.filter(p => p.status === 'Pendiente').length} />}
+
               {/* LÓGICA DE BADGES DIVIDIDA POR TIPO DE DESPACHO */}
-              {showDespacho && <TabButton active={activeTab === 'despacho'} onClick={() => handleTabClick('despacho')} icon={<Truck size={18} />} label={`Despacho Nacional`} badge={pedidos.filter(p=>p.status==='Validado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')).length} />}
-              {showRecepcion && <TabButton active={activeTab === 'recepcion'} onClick={() => handleTabClick('recepcion')} icon={<Inbox size={18} />} label={`Recepción (Tienda)`} badge={pedidos.filter(p=>['Tienda', 'Delivery'].includes(p.tipoDespacho) && p.status==='Validado').length} />}
-              
+              {showDespacho && <TabButton active={activeTab === 'despacho'} onClick={() => handleTabClick('despacho')} icon={<Truck size={18} />} label={`Despacho Nacional`} badge={pedidos.filter(p => p.status === 'Validado' && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')).length} />}
+              {showRecepcion && <TabButton active={activeTab === 'recepcion'} onClick={() => handleTabClick('recepcion')} icon={<Inbox size={18} />} label={`Recepción (Tienda)`} badge={pedidos.filter(p => ['Tienda', 'Delivery'].includes(p.tipoDespacho) && p.status === 'Validado').length} />}
+
               {(showReportes || showClientes || showInventario || showUsuarios || showLogs) && <div className="my-4 border-t border-sky-800/50 dark:border-slate-800 mx-2"></div>}
               {(showReportes || showClientes || showInventario || showUsuarios || showLogs) && <div className="text-[10px] font-bold text-sky-300 dark:text-slate-500 uppercase tracking-widest mb-2 px-2">Gestión y Reportes</div>}
 
               {/* NUEVO MÓDULO CRM */}
               {showClientes && <TabButton active={activeTab === 'clientes'} onClick={() => handleTabClick('clientes')} icon={<UserSquare size={18} />} label="CRM Clientes" />}
               {showReportes && <TabButton active={activeTab === 'reportes'} onClick={() => handleTabClick('reportes')} icon={<FileSpreadsheet size={18} />} label="Reportes Financieros" />}
-              {showInventario && <TabButton active={activeTab === 'inventario'} onClick={() => handleTabClick('inventario')} icon={<Archive size={18} />} label="Inventario Dual" badge={movimientos.filter(m=>m.status==='PENDIENTE').length} />}
-              {showUsuarios && <TabButton active={activeTab === 'usuarios'} onClick={() => handleTabClick('usuarios')} icon={<Users size={18} />} label="Usuarios" badge={usuarios.filter(u=>!u.isApproved).length} />}
+              {showInventario && <TabButton active={activeTab === 'inventario'} onClick={() => handleTabClick('inventario')} icon={<Archive size={18} />} label="Inventario Dual" badge={movimientos.filter(m => m.status === 'PENDIENTE').length} />}
+              {showUsuarios && <TabButton active={activeTab === 'usuarios'} onClick={() => handleTabClick('usuarios')} icon={<Users size={18} />} label="Usuarios" badge={usuarios.filter(u => !u.isApproved).length} />}
               {showLogs && <TabButton active={activeTab === 'logs'} onClick={() => handleTabClick('logs')} icon={<FileText size={18} />} label="Auditoría" />}
             </nav>
 
@@ -434,22 +580,22 @@ export default function App() {
           <main className="flex-1 p-4 md:p-10 overflow-y-auto print:p-0 print:m-0 print:bg-white print:block w-full">
             <div className="max-w-6xl mx-auto print:max-w-none print:mx-0">
               <div className="print:hidden">
-                
+
                 {/* PASAMOS CLIENTEPRECARGADO AL PANEL DE VENTAS (SI LO SOPORTA LUEGO) */}
                 {activeTab === 'ventas' && showVentas && <PanelVentas perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} cambiarEstadoPedido={cambiarEstadoPedido} clientePreCargado={clienteParaPedido} setClientePreCargado={setClienteParaPedido} />}
-                
+
                 {/* RENDERIZADO DEL NUEVO PANEL DE CONSIGNACIONES */}
                 {activeTab === 'consignaciones' && showConsignaciones && <PanelConsignaciones perfil={userProfile} catalogo={catalogo} stock={stockInventario} config={configGral} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
 
-                {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} config={configGral} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} />}
-                {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} perfil={userProfile} />}
-                
+                {activeTab === 'admin' && showAdmin && <PanelAdmin perfil={userProfile} config={configGral} pedidos={pedidos} stock={stockInventario} loggear={loggear} db={db} appId={appId} dialogs={dialogs} onCambiarFechaDespacho={cambiarFechaDespacho} onRenombrarAsesora={renombrarAsesora} onCargarPorRango={cargarPedidosPorRango} />}
+                {activeTab === 'despacho' && showDespacho && <PanelDespacho pedidos={pedidos} catalogo={catalogo} stock={stockInventario} cambiarEstado={cambiarEstadoPedido} db={db} appId={appId} loggear={loggear} dialogs={dialogs} perfil={userProfile} onCambiarFechaDespacho={cambiarFechaDespacho} onCargarPorFecha={cargarPedidosPorFecha} />}
+
                 {activeTab === 'recepcion' && showRecepcion && <PanelRecepcion pedidos={pedidos} catalogo={catalogo} stock={stockInventario} perfil={userProfile} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
-                
+
                 {/* INYECCIÓN DE LOS HANDLERS AL PANEL CLIENTES */}
                 {activeTab === 'clientes' && showClientes && <PanelClientes pedidos={pedidos} perfil={userProfile} onActualizarCliente={handleActualizarCliente} onTomarPedido={handleTomarPedido} />}
 
-                {activeTab === 'reportes' && showReportes && <PanelReportes perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} />}
+                {activeTab === 'reportes' && showReportes && <PanelReportes perfil={userProfile} pedidos={pedidos} catalogo={catalogo} stock={stockInventario} onCargarPorRango={cargarPedidosPorRango} />}
                 {activeTab === 'inventario' && showInventario && <PanelInventario stock={stockInventario} notas={notasInventario} catalogo={catalogo} movimientos={movimientos} pedidos={pedidos} db={db} appId={appId} loggear={loggear} perfil={userProfile} dialogs={dialogs} />}
                 {activeTab === 'usuarios' && showUsuarios && <PanelUsuarios usuarios={usuarios} db={db} appId={appId} loggear={loggear} dialogs={dialogs} />}
                 {activeTab === 'logs' && showLogs && <PanelLogs logs={logs} />}
@@ -457,20 +603,20 @@ export default function App() {
 
               {/* VISTA DE IMPRESIÓN MASIVA (EXCLUYE RECEPCIÓN Y DELIVERY) */}
               <VistaImpresion pedidos={pedidos.filter(p => {
-                  if (p.status !== 'Validado') return false;
-                  // Si es Delivery o Tienda no se imprime por lote, se procesan individual en el módulo Recepción
-                  if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Delivery') return false; 
+                if (p.status !== 'Validado') return false;
+                // Si es Delivery o Tienda no se imprime por lote, se procesan individual en el módulo Recepción
+                if (p.tipoDespacho === 'Tienda' || p.tipoDespacho === 'Delivery') return false;
 
-                  if (!p.fechaDespacho || p.fechaDespacho === 'Sin Fecha') return false;
-                  const parts = p.fechaDespacho.split('/');
-                  if (parts.length !== 3) return false;
-                  const timeDespacho = new Date(parts[2], parts[1] - 1, parts[0]).getTime();
-                  
-                  const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", {timeZone: "America/Caracas"}));
-                  const tDateApp = getVeneziaTimeApp();
-                  const timeHoy = new Date(tDateApp.getFullYear(), tDateApp.getMonth(), tDateApp.getDate()).getTime();
-                  
-                  return timeDespacho <= timeHoy;
+                if (!p.fechaDespacho || p.fechaDespacho === 'Sin Fecha') return false;
+                const parts = p.fechaDespacho.split('/');
+                if (parts.length !== 3) return false;
+                const timeDespacho = new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+
+                const getVeneziaTimeApp = () => new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
+                const tDateApp = getVeneziaTimeApp();
+                const timeHoy = new Date(tDateApp.getFullYear(), tDateApp.getMonth(), tDateApp.getDate()).getTime();
+
+                return timeDespacho <= timeHoy;
               })} />
             </div>
           </main>
