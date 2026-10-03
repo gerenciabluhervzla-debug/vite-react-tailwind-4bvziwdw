@@ -13,6 +13,12 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const esSoloLectura = perfil?.role === ROLES.ADMINISTRACION;
   const puedeHacerCierre = [ROLES.ADMIN, ROLES.DESPACHO].includes(perfil?.role);
 
+  // Definida ANTES de los useState para evitar Temporal Dead Zone
+  const getHoyISO = () => {
+    const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
   const [vistaDespacho, setVistaDespacho] = useState(esAuditorPuro ? 'historial_cierres' : 'pendientes');
   const [filtroFechaHistorial, setFiltroFechaHistorial] = useState(getHoyISO());
   const [previewImage, setPreviewImage] = useState(null);
@@ -35,10 +41,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
     return url;
   };
 
-  const getHoyISO = () => {
-    const d = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
+  // getHoyISO definida arriba (antes de los useState)
 
   const pedidosValidados = useMemo(() =>
     pedidos.filter(p => p.status === 'Validado' && !p.esAbono && (!p.tipoDespacho || p.tipoDespacho === 'Nacional')),
