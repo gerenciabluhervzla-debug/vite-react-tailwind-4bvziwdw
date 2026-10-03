@@ -14,8 +14,10 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const puedeHacerCierre = [ROLES.ADMIN, ROLES.DESPACHO].includes(perfil?.role);
 
   const [vistaDespacho, setVistaDespacho] = useState(esAuditorPuro ? 'historial_cierres' : 'pendientes');
-  const [filtroFechaHistorial, setFiltroFechaHistorial] = useState('');
+  const [filtroFechaHistorial, setFiltroFechaHistorial] = useState(getHoyISO());
   const [previewImage, setPreviewImage] = useState(null);
+  const [modalImpresion, setModalImpresion] = useState(false);
+  const [seleccionEtiquetas, setSeleccionEtiquetas] = useState(new Set());
 
   const getDirectUrl = (url) => {
     if (!url) return null;
@@ -710,8 +712,9 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
   const pedidosAMostrar = useMemo(() => {
     let lista = vistaDespacho === 'pendientes' ? pedidosValidados : pedidosDespachados;
 
-    if (vistaDespacho === 'historial' && filtroFechaHistorial) {
-      const [year, month, day] = filtroFechaHistorial.split('-');
+    if (vistaDespacho === 'historial') {
+      const fechaFiltro = filtroFechaHistorial || getHoyISO();
+      const [year, month, day] = fechaFiltro.split('-');
       const fechaFiltroStr = `${day}/${month}/${year}`;
       lista = lista.filter(p => p.fechaDespacho === fechaFiltroStr);
     }
@@ -726,6 +729,40 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
       return numA - numB;
     });
   }, [pedidosAMostrar, numeracionDiaria]);
+
+  const abrirModalImpresion = useCallback((listaDePedidos) => {
+    const ids = new Set(listaDePedidos.map(p => p.id));
+    setSeleccionEtiquetas(ids);
+    setModalImpresion(true);
+  }, []);
+
+  const toggleEtiqueta = useCallback((id) => {
+    setSeleccionEtiquetas(prev => {
+      const s = new Set(prev);
+      if (s.has(id)) s.delete(id); else s.add(id);
+      return s;
+    });
+  }, []);
+
+  const imprimirSeleccionadas = useCallback(() => {
+    const ids = Array.from(seleccionEtiquetas);
+    if (ids.length === 0) return;
+    // Mark which pedido cards to print using a data-attribute approach
+    document.querySelectorAll('[data-pedido-id]').forEach(el => {
+      const id = el.getAttribute('data-pedido-id');
+      el.style.display = ids.includes(id) ? '' : 'none';
+    });
+    setModalImpresion(false);
+    setTimeout(() => {
+      window.print();
+      // Restore after printing
+      setTimeout(() => {
+        document.querySelectorAll('[data-pedido-id]').forEach(el => {
+          el.style.display = '';
+        });
+      }, 1500);
+    }, 200);
+  }, [seleccionEtiquetas]);
 
   return (
     <div className="bg-white dark:bg-slate-800 p-4 md:p-8 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 transition-colors">
@@ -769,8 +806,8 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
           )}
 
           {['pendientes', 'historial'].includes(vistaDespacho) && !esSoloLectura && (
-            <button onClick={() => window.print()} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm w-full md:w-auto justify-center shrink-0">
-              <Printer size={18} /> Imprimir Etiquetas ({todayStr})
+            <button onClick={() => abrirModalImpresion(pedidosOrdenados)} className="bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900 font-bold py-2.5 px-5 rounded-xl transition-colors flex items-center gap-2 text-sm shadow-sm w-full md:w-auto justify-center shrink-0">
+              <Printer size={18} /> Seleccionar Etiquetas a Imprimir
             </button>
           )}
         </div>
@@ -1070,7 +1107,7 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
                 : "bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 hover:border-sky-400";
 
             return (
-              <div key={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-5 md:p-6 transition-colors border-2 rounded-2xl shadow-md ${cardClass}`}>
+              <div key={p.id} data-pedido-id={p.id} className={`relative flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 p-5 md:p-6 transition-colors border-2 rounded-2xl shadow-md ${cardClass}`}>
 
                 <div className="absolute -top-3 -left-3 bg-[#003366] dark:bg-sky-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-black border-2 border-white dark:border-slate-800 shadow-md">
                   {numeracionDiaria[p.id]}
@@ -1243,6 +1280,66 @@ export default function PanelDespacho({ pedidos, catalogo, stock, cambiarEstado,
         <div className="fixed inset-0 z-[400] bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
           <button onClick={() => setPreviewImage(null)} className="absolute top-6 right-6 text-white bg-white/20 p-2 rounded-full hover:bg-white/40 transition-colors"><X size={24} /></button>
           <img src={getDirectUrl(previewImage)} alt="Vista Previa" className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain" />
+        </div>
+      )}
+
+      {/* MODAL DE SELECCIÓN DE ETIQUETAS A IMPRIMIR */}
+      {modalImpresion && (
+        <div className="fixed inset-0 z-[500] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={(e) => e.target === e.currentTarget && setModalImpresion(false)}>
+          <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-700">
+            <div className="p-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-black text-slate-800 dark:text-slate-100 text-lg flex items-center gap-2"><Printer size={20} className="text-sky-600" /> Seleccionar Etiquetas</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Marca las etiquetas que deseas imprimir. Las desmarcadas no se imprimirán.</p>
+              </div>
+              <button onClick={() => setModalImpresion(false)} className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-500"><X size={20} /></button>
+            </div>
+
+            <div className="flex gap-3 px-5 pt-4 pb-2 border-b border-slate-100 dark:border-slate-700">
+              <button onClick={() => setSeleccionEtiquetas(new Set(pedidosOrdenados.map(p => p.id)))} className="text-xs font-bold text-sky-600 hover:text-sky-800 underline transition-colors">Seleccionar Todas</button>
+              <span className="text-slate-300 dark:text-slate-600">|</span>
+              <button onClick={() => setSeleccionEtiquetas(new Set())} className="text-xs font-bold text-slate-500 hover:text-red-500 underline transition-colors">Deseleccionar Todas</button>
+              <span className="ml-auto text-xs font-bold text-slate-400">{seleccionEtiquetas.size}/{pedidosOrdenados.length} seleccionadas</span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {pedidosOrdenados.length === 0 ? (
+                <div className="py-10 text-center text-slate-400 italic font-bold">No hay pedidos en esta vista.</div>
+              ) : pedidosOrdenados.map(p => (
+                <label key={p.id} className={`flex items-center gap-4 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${seleccionEtiquetas.has(p.id) ? 'border-sky-400 bg-sky-50 dark:bg-sky-900/20 dark:border-sky-600' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}>
+                  <input
+                    type="checkbox"
+                    checked={seleccionEtiquetas.has(p.id)}
+                    onChange={() => toggleEtiqueta(p.id)}
+                    className="w-5 h-5 accent-sky-600 cursor-pointer rounded shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-slate-800 dark:text-slate-100 truncate">{p.clienteNombre}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5">
+                      <span className="font-bold text-sky-600">#{numeracionDiaria[p.id]}</span>
+                      <span>{p.courier || p.tipoDespacho || 'Nacional'}</span>
+                      {p.fechaDespacho && <span>· Sale: {p.fechaDespacho}</span>}
+                    </div>
+                  </div>
+                  {seleccionEtiquetas.has(p.id)
+                    ? <span className="shrink-0 text-sky-600 dark:text-sky-400"><CheckCircle size={18} /></span>
+                    : <span className="shrink-0 text-slate-300 dark:text-slate-600"><X size={18} /></span>
+                  }
+                </label>
+              ))}
+            </div>
+
+            <div className="p-5 border-t border-slate-100 dark:border-slate-700 flex gap-3">
+              <button onClick={() => setModalImpresion(false)} className="flex-1 py-3 rounded-xl font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">Cancelar</button>
+              <button
+                onClick={imprimirSeleccionadas}
+                disabled={seleccionEtiquetas.size === 0}
+                className="flex-1 py-3 rounded-xl font-black text-white bg-sky-600 hover:bg-sky-700 shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Printer size={18} /> Imprimir {seleccionEtiquetas.size > 0 ? `(${seleccionEtiquetas.size})` : ''}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
